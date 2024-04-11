@@ -112,6 +112,7 @@ def plotProbablisticEngagementZone(agentHeading, pursuerPosition,pursuerPosition
     engagementZonePlot = np.zeros(X.shape)
 
     for i in range(X.shape[0]):
+        print(i)
         for j in range(X.shape[1]):
             engagementZonePlot[i, j] = probabalisticEngagementZone(np.array([[X[i,j]],[Y[i,j]]]), agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
     # c = ax.pcolormesh(X, Y, engagementZonePlot)
@@ -147,7 +148,7 @@ def plotMCProbablisticEngagementZone(agentHeading, pursuerPosition,pursuerPositi
     c = ax.contour(X, Y, engagementZonePlot, levels=np.linspace(0,1,11))
     ax.clabel(c, inline=True, fontsize=8)
     
-    return
+    return c
 
 def monte_carlo_probalistic_engagment_zone(agentPosition, agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, numMonteCarloTrials, pursurPositionSamples=None):
     if pursurPositionSamples is None:
@@ -165,7 +166,6 @@ def monte_carlo_probalistic_engagment_zone(agentPosition, agentHeading, pursuerP
     
     
     
-fig, ax = plt.subplots()
 
 
 # probabalisticEngagementZone(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, np.array([[0.1, 0], [0, 0.1]]), pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
@@ -173,17 +173,21 @@ fig, ax = plt.subplots()
 
 
 
-pursuerPositionCov = np.array([[0.1, -0.09], [-0.09, 0.1]])
+pursuerPositionCov = np.array([[0.5, 0.0], [0.0, 0.1]])
 
 
 # mcpez = monte_carlo_probalistic_engagment_zone(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, 100)
 # print(mcpez)
 
+fig, ax = plt.subplots()
 plotMCProbablisticEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, ax)
-# plotProbablisticEngagementZone(agentInitialHeading, pursuerInitialPosition, np.array([[0.1, .09], [.09, 0.1]]), pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax)
-# plotProbablisticEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax)
 plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax)   
-# plotEngagementZone(agentInitialHeading, np.array([[1],[0.1]]), pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax)   
 plotMalhalanobisDistance(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, ax)
 
+
+fig1, ax1 = plt.subplots()
+plotProbablisticEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax1)
+plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax1)   
+plotMalhalanobisDistance(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, ax1)
 plt.show()
+
