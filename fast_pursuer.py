@@ -1,8 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import jax.numpy as jnp
-from jax import jacfwd
+# import jax.numpy as jnp
+# from jax import jacfwd, value_and_grad
 from scipy.stats import norm
+import time
+# from jax import jit
+
+from math import erf, sqrt
+from math import erfc
 
 
 
@@ -11,11 +16,6 @@ pursuerCaptureRange = 0.1
 pursuerSpeed = 1
 agentSpeed = .9
 
-
-# pursuerInitialPosition = jnp.array([-.5, .5])
-pursuerInitialPosition = jnp.array([[0.0], [0.0]])
-agentInitialPosition = jnp.array([[0.0], [2.0]])
-agentInitialHeading = 0
 
 def inEngagementZone(agentPosition,agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed):
     rotationMinusHeading = np.array([[np.cos(agentHeading), np.sin(agentHeading)], [-np.sin(agentHeading), np.cos(agentHeading)]])
@@ -34,7 +34,7 @@ def inEngagementZone(agentPosition,agentHeading, pursuerPosition, pursuerRange, 
     return distance - rho
     # return rho
 
-def plotMalhalanobisDistance(agentPosition, agentHeading, pursuerPosition, pursuerPositionCov, ax):
+def plotMalhalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
     x = np.linspace(-2, 2, 50)
     y = np.linspace(-2, 2, 50)
     [X, Y] = np.meshgrid(x, y)
@@ -69,42 +69,54 @@ def plotEngagementZone(agentHeading, pursuerPosition, pursuerRange, pursuerCaptu
     return
 
 
+def analytic_epsilonJac(agentPositionHat, pursuerPositionHat):
+    y_p = pursuerPositionHat[1]
+    x_p = pursuerPositionHat[0]
+    y_a = agentPositionHat[1]
+    x_a = agentPositionHat[0]
+    epsilonJac = np.zeros((1,2))
+    epsilonJac[0][0] = (-(y_p-y_a)/((x_p-x_a)**2*((y_p-y_a)**2/(x_p-x_a)**2+1)))[0]
+    epsilonJac[0][1] = (1/((x_p-x_a)*((y_p-y_a)**2/(x_p-x_a)**2+1)))[0]
+    
+    return epsilonJac.squeeze() 
+
+def analytic_rhoJac(epsilon, speedRatio, pursuerRange, pursuerCaptureRange):
+    return (pursuerRange*speedRatio*(-(np.cos(epsilon)*np.sin(epsilon))/np.sqrt(np.cos(epsilon)**2+(pursuerCaptureRange+pursuerRange)**2/(pursuerRange**2*speedRatio**2)-1)-np.sin(epsilon))).squeeze()
+
+def analytic_distJac(agentPosition, pursuerPosition):
+    return -(agentPosition - pursuerPosition)/np.linalg.norm(agentPosition - pursuerPosition)
+
+
 def probabalisticEngagementZone(agentPosition, agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed):
     rotationMinusHeading = np.array([[np.cos(agentHeading), np.sin(agentHeading)], [-np.sin(agentHeading), np.cos(agentHeading)]])
 
     pursuerPositionHat = rotationMinusHeading@(pursuerPosition - pursuerPosition)
     agentPositionHat = rotationMinusHeading@(agentPosition - pursuerPosition)
-    pursuerPositionCovHat = rotationMinusHeading.T@pursuerPositionCov@rotationMinusHeading
     epsilon = np.arctan2(pursuerPositionHat[1] - agentPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
-    # epsilon = np.arctan2(agentPositionHat[1] - pursuerPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
-    # dEpsilondpursuerPosition = jacfwd(lambda x: jnp.arctan2(agentPositionHat[1] - x[1], x[0] - agentPositionHat[0]))(pursuerPositionHat).squeeze()
-    dEpsilondpursuerPosition = jacfwd(lambda x: jnp.arctan2(x[1] - agentPositionHat[1], x[0] - agentPositionHat[0]))(pursuerPositionHat).squeeze()
-    epsilonCov = dEpsilondpursuerPosition.T@pursuerPositionCovHat@dEpsilondpursuerPosition
 
+    epsilonJac = analytic_epsilonJac(agentPositionHat, pursuerPositionHat)
     speedRatio = agentSpeed / pursuerSpeed
     
     rho = speedRatio*pursuerRange*(np.cos(epsilon) + np.sqrt(np.cos(epsilon)**2 - 1+(pursuerRange+pursuerCaptureRange)**2/(speedRatio**2*pursuerRange**2)))
-    rhoJac = np.array(jacfwd(lambda x: speedRatio*pursuerRange*(jnp.cos(x) + jnp.sqrt(jnp.cos(x)**2 - 1+(pursuerRange+pursuerCaptureRange)**2/(speedRatio**2*pursuerRange**2))))(epsilon))
-    rhoCov = rhoJac**2*epsilonCov
-    # dist = np.linalg.norm(agentPositionHat - pursuerPositionHat)
-    # ddistdpursuerPosition = jacfwd(lambda x: jnp.linalg.norm(agentPositionHat - x))(pursuerPositionHat)
-    # dist = np.linalg.norm(pursuerPositionHat - agentPositionHat)
-    # ddistdpursuerPosition = jacfwd(lambda x: jnp.linalg.norm(x - agentPositionHat))(pursuerPositionHat)
+    
+    rhoJac = analytic_rhoJac(epsilon, speedRatio, pursuerRange, pursuerCaptureRange)
+
     dist = np.linalg.norm(agentPosition - pursuerPosition)
-    ddistdpursuerPosition = jacfwd(lambda x: jnp.linalg.norm(agentPosition - x))(pursuerPosition)
-    distCov = ddistdpursuerPosition.T@pursuerPositionCov@ddistdpursuerPosition
+    distJac = analytic_distJac(agentPosition, pursuerPosition)
+    
+    
+    overallJac = (distJac).reshape((-1,1)).squeeze() -(rotationMinusHeading.T@epsilonJac*rhoJac).squeeze()
 
-    differenceMean = dist - rho.squeeze()
-    differenceCov = distCov.squeeze() + rhoCov.squeeze()
-    # print("mean: ", differenceMean)
-    # print("cov: ", differenceCov)
+    mean = dist - rho
+    cov = overallJac@pursuerPositionCov@overallJac.T
 
-    diffDistribution = norm(differenceMean, np.sqrt(differenceCov))
+    diffDistribution = norm(mean, np.sqrt(cov))
     
     return diffDistribution.cdf(0)
 
+#@jit
 def inEngagementZoneJax(agentPosition,agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed):
-    rotationMinusHeading = jnp.array([[np.cos(agentHeading), np.sin(agentHeading)], [-np.sin(agentHeading), np.cos(agentHeading)]])
+    rotationMinusHeading = jnp.array([[jnp.cos(agentHeading), jnp.sin(agentHeading)], [-jnp.sin(agentHeading), jnp.cos(agentHeading)]])
     pursuerPositionHat = rotationMinusHeading@(pursuerPosition - pursuerPosition)
     agentPositionHat = rotationMinusHeading@(agentPosition - pursuerPosition)
 
@@ -116,16 +128,36 @@ def inEngagementZoneJax(agentPosition,agentHeading, pursuerPosition, pursuerRang
     # print(epsilon)
     rho = speedRatio*pursuerRange*(jnp.cos(epsilon) + jnp.sqrt(jnp.cos(epsilon)**2 - 1+(pursuerRange+pursuerCaptureRange)**2/(speedRatio**2*pursuerRange**2)))
     
-    # return distance < rho
+    # return distnce < rho
     return distance - rho
 
+# @jit
+def get_grad_and_value(agentPosition, agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed):
+    fun = value_and_grad(lambda x: inEngagementZoneJax(agentPosition, agentHeading, x, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed))
+    return fun
+    
+
+    
 def probabalisticEngagementZoneTemp(agentPosition, agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed):
-    mean = inEngagementZoneJax(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
+    # start = time.time()
+    mean = inEngagementZoneJax(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
+    # print("mean time: ", time.time() - start)
+    # start = time.time()
     jac = jacfwd(lambda x: inEngagementZoneJax(agentPosition, agentHeading, x, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed))(pursuerPosition).squeeze()
+    jac = jacfwd(lambda x: inEngagementZoneJax(agentPosition, agentHeading, x, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed))(pursuerPosition).squeeze()
+    # print("jac time: ", time.time() - start)
+    # start = time.time()
     cov = jac@pursuerPositionCov@jac.T
-    diffDistribution = norm(mean, np.sqrt(cov))
+    # print("cov time: ", time.time() - start)
+
+    #'Cumulative distribution function for the standard normal distribution'
+    # print("temp")
     # print("mean: ", mean)
     # print("cov: ", cov)
+
+    # start = time.time()
+    diffDistribution = norm(mean, np.sqrt(cov))
+    # print("dist time: ", time.time() - start)
     return diffDistribution.cdf(0)
 
 def plotProbablisticEngagementZone(agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax):
@@ -199,22 +231,32 @@ def monte_carlo_probalistic_engagment_zone(agentPosition, agentHeading, pursuerP
 
 
 if __name__ == "__main__":
+    pursuerRange = .8
+    pursuerCaptureRange = 0.1
+    pursuerSpeed = 1
+    agentSpeed = .9
 
     pursuerPositionCov = np.array([[0.1, -0.09], [-0.09, 0.1]])
+    # pursuerInitialPosition = jnp.array([-.5, .5])
+    pursuerInitialPosition = np.array([[0.0], [0.0]])
+    agentInitialPosition = np.array([[0.0], [2.0]])
+    # agentInitialHeading = 9*np.pi/11
+    agentInitialHeading = 0
 
+    
 
     # mcpez = monte_carlo_probalistic_engagment_zone(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, 100)
     # print(mcpez)
 
-    fig, ax = plt.subplots()
-    plotMCProbablisticEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, ax)
-    plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax)   
-    plotMalhalanobisDistance(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, ax)
+    # fig, ax = plt.subplots()
+    # plotMCProbablisticEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, ax)
+    # plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax)   
+    # plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, ax)
 
 
     fig1, ax1 = plt.subplots()
     plotProbablisticEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax1)
     plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax1)   
-    plotMalhalanobisDistance(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, ax1)
+    plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, ax1)
     plt.show()
 
