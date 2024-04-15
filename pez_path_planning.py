@@ -219,7 +219,7 @@ def mc_spline_evaluation(spline, num_mc_runs, num_samples, pursuerPosition, purs
 
 if __name__ == '__main__':
     pursuerPosition = np.array([[0.0],[0.0]])
-    pursuerPositionCov = np.array([[.1,0],[0,.1]])
+    pursuerPositionCov = np.array([[.2,0],[0,.2]])
 
     startingLocation = np.array([-4.0,-4.0])
     endingLocation = np.array([3.0,3.0])
@@ -230,8 +230,8 @@ if __name__ == '__main__':
     turn_rate_constraints = (-5.0,5.0) 
     curvature_constraints = (-1,1) 
     num_constraint_samples = 50
-    # pez_constraint_limit_list = [.1,.2,.3,.4]
-    pez_constraint_limit_list = [.1]
+    #pez_constraint_limit_list = [.1,.2,.3,.4]
+    pez_constraint_limit_list = [.01, 0.05]
     pursuerRange = 2
     pursuerCaptureRange = 0.1
     pursuerSpeed = 1.0
