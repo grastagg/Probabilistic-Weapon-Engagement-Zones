@@ -81,6 +81,21 @@ def compute_spline_constraints(spl, t, pursuerPosition, pursuerPositionCov, purs
 
 
     return velocity, turn_rate, curvature, pez_constraint
+
+def find_spline_dist(spline):
+    t0 = spline.t[0]
+    tf = spline.t[-1]
+    num_samples = 1000
+    t = np.linspace(t0, tf, num_samples, endpoint=True)
+    pos = spline(t).squeeze()
+    out_d1 = spline.derivative(1)(t).squeeze()
+    x1_dot = out_d1[:,0]
+    x2_dot = out_d1[:,1]
+    dist = 0
+    dt = t[1] - t[0]
+    for i in range(num_samples):
+        dist += np.sqrt(x1_dot[i]**2 + x2_dot[i]**2)*dt
+    return dist
   
 def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_constraints, turn_rate_constraints, curvature_constraints, num_constraint_samples, pez_constraint_limit, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, useProbabalistic):
     
@@ -95,6 +110,8 @@ def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_cons
         t_constraints = np.linspace(0,tf, num_constraint_samples)
 
         velocity, turn_rate, curvature,pez = compute_spline_constraints(spline, t_constraints,pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, useProbabalistic)
+        dist = find_spline_dist(spline)
+        funcs['dist'] = dist
 
         funcs['turn_rate'] = turn_rate
         funcs['velocity'] = velocity 
@@ -124,11 +141,14 @@ def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_cons
 
 
 
-    optProb.addObj("tf")
+    # optProb.addObj("tf")
+    optProb.addObj("dist")
 
     opt = OPT("ipopt")
-    opt.options['print_level'] = 0
+    opt.options['print_level'] = 5
     opt.options['max_iter'] = 500
+    opt.options['hsllib'] = '/home/grant/packages/ThirdParty-HSL/.libs/libcoinhsl.so'
+    opt.options['linear_solver'] = 'ma97'
 
     sol = opt(optProb, sens="FD")
     # print(sol)
@@ -223,15 +243,16 @@ if __name__ == '__main__':
 
     startingLocation = np.array([-4.0,-4.0])
     endingLocation = np.array([3.0,3.0])
-    initialVelocity = np.array([1,1])
+    initialVelocity = np.array([1,1])/np.sqrt(2)
     numControlPoints = 7
     splineOrder = 3
-    velocity_constraints = (0,10.0) 
+    velocity_constraints = (0,1.0) 
     turn_rate_constraints = (-5.0,5.0) 
     curvature_constraints = (-1,1) 
     num_constraint_samples = 50
     #pez_constraint_limit_list = [.1,.2,.3,.4]
-    pez_constraint_limit_list = [.01, 0.05]
+    pez_constraint_limit_list = [.01]
+
     pursuerRange = 2
     pursuerCaptureRange = 0.1
     pursuerSpeed = 1.0
