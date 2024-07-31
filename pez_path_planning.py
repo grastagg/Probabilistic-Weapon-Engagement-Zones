@@ -102,6 +102,7 @@ def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_cons
     def objfunc(xdict):
         x_control_points = xdict["control_points"]
         tf = xdict["tf"]
+        # tf = 1
         funcs = {}
 
         spline = create_spline(0, tf, x_control_points, spline_order, p0, pf, v0)
@@ -132,8 +133,8 @@ def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_cons
     optProb.addVarGroup(name="tf", nVars=1, varType="c", value=.1, lower=0,upper=None)
 
     optProb.addConGroup("velocity", num_constraint_samples, lower=velocity_constraints[0], upper=velocity_constraints[1], scale=1.0 / velocity_constraints[1])
-    # optProb.addConGroup("turn_rate", num_constraint_samples, lower=turn_rate_constraints[0], upper=turn_rate_constraints[1], scale=1.0 / turn_rate_constraints[1])
-    # optProb.addConGroup("curvature", num_constraint_samples, lower=curvature_constraints[0], upper=curvature_constraints[1], scale=1.0 / curvature_constraints[1])
+    optProb.addConGroup("turn_rate", num_constraint_samples, lower=turn_rate_constraints[0], upper=turn_rate_constraints[1], scale=1.0 / turn_rate_constraints[1])
+    optProb.addConGroup("curvature", num_constraint_samples, lower=curvature_constraints[0], upper=curvature_constraints[1], scale=1.0 / curvature_constraints[1])
     if useProbabalistic:
         optProb.addConGroup("pez", num_constraint_samples, lower=None, upper=pez_constraint_limit)
     else:
@@ -141,21 +142,24 @@ def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_cons
 
 
 
-    # optProb.addObj("tf")
-    optProb.addObj("dist")
+    optProb.addObj("tf")
+    # optProb.addObj("dist")
 
     opt = OPT("ipopt")
-    opt.options['print_level'] = 5
+    opt.options['print_level'] = 0
     opt.options['max_iter'] = 500
     opt.options['hsllib'] = '/home/grant/packages/ThirdParty-HSL/.libs/libcoinhsl.so'
     opt.options['linear_solver'] = 'ma97'
 
     sol = opt(optProb, sens="FD")
-    # print(sol)
+    print(sol)
 
     print("time", sol.xStar['tf'])
+    # print("dist", sol.fStar)
+    # print("time", sol.fStar/agentSpeed)
 
     return create_spline(0, sol.xStar['tf'], sol.xStar['control_points'], spline_order, p0, pf, v0)
+    # return create_spline(0, 1, sol.xStar['control_points'], spline_order, p0, pf, v0)
 
 def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
     fig,ax = plt.subplots()
@@ -250,7 +254,7 @@ if __name__ == '__main__':
     turn_rate_constraints = (-5.0,5.0) 
     curvature_constraints = (-1,1) 
     num_constraint_samples = 50
-    #pez_constraint_limit_list = [.1,.2,.3,.4]
+    # pez_constraint_limit_list = [0.01,0.05,.1,.2,.3,.4]
     pez_constraint_limit_list = [.01]
 
     pursuerRange = 2
@@ -269,12 +273,12 @@ if __name__ == '__main__':
         bez_fail_percentage = mc_spline_evaluation(spline, num_mc_runs, num_constraint_samples, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
         print("BEZ Fail Percentage: ", bez_fail_percentage)
 
-    useProbabalistic = False
-    spline = optimize_spline_path(startingLocation, endingLocation, initialVelocity, numControlPoints,splineOrder, velocity_constraints, turn_rate_constraints, curvature_constraints, num_constraint_samples, pez_constraint_limit, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, useProbabalistic)
-    plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit,useProbabalistic)
-    plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_constraint_limit, useProbabalistic)
+    # useProbabalistic = False
+    # spline = optimize_spline_path(startingLocation, endingLocation, initialVelocity, numControlPoints,splineOrder, velocity_constraints, turn_rate_constraints, curvature_constraints, num_constraint_samples, pez_constraint_limit, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, useProbabalistic)
+    # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit,useProbabalistic)
+    # plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_constraint_limit, useProbabalistic)
 
-    bez_fail_percentage = mc_spline_evaluation(spline, num_mc_runs, num_constraint_samples, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
-    print("BEZ Fail Percentage: ", bez_fail_percentage)
+    # bez_fail_percentage = mc_spline_evaluation(spline, num_mc_runs, num_constraint_samples, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
+    # print("BEZ Fail Percentage: ", bez_fail_percentage)
     
     plt.show()
