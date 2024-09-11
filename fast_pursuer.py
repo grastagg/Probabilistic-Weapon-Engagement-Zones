@@ -156,7 +156,7 @@ def probabalisticEngagementZoneTemp(agentPosition, agentHeading, pursuerPosition
     diffDistribution = norm(mean, np.sqrt(cov))
     return diffDistribution.cdf(0)
 
-def probabalisticEngagementZoneVectorizedTemp(agentPositions, agentHeading, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, dPezDPursuerPosition):
+def probabalisticEngagementZoneVectorizedTemp(agentPositions,agentPositionCov, agentHeading, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, dPezDPursuerPosition, dPezDAgentPosition):
     # Define vectorized operations with vmap
     def single_agent_prob(agentPosition):
         agentPosition = agentPosition.reshape(-1,1)
@@ -165,9 +165,10 @@ def probabalisticEngagementZoneVectorizedTemp(agentPositions, agentHeading, purs
 
         # Calculate the Jacobian for the engagement zone
         dPezDPursuerPositionJac = dPezDPursuerPosition(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
+        dPezDAgentPositionJac = dPezDAgentPosition(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
 
         # Compute the covariance matrix
-        cov = dPezDPursuerPositionJac @ pursuerPositionCov @ dPezDPursuerPositionJac.T
+        cov = dPezDPursuerPositionJac @ pursuerPositionCov @ dPezDPursuerPositionJac.T + dPezDAgentPositionJac @ agentPositionCov @ dPezDAgentPositionJac.T
 
         # Define the normal distribution based on mean and covariance
         # diffDistribution = jax.scipy.stats.norm(mean, jnp.sqrt(cov))
@@ -214,7 +215,7 @@ def probabalisticEngagementZoneVectorizedTemp(agentPositions, agentHeading, purs
 #     ax.clabel(c, inline=True, fontsize=8)
     
 #     return
-def plotProbablisticEngagementZone(agentHeading, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, ax):
+def plotProbablisticEngagementZone(agentPositionCov,agentHeading, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, ax):
     ax.set_aspect('equal')
     ax.set_title("Linearized Probabilistic Engagement Zone")
 
@@ -226,11 +227,13 @@ def plotProbablisticEngagementZone(agentHeading, pursuerPosition, pursuerPositio
 
     # Compute Jacobian of engagement zone function
     dPezDPursuerPosition = jacfwd(inEngagementZoneJax, argnums=2)
+    dPezDAgentPosition = jacfwd(inEngagementZoneJax, argnums=0)
 
     start = time.time()
     # Compute engagement zone probabilities
     engagementZonePlot = probabalisticEngagementZoneVectorizedTemp(
         agentPositions,
+        agentPositionCov,
         agentHeading,
         pursuerPosition,
         pursuerPositionCov,
@@ -238,7 +241,8 @@ def plotProbablisticEngagementZone(agentHeading, pursuerPosition, pursuerPositio
         pursuerCaptureRange,
         pursuerSpeed,
         agentSpeed,
-        dPezDPursuerPosition
+        dPezDPursuerPosition,
+        dPezDAgentPosition
     )
     print("total time: ", time.time() - start)
 
@@ -314,7 +318,8 @@ if __name__ == "__main__":
     pursuerSpeed = 1
     agentSpeed = .9
 
-    pursuerPositionCov = np.array([[0.1, 0.0], [0.0, 0.1]])
+    agentPositionCov = np.array([[0.1, 0.0], [0.0, 0.1]])
+    pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
     # pursuerInitialPosition = jnp.array([-.5, .5])
     pursuerInitialPosition = np.array([[0.0], [0.0]])
     agentInitialPosition = np.array([[0.0], [2.0]])
@@ -333,8 +338,8 @@ if __name__ == "__main__":
 
 
     fig1, ax1 = plt.subplots()
-    plotProbablisticEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax1)
+    plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax1)
     plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax1)   
-    plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, ax1)
+    # plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, ax1)
     plt.show()
 
