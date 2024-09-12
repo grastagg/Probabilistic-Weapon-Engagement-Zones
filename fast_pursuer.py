@@ -150,10 +150,19 @@ def probabalisticEngagementZoneTemp(agentPosition, agentHeading, pursuerPosition
     diffDistribution = norm(mean, np.sqrt(cov))
     return diffDistribution.cdf(0)
 
-def  probabalisticEngagementZoneVectorizedTemp(agentPositions,agentPositionCov, agentHeading,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed, agentSpeed, dPezDPursuerPosition, dPezDAgentPosition,dPezDPursuerRange,dPezDPursuerCaptureRange,dPezDAgentHeading):
+dPezDPursuerPosition = jacfwd(inEngagementZoneJax, argnums=2)
+dPezDAgentPosition = jacfwd(inEngagementZoneJax, argnums=0)
+dPezDPursuerRange = jacfwd(inEngagementZoneJax, argnums=3)
+dPezDPursuerCaptureRange = jacfwd(inEngagementZoneJax, argnums=4)
+dPezDAgentHeading = jacfwd(inEngagementZoneJax, argnums=1)
+def probabalisticEngagementZoneVectorizedTemp(agentPositions, agentPositionCov, agentHeadings, agentHeadingVar, 
+                                              pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, 
+                                              pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed):
+    
     # Define vectorized operations with vmap
-    def single_agent_prob(agentPosition):
-        agentPosition = agentPosition.reshape(-1,1)
+    def single_agent_prob(agentPosition, agentHeading):
+        agentPosition = agentPosition.reshape(-1, 1)
+        
         # Calculate the mean for the engagement zone
         mean = inEngagementZoneJax(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
 
@@ -165,19 +174,46 @@ def  probabalisticEngagementZoneVectorizedTemp(agentPositions,agentPositionCov, 
         dPezDAgentHeadingJac = dPezDAgentHeading(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
 
         # Compute the covariance matrix
-        cov = dPezDPursuerPositionJac @ pursuerPositionCov @ dPezDPursuerPositionJac.T + dPezDAgentPositionJac @ agentPositionCov @ dPezDAgentPositionJac.T+ dPezDPursuerRangeJac**2 * pursuerRangeVar + dPezDPursuerCaptureRangeJac**2 * pursuerCaptureRangeVar+ dPezDAgentHeadingJac**2 * agentHeadingVar
+        cov = (dPezDPursuerPositionJac @ pursuerPositionCov @ dPezDPursuerPositionJac.T + 
+               dPezDAgentPositionJac @ agentPositionCov @ dPezDAgentPositionJac.T + 
+               dPezDPursuerRangeJac**2 * pursuerRangeVar + 
+               dPezDPursuerCaptureRangeJac**2 * pursuerCaptureRangeVar + 
+               dPezDAgentHeadingJac**2 * agentHeadingVar)
 
-        # Define the normal distribution based on mean and covariance
-        # diffDistribution = jax.scipy.stats.norm(mean, jnp.sqrt(cov))
-        # jax.scipy.stats.norm.
-        
-        # # Return the CDF at 0
-        # return diffDistribution.cdf(0)
+        # Return the CDF at 0
         return jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(cov))
     
+    # Apply vectorization over agentPositions and agentHeadings
+    return vmap(single_agent_prob)(agentPositions, agentHeadings)
 
-    # Apply vectorization over agentPositions
-    return vmap(single_agent_prob)(agentPositions)
+# def  probabalisticEngagementZoneVectorizedTemp(agentPositions,agentPositionCov, agentHeading,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed, agentSpeed, dPezDPursuerPosition, dPezDAgentPosition,dPezDPursuerRange,dPezDPursuerCaptureRange,dPezDAgentHeading):
+#     # Define vectorized operations with vmap
+#     def single_agent_prob(agentPosition):
+#         agentPosition = agentPosition.reshape(-1,1)
+#         # Calculate the mean for the engagement zone
+#         mean = inEngagementZoneJax(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
+
+#         # Calculate the Jacobian for the engagement zone
+#         dPezDPursuerPositionJac = dPezDPursuerPosition(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
+#         dPezDAgentPositionJac = dPezDAgentPosition(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
+#         dPezDPursuerRangeJac = dPezDPursuerRange(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
+#         dPezDPursuerCaptureRangeJac = dPezDPursuerCaptureRange(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
+#         dPezDAgentHeadingJac = dPezDAgentHeading(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
+
+#         # Compute the covariance matrix
+#         cov = dPezDPursuerPositionJac @ pursuerPositionCov @ dPezDPursuerPositionJac.T + dPezDAgentPositionJac @ agentPositionCov @ dPezDAgentPositionJac.T+ dPezDPursuerRangeJac**2 * pursuerRangeVar + dPezDPursuerCaptureRangeJac**2 * pursuerCaptureRangeVar+ dPezDAgentHeadingJac**2 * agentHeadingVar
+
+#         # Define the normal distribution based on mean and covariance
+#         # diffDistribution = jax.scipy.stats.norm(mean, jnp.sqrt(cov))
+#         # jax.scipy.stats.norm.
+        
+#         # # Return the CDF at 0
+#         # return diffDistribution.cdf(0)
+#         return jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(cov))
+    
+
+#     # Apply vectorization over agentPositions
+#     return vmap(single_agent_prob)(agentPositions)
 
 # def plotProbablisticEngagemenpedalck([X.ravel(), Y.ravel()]).T
 
@@ -215,20 +251,21 @@ def plotProbablisticEngagementZone(agentPositionCov,agentHeading,agentHeadingVar
     y = jnp.linspace(-2, 2, 50)
     X, Y = jnp.meshgrid(x, y)
     agentPositions = jnp.vstack([X.ravel(), Y.ravel()]).T
+    agentHeadings = jnp.ones(agentPositions.shape[0]) * agentHeading
 
     # Compute Jacobian of engagement zone function
-    dPezDPursuerPosition = jacfwd(inEngagementZoneJax, argnums=2)
-    dPezDAgentPosition = jacfwd(inEngagementZoneJax, argnums=0)
-    dPezDPursuerRange = jacfwd(inEngagementZoneJax, argnums=3)
-    dPezDPursuerCaptureRange = jacfwd(inEngagementZoneJax, argnums=4)
-    dPezDAgentHeading = jacfwd(inEngagementZoneJax, argnums=1)
+    # dPezDPursuerPosition = jacfwd(inEngagementZoneJax, argnums=2)
+    # dPezDAgentPosition = jacfwd(inEngagementZoneJax, argnums=0)
+    # dPezDPursuerRange = jacfwd(inEngagementZoneJax, argnums=3)
+    # dPezDPursuerCaptureRange = jacfwd(inEngagementZoneJax, argnums=4)
+    # dPezDAgentHeading = jacfwd(inEngagementZoneJax, argnums=1)
 
     start = time.time()
     # Compute engagement zone probabilities
     engagementZonePlot = probabalisticEngagementZoneVectorizedTemp(
         agentPositions,
         agentPositionCov,
-        agentHeading,
+        agentHeadings,
         agentHeadingVar,
         pursuerPosition,
         pursuerPositionCov,
@@ -237,12 +274,7 @@ def plotProbablisticEngagementZone(agentPositionCov,agentHeading,agentHeadingVar
         pursuerCaptureRange,
         pursuerCaptureRangeVar,
         pursuerSpeed,
-        agentSpeed,
-        dPezDPursuerPosition,
-        dPezDAgentPosition,
-        dPezDPursuerRange,
-        dPezDPursuerCaptureRange,
-        dPezDAgentHeading
+        agentSpeed
     )
     print("total time: ", time.time() - start)
 
