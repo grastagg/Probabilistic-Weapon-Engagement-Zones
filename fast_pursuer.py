@@ -59,18 +59,21 @@ def plotEngagementZone(agentHeading, pursuerPosition, pursuerRange, pursuerCaptu
     x = np.linspace(-2, 2, 50)
     y = np.linspace(-2, 2, 50)
     [X, Y] = np.meshgrid(x, y)
+    agentPositions = jnp.vstack([X.ravel(), Y.ravel()]).T
+    agentHeadings = jnp.ones(agentPositions.shape[0]) * agentHeading
+    engagementZonePlot = inEngagementZoneJaxVectorized(agentPositions, agentHeadings, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
 
-    engagementZonePlot = np.zeros(X.shape)
+    # engagementZonePlot = np.zeros(X.shape)
 
-    for i in range(X.shape[0]):
-        for j in range(X.shape[1]):
-            engagementZonePlot[i, j] = inEngagementZone(np.array([[X[i, j]], [Y[i, j]]]), agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
+    # for i in range(X.shape[0]):
+    #     for j in range(X.shape[1]):
+    #         engagementZonePlot[i, j] = inEngagementZone(np.array([[X[i, j]], [Y[i, j]]]), agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
     # c = plt.pcolormesh(X, Y, engagementZonePlot)
     # plt.colorbar(c, ax=ax)
     # c = plt.Circle([0,0], pursuerRange+pursuerCaptureRange, fill=False)
     # ax.add_artist(c)
     # plt.contour(X, Y, engagementZonePlot, levels=[0, 1], colors=['red'])
-    ax.contour(X, Y, engagementZonePlot, levels=[0], colors=['red'])
+    ax.contour(X, Y, engagementZonePlot.reshape((50,50)), levels=[0], colors=['red'])
     ax.scatter(pursuerPosition[0], pursuerPosition[1], color='red')
 
     
@@ -138,7 +141,13 @@ def inEngagementZoneJax(agentPosition,agentHeading, pursuerPosition, pursuerRang
     rho = speedRatio*pursuerRange*(jnp.cos(epsilon) + jnp.sqrt(jnp.cos(epsilon)**2 - 1+(pursuerRange+pursuerCaptureRange)**2/(speedRatio**2*pursuerRange**2)))
     
     # return distnce < rho
-    return distance - rho
+    # jax.debug.print("agen: {x}", x=rho)
+    return (distance - rho[0])
+
+def inEngagementZoneJaxVectorized(agentPositions,agentHeadings, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed):
+    single_agent_prob = lambda agentPosition, agentHeading: inEngagementZoneJax(agentPosition.reshape(-1,1), agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
+        # agentPosition = agentPosition.reshape(-1, 1)
+    return vmap(single_agent_prob)(agentPositions, agentHeadings)
 
 
     
@@ -184,6 +193,8 @@ def probabalisticEngagementZoneVectorizedTemp(agentPositions, agentPositionCov, 
         return jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(cov))
     
     # Apply vectorization over agentPositions and agentHeadings
+    # print("agentPositions: ", agentPositions.shape)
+    # print("agentHeadings: ", agentHeadings.shape)
     return vmap(single_agent_prob)(agentPositions, agentHeadings)
 
 # def  probabalisticEngagementZoneVectorizedTemp(agentPositions,agentPositionCov, agentHeading,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed, agentSpeed, dPezDPursuerPosition, dPezDAgentPosition,dPezDPursuerRange,dPezDPursuerCaptureRange,dPezDAgentHeading):
