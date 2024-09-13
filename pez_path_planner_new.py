@@ -19,7 +19,7 @@ from bspline.matrix_evaluation import matrix_bspline_evaluation_for_dataset, mat
 numSamplesPerInterval = 15
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
-def plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar,pursuerSpeed,agentSpeed,pez_constraint_limit,ax):
+def plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar,pursuerSpeed,pursuerSpeedVar,agentSpeed,pez_constraint_limit,ax):
     t0 = spline.t[spline.k]
     tf = spline.t[-1-spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
@@ -36,7 +36,7 @@ def plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuer
     xDot = splineDot[:, 0]
     yDot = splineDot[:, 1]
     agentHeadings = np.arctan2(yDot,xDot)
-    pez = probabalisticEngagementZoneVectorizedTemp(pos, agentPositionCov,agentHeadings, agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed)
+    pez = probabalisticEngagementZoneVectorizedTemp(pos, agentPositionCov,agentHeadings, agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed)
     pezDeterministic = inEngagementZoneJaxVectorized(pos, agentHeadings, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
     if pez_constraint_limit == 0.5:
         pez = pezDeterministic
@@ -123,12 +123,12 @@ def get_spline_heading(controlPoints, tf, splineOrder,numSamplesPerInterval):
     return jnp.arctan2(out_d1[:,1],out_d1[:,0])
 # @partial(jit, static_argnums=(2,3,4,5,6,7,8,9,10))
 @jit
-def get_pez_along_spline(controlPoints, tf, agentPositionCov,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed):
+def get_pez_along_spline(controlPoints, tf, agentPositionCov,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed):
     numControlPoints = int(len(controlPoints)/2)
     knotPoints = create_unclamped_knot_points(0, tf,numControlPoints,3)
     agentHeadings = get_spline_heading(controlPoints, tf, 3, numSamplesPerInterval)
     controlPoints = controlPoints.reshape((numControlPoints,2))
-    return probabalisticEngagementZoneVectorizedTemp(evaluate_spline(controlPoints, knotPoints), agentPositionCov,agentHeadings, agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed)
+    return probabalisticEngagementZoneVectorizedTemp(evaluate_spline(controlPoints, knotPoints), agentPositionCov,agentHeadings, agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed)
 
         
 def get_start_constraint(controlPoints):
@@ -173,14 +173,14 @@ def get_turn_rate_velocity_and_headings(controlPoints, knotPoints):
     return u,v,heading
 
 def compute_spline_constraints(controlPoints, knotPoints,agentPositionCov,agentHeadingVar,pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, 
-                                              pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed):
+                                              pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed):
     pos = evaluate_spline(controlPoints, knotPoints)
 
     turn_rate, velocity,agentHeadings = get_turn_rate_velocity_and_headings(controlPoints, knotPoints)
 
     curvature = turn_rate/velocity
 
-    pez_constraint = probabalisticEngagementZoneVectorizedTemp(pos, agentPositionCov, agentHeadings, agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed)
+    pez_constraint = probabalisticEngagementZoneVectorizedTemp(pos, agentPositionCov, agentHeadings, agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed)
 
 
     return velocity, turn_rate, curvature, pez_constraint,pos
@@ -203,7 +203,7 @@ dCurvatureDControlPoints = jacfwd(get_spline_curvature)
 dCurvatureDtf = jacfwd(get_spline_curvature,argnums=1)
 
 
-def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_constraints, turn_rate_constraints, curvature_constraints, num_constraint_samples, pez_constraint_limit,agentPositionCov,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed, agentSpeed, useProbabalistic):
+def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_constraints, turn_rate_constraints, curvature_constraints, num_constraint_samples, pez_constraint_limit,agentPositionCov,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, useProbabalistic):
 
     # Compute Jacobian of engagement zone function
     
@@ -217,7 +217,7 @@ def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_cons
         controlPoints = controlPoints.reshape((num_cont_points,2))
 
         velocity, turn_rate, curvature,pez,pos=compute_spline_constraints(controlPoints, knotPoints,agentPositionCov,agentHeadingVar,pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, 
-                                              pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed)
+                                              pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed)
         # funcs['start'] = self.get_start_constraint_jax(controlPoints)
         # funcs['start'] = pos[0]
         # funcs['end'] = pos[-1]
@@ -237,8 +237,8 @@ def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_cons
 
         dStartDControlPointsVal = get_start_constraint_jacobian(controlPoints)
         dEndDControlPointsVal = get_end_constraint_jacobian(controlPoints)
-        dPezDControlPointsVal = dPezDControlPoints(controlPoints, tf, agentPositionCov,agentHeadingVar,pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed)
-        dPezDtfVal = dPezDtf(controlPoints, tf, agentPositionCov,agentHeadingVar,pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed)
+        dPezDControlPointsVal = dPezDControlPoints(controlPoints, tf, agentPositionCov,agentHeadingVar,pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed)
+        dPezDtfVal = dPezDtf(controlPoints, tf, agentPositionCov,agentHeadingVar,pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed)
         dVelocityDControlPointsVal = dVelocityDControlPoints(controlPoints, tf, 3, numSamplesPerInterval)
         dVelocityDtfVal = sdVelocityDtf(controlPoints, tf, 3, numSamplesPerInterval)
         dTurnRateDControlPointsVal = dTurnRateDControlPoints(controlPoints, tf, 3, numSamplesPerInterval)
@@ -264,9 +264,11 @@ def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_cons
     # x0_x = np.linspace(p0[0], pf[0], num_cont_points)
     # x0_y = np.linspace(p0[0], pf[0], num_cont_points)
     # x0 = np.hstack((x0_x,x0_y)).reshape((2*(num_cont_points)))
-    x0 = np.array([-5.36546135, -6.72247472, -3.74519783, -4.03001312, -3.65374732, -1.15747281,
-                    -2.66495198,  1.67172852,  0.07281431,  3.16813473,  3.05293707,  2.55711375,
-                    5.7154374,   4.60341026])
+    x0  = np.array([
+    -6.99550637, -8.95872567, -4.47336006, -5.06316688, -5.11105337, -0.78860679,
+    -3.19745253,  3.19381798,  0.79036742,  5.04575115,  5.06051916,  4.51374057,
+    8.96755593,  6.89928658
+    ])
 
     tempVelocityContstraints = get_spline_velocity(x0,1,3,1)
     num_constraint_samples = len(tempVelocityContstraints)
@@ -293,16 +295,16 @@ def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_cons
     username = getpass.getuser()
     opt.options['hsllib'] = '/home/' + username+'/packages/ThirdParty-HSL/.libs/libcoinhsl.so'
     opt.options['linear_solver'] = 'ma97'
-    opt.options['derivative_test'] = 'first-order'
+    # opt.options['derivative_test'] = 'first-order'
 
     sol = opt(optProb, sens=sens)
-    # print(sol)
+    if sol.optInform['value'] != 0:
+        print("Optimization failed")
 
     print("time", sol.xStar['tf'])
 
     knotPoints = create_unclamped_knot_points(0, sol.xStar['tf'][0], num_cont_points, 3)
     # print("knot points", knotPoints)
-    # print("control points", sol.xStar['control_points'])
     controlPoints = sol.xStar['control_points'].reshape((num_cont_points,2))
     return create_spline(knotPoints,controlPoints, spline_order)
 
@@ -333,42 +335,44 @@ def main():
     agentPositionCov = np.array([[.0,0],[0,.0]])
     agentHeadingVar = 0.0
     pursuerPosition = np.array([[0.0],[0.0]])
-    pursuerPositionCov = np.array([[.2,0],[0,.2]])
 
-    startingLocation = np.array([-5.0,-5.0])
-    endingLocation = np.array([3.0,3.0])
+    startingLocation = np.array([-4.0,-4.0])
+    endingLocation = np.array([4.0,4.0])
     initialVelocity = np.array([1.0,1.0])/np.sqrt(2)
+
     numControlPoints = 7
     splineOrder = 3
     turn_rate_constraints = (-50.0,50.0) 
     curvature_constraints = (-10.0,10.0) 
     num_constraint_samples = 50
     #pez_constraint_limit_list = [.1,.2,.3,.4]
-    pez_constraint_limit_list = [.01,.1,.2,.3,.4,.5]
+    pez_constraint_limit_list = [.01,0.05,.1,.2,.3,.4,.5]
     # pez_constraint_limit_list = [.01]
 
-    pursuerRange = 2.0
-    pursuerRangeVar = 0.25
+    pursuerPositionCov = np.array([[.2,0],[0,.2]])
+    pursuerRange = 1.0
+    pursuerRangeVar = 0.2
     pursuerCaptureRange = 0.1
-    pursuerCaptureRangeVar = 0.1
+    pursuerCaptureRangeVar = 0.02
     pursuerSpeed = 1.0
-    agentSpeed = .9
+    pursuerSpeedVar = 0.2
+    agentSpeed = .5
     # velocity_constraints = (0,1.0) 
     velocity_constraints = (agentSpeed-.01,agentSpeed+.01) 
 
-    num_mc_runs = 2000
+    num_mc_runs = 10000
     
     useProbabalistic = True
 
-    fig,axes = plt.subplots(2,3)
+    # fig,axes = plt.subplots(2,3)
     # fig.set_size_inches(15,10)
 
     for pez_constraint_limit in pez_constraint_limit_list:
-        axis = axes.flatten()[pez_constraint_limit_list.index(pez_constraint_limit)]
+        # axis = axes.flatten()[pez_constraint_limit_list.index(pez_constraint_limit)]
         print("PEZ Constraint Limit: ", pez_constraint_limit)
-        spline = optimize_spline_path(startingLocation, endingLocation, initialVelocity, numControlPoints,splineOrder, velocity_constraints, turn_rate_constraints, curvature_constraints, num_constraint_samples, pez_constraint_limit,agentPositionCov,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed, agentSpeed, useProbabalistic)
+        spline = optimize_spline_path(startingLocation, endingLocation, initialVelocity, numControlPoints,splineOrder, velocity_constraints, turn_rate_constraints, curvature_constraints, num_constraint_samples, pez_constraint_limit,agentPositionCov,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, useProbabalistic)
         # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit, useProbabalistic)
-        plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar,pursuerSpeed,agentSpeed,pez_constraint_limit,axis)
+        # plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar,pursuerSpeed,pursuerSpeedVar,agentSpeed,pez_constraint_limit,axis)
         bez_fail_percentage = mc_spline_evaluation(spline, num_mc_runs, 200, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed)
         # bez_fail_percentage = mc_spline_evaluation(spline, num_mc_runs, num_constraint_samples, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
         print("BEZ Fail Percentage: ", bez_fail_percentage)
