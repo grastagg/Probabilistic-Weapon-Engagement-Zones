@@ -336,7 +336,8 @@ def plotMCProbablisticEngagementZone(agentPositionCov,agentHeading,agentHeadingV
         print(i)
         for j in range(X.shape[1]):
             # engagementZonePlot[i, j] = probabalisticEngagementZone(np.array([[X[i,j]],[Y[i,j]]]), agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
-            engagementZonePlot[i, j] = monte_carlo_probalistic_engagment_zone(np.array([[X[i,j]],[Y[i,j]]]), agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, numMcTrials, pursuerPositionSamples,pursuerRangeSamples,pursuerCaptureRangeSamples,agentHeadingSamples,pursuerSpeedSamples)
+            agentPositionSamples = np.random.multivariate_normal(np.array([[X[i,j]],[Y[i,j]]]).squeeze(), agentPositionCov, numMcTrials)
+            engagementZonePlot[i, j] = monte_carlo_probalistic_engagment_zone(np.array([[X[i,j]],[Y[i,j]]]), agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, numMcTrials, pursuerPositionSamples,pursuerRangeSamples,pursuerCaptureRangeSamples,agentHeadingSamples,pursuerSpeedSamples,agentPositionSamples)
     # c = ax.pcolormesh(X, Y, engagementZonePlot)
     # c = plt.Circle(pursuerPosition, pursuerRange+pursuerCaptureRange, fill=False)
     # ax.add_artist(c)
@@ -349,7 +350,7 @@ def plotMCProbablisticEngagementZone(agentPositionCov,agentHeading,agentHeadingV
     
     return engagementZonePlot
 
-def monte_carlo_probalistic_engagment_zone(agentPosition, agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, numMonteCarloTrials, pursurPositionSamples=None,pursuerRangeSamples=None,pursuerCaptureRangeSamples=None,agentHeadingSamples=None,pursuerSpeedSamples=None):
+def monte_carlo_probalistic_engagment_zone(agentPosition, agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, numMonteCarloTrials, pursurPositionSamples=None,pursuerRangeSamples=None,pursuerCaptureRangeSamples=None,agentHeadingSamples=None,pursuerSpeedSamples=None,agentPositionSamples=None): 
     if pursurPositionSamples is None:
         #randomly sample from the pursuer position distribution
         pursurPositionSamples = np.random.multivariate_normal(pursuerPosition.squeeze(), pursuerPositionCov, numMonteCarloTrials)
@@ -360,7 +361,7 @@ def monte_carlo_probalistic_engagment_zone(agentPosition, agentHeading, pursuerP
         pursuerPositionSample = pursuerPositionSample.reshape(-1,1)
 
 
-        ez = inEngagementZone(agentPosition, agentHeadingSamples[i], pursuerPositionSample, pursuerRangeSamples[i], pursuerCaptureRangeSamples[i], pursuerSpeedSamples[i], agentSpeed)
+        ez = inEngagementZone(agentPositionSamples[i].reshape(-1,1), agentHeadingSamples[i], pursuerPositionSample, pursuerRangeSamples[i], pursuerCaptureRangeSamples[i], pursuerSpeedSamples[i], agentSpeed)
         if ez < 0:
             numInEngagementZone += 1
     
@@ -375,69 +376,71 @@ def monte_carlo_probalistic_engagment_zone(agentPosition, agentHeading, pursuerP
 
 def main():
     pursuerRange = 1.0
-    pursuerRangeVar = 0.0
+    pursuerRangeVar = 0.2
     pursuerCaptureRange = 0.1
-    pursuerCaptureRangeVar = 0.00
+    pursuerCaptureRangeVar = 0.02
     pursuerSpeed = 1.0
     pursuerSpeedVar = 0.0
     agentSpeed = .5
 
-    agentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
-    pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
+    agentPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
+    pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
     pursuerInitialPosition = np.array([[0.0], [0.0]])
 
     agentInitialHeading = 0.0
-    agentHeadingVar = 0.0
+    agentHeadingVar = 0.2
     
 
     
     fig,axes = plt.subplots(2,4)
 
 
-    for case in range(4):
-        if case == 0:
-            pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
+    # for case in range(4):
+    #     if case == 0:
+    #         pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
         
-        elif case == 1:
-            pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
-            pursuerRangeVar = 0.2
-        elif case == 2:
-            pursuerRangeVar = 0.0
-            pursuerCaptureRangeVar = 0.02
-        elif case == 3:
-            pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
-            pursuerRangeVar = 0.2
-            pursuerCaptureRangeVar = 0.02
+    #     elif case == 1:
+    #         pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
+    #         pursuerRangeVar = 0.2
+    #     elif case == 2:
+    #         pursuerRangeVar = 0.0
+    #         pursuerCaptureRangeVar = 0.02
+    #     elif case == 3:
+    #         pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
+    #         pursuerRangeVar = 0.2
+    #         pursuerCaptureRangeVar = 0.02
 
 
-        mcAx = axes[1][case]
-        mcEz = plotMCProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, mcAx)
-        plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,mcAx)   
-
-        if case == 0 or case == 3:
-            plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
+        # mcAx = axes[1][case]
+    mcFig,mcAx = plt.subplots(1,1)
+    mcEz = plotMCProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, mcAx)
+    plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,mcAx)   
 
 
-        linAx = axes[0][case]
-        linPez = plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,linAx)
-        plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,linAx)   
-        if case == 0 or case == 3:
-            plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, linAx)
+    if np.any(pursuerPositionCov):
+        plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
+
+
+    linFig,linAx = plt.subplots(1,1)
+    linPez = plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,linAx)
+    plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,linAx)   
+    if np.any(pursuerPositionCov):
+        plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
 
 
     
-        mse = np.sqrt(np.mean((mcEz - linPez)**2))
-        print(mse)
-        absPercentError = np.mean(np.abs(mcEz - linPez))
-        print("Absolute Percent Error: ", absPercentError)
+    mse = np.sqrt(np.mean((mcEz - linPez)**2))
+    print(mse)
+    absPercentError = np.mean(np.abs(mcEz - linPez))
+    print("Absolute Percent Error: ", absPercentError)
     
     
-    cols = ['Case 1', 'Case 2', 'Case 3', 'Case 4']
-    rows = ['Linearized', 'Monte Carlo']
-    for ax, col in zip(axes[0], cols):
-        ax.set_title(col,fontsize = 20)
-    for ax, row in zip(axes[:,0], rows):
-        ax.set_ylabel(row, rotation=90,fontsize = 20)
+    # cols = ['Case 1', 'Case 2', 'Case 3', 'Case 4']
+    # rows = ['Linearized', 'Monte Carlo']
+    # for ax, col in zip(axes[0], cols):
+    #     ax.set_title(col,fontsize = 20)
+    # for ax, row in zip(axes[:,0], rows):
+    #     ax.set_ylabel(row, rotation=90,fontsize = 20)
 
     plt.show()
     
