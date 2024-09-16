@@ -46,7 +46,7 @@ def plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuer
     else:
         cmap = 'viridis'
         cbarLabel = "Engagement Zone Probability"
-        plotMalhalanobisDistance(pursuerPosition, pursuerPositionCov, ax)
+        # plotMalhalanobisDistance(pursuerPosition, pursuerPositionCov, ax)
         
 
     c = ax.scatter(x, y, c = pez, cmap = cmap,s=4)
@@ -309,7 +309,7 @@ def optimize_spline_path(p0, pf, v0, num_cont_points,spline_order, velocity_cons
     return create_spline(knotPoints,controlPoints, spline_order)
 
 
-def mc_spline_evaluation(spline, num_mc_runs, num_samples, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed):
+def mc_spline_evaluation(spline, num_mc_runs, num_samples, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed):
     t0 = spline.t[spline.k]
     tf = spline.t[-1-spline.k]
     t = np.linspace(t0, tf, num_samples, endpoint=True)
@@ -317,13 +317,18 @@ def mc_spline_evaluation(spline, num_mc_runs, num_samples, pursuerPosition, purs
     pos = spline(t)
     d1 = spline.derivative()(t)
     agentHeadins = np.arctan2(d1[:,1],d1[:,0])
-    for j in tqdm(range(num_mc_runs)):
+    # for j in tqdm(range(num_mc_runs)):
+    for j in range(num_mc_runs):
         pursuerPositionTemp = np.random.multivariate_normal(pursuerPosition.squeeze(), pursuerPositionCov).reshape((-1,1))
         pursuerRangeTemp = np.random.normal(pursuerRange, np.sqrt(pursuerRangeVar))
         pursuerCaptureRangeTemp = np.random.normal(pursuerCaptureRange, np.sqrt(pursuerCaptureRangeVar))
+
+        pursuerSpeedTemp = np.random.normal(pursuerSpeed, np.sqrt(pursuerSpeedVar))
+        while pursuerSpeedTemp < agentSpeed:
+            pursuerSpeedTemp = np.random.normal(pursuerSpeed, np.sqrt(pursuerSpeedVar))
         
-        ez = inEngagementZoneJaxVectorized(pos, agentHeadins, pursuerPositionTemp, pursuerRangeTemp, pursuerCaptureRangeTemp, pursuerSpeed, agentSpeed)
-        if np.any(ez<0):
+        ez = inEngagementZoneJaxVectorized(pos, agentHeadins, pursuerPositionTemp, pursuerRangeTemp, pursuerCaptureRangeTemp, pursuerSpeedTemp, agentSpeed)
+        if np.any(ez<0) or np.isnan(ez).any():
             num_bez_violations += 1
             #
 
@@ -347,15 +352,20 @@ def main():
     num_constraint_samples = 50
     #pez_constraint_limit_list = [.1,.2,.3,.4]
     pez_constraint_limit_list = [.01,0.05,.1,.2,.3,.4,.5]
+    # pez_constraint_limit_list = [.01,.1,.2,.3,.4,.5]
     # pez_constraint_limit_list = [.01]
 
     pursuerPositionCov = np.array([[.2,0],[0,.2]])
+    # pursuerPositionCov = np.array([[0.0,0],[0,0.0]])
     pursuerRange = 1.0
     pursuerRangeVar = 0.2
+    # pursuerRangeVar = 0.0
     pursuerCaptureRange = 0.1
     pursuerCaptureRangeVar = 0.02
-    pursuerSpeed = 1.0
-    pursuerSpeedVar = 0.2
+    # pursuerCaptureRangeVar = 0.00
+    pursuerSpeed = 2.0
+    # pursuerSpeedVar = 0.2
+    pursuerSpeedVar = 0.0
     agentSpeed = .5
     # velocity_constraints = (0,1.0) 
     velocity_constraints = (agentSpeed-.01,agentSpeed+.01) 
@@ -373,8 +383,7 @@ def main():
         spline = optimize_spline_path(startingLocation, endingLocation, initialVelocity, numControlPoints,splineOrder, velocity_constraints, turn_rate_constraints, curvature_constraints, num_constraint_samples, pez_constraint_limit,agentPositionCov,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, useProbabalistic)
         # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit, useProbabalistic)
         # plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar,pursuerSpeed,pursuerSpeedVar,agentSpeed,pez_constraint_limit,axis)
-        bez_fail_percentage = mc_spline_evaluation(spline, num_mc_runs, 200, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed, agentSpeed)
-        # bez_fail_percentage = mc_spline_evaluation(spline, num_mc_runs, num_constraint_samples, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
+        bez_fail_percentage = mc_spline_evaluation(spline, num_mc_runs, 200, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed)
         print("BEZ Fail Percentage: ", bez_fail_percentage)
 
     # useProbabalistic = False
