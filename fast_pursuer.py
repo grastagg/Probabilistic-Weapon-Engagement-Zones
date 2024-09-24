@@ -395,52 +395,52 @@ def main():
     fig,axes = plt.subplots(2,4)
 
 
-    # for case in range(4):
-    #     if case == 0:
-    #         pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
+    for case in range(4):
+        if case == 0:
+            pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
         
-    #     elif case == 1:
-    #         pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
-    #         pursuerRangeVar = 0.2
-    #     elif case == 2:
-    #         pursuerRangeVar = 0.0
-    #         pursuerCaptureRangeVar = 0.02
-    #     elif case == 3:
-    #         pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
-    #         pursuerRangeVar = 0.2
-    #         pursuerCaptureRangeVar = 0.02
+        elif case == 1:
+            pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
+            pursuerRangeVar = 0.2
+        elif case == 2:
+            pursuerRangeVar = 0.0
+            pursuerCaptureRangeVar = 0.02
+        elif case == 3:
+            pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
+            pursuerRangeVar = 0.2
+            pursuerCaptureRangeVar = 0.02
 
 
-        # mcAx = axes[1][case]
-    mcFig,mcAx = plt.subplots(1,1)
-    mcEz = plotMCProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, mcAx)
-    plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,mcAx)   
+        mcAx = axes[1][case]
+    # mcFig,mcAx = plt.subplots(1,1)
+        mcEz = plotMCProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, mcAx)
+        plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,mcAx)   
 
 
-    if np.any(pursuerPositionCov):
-        plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
+        if np.any(pursuerPositionCov):
+            plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
 
 
-    linFig,linAx = plt.subplots(1,1)
-    linPez = plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,linAx)
-    plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,linAx)   
-    if np.any(pursuerPositionCov):
-        plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
+        linFig,linAx = plt.subplots(1,1)
+        linPez = plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,linAx)
+        plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,linAx)   
+        if np.any(pursuerPositionCov):
+            plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
 
 
+        
+        mse = np.sqrt(np.mean((mcEz - linPez)**2))
+        print(mse)
+        absPercentError = np.mean(np.abs(mcEz - linPez))
+        print("Absolute Percent Error: ", absPercentError)
     
-    mse = np.sqrt(np.mean((mcEz - linPez)**2))
-    print(mse)
-    absPercentError = np.mean(np.abs(mcEz - linPez))
-    print("Absolute Percent Error: ", absPercentError)
     
-    
-    # cols = ['Case 1', 'Case 2', 'Case 3', 'Case 4']
-    # rows = ['Linearized', 'Monte Carlo']
-    # for ax, col in zip(axes[0], cols):
-    #     ax.set_title(col,fontsize = 20)
-    # for ax, row in zip(axes[:,0], rows):
-    #     ax.set_ylabel(row, rotation=90,fontsize = 20)
+    cols = ['Case 1', 'Case 2', 'Case 3', 'Case 4']
+    rows = ['Linearized', 'Monte Carlo']
+    for ax, col in zip(axes[0], cols):
+        ax.set_title(col,fontsize = 20)
+    for ax, row in zip(axes[:,0], rows):
+        ax.set_ylabel(row, rotation=90,fontsize = 20)
 
     plt.show()
     
