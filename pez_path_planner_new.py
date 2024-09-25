@@ -13,7 +13,7 @@ import matplotlib
 matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
 
-from fast_pursuer import inEngagementZone, probabalisticEngagementZone, plotMalhalanobisDistance,probabalisticEngagementZoneVectorizedTemp,inEngagementZoneJax,inEngagementZoneJaxVectorized  
+from fast_pursuer import inEngagementZone, probabalisticEngagementZone, plotMahalanobisDistance,probabalisticEngagementZoneVectorizedTemp,inEngagementZoneJax,inEngagementZoneJaxVectorized  
 from bspline.matrix_evaluation import matrix_bspline_evaluation_for_dataset, matrix_bspline_derivative_evaluation_for_dataset
 
 numSamplesPerInterval = 15
