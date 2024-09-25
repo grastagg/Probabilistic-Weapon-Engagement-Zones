@@ -69,7 +69,7 @@ def plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
     ax.scatter(pursuerPosition[0], pursuerPosition[1], color='darkred', label='Pursuer Position', s=100)
     
     # Add a color bar and increase font size
-    cbar = plt.colorbar(c, ax=ax, ticks=[0, 1, 2, 3],shrink=0.6)
+    cbar = plt.colorbar(c, ax=ax, ticks=[0, 1, 2, 3],shrink=0.8)
     cbar.set_label("Pursuer Std Dev", fontsize=16)
     cbar.ax.tick_params(labelsize=16)
 
@@ -411,7 +411,7 @@ def main():
     
 
     
-    fig,axes = plt.subplots(2,4)
+    fig,axes = plt.subplots(2,4,layout='constrained')
 
 
     for case in range(4):
