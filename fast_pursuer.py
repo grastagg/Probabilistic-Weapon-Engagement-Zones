@@ -42,18 +42,37 @@ def inEngagementZone(agentPosition,agentHeading, pursuerPosition, pursuerRange, 
     return distance - rho
     # return rho
 
-def plotMalhalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
-    x = np.linspace(-2, 2, 50)
-    y = np.linspace(-2, 2, 50)
-    [X, Y] = np.meshgrid(x, y)
+def plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
+    # Define the grid
+    x = np.linspace(-2, 2, 100)
+    y = np.linspace(-2, 2, 100)
+    X, Y = np.meshgrid(x, y)
 
-    malhalanobisDistance = np.zeros(X.shape)
+    # Stack X, Y coordinates into a single array
+    points = np.stack([X.ravel(), Y.ravel()]).T
+    
+    # Compute the inverse of the covariance matrix
+    inv_cov = np.linalg.inv(pursuerPositionCov)
+    
+    # Compute Mahalanobis distance for each point (vectorized)
+    delta = points - pursuerPosition.T
+    malhalanobisDistance = np.sqrt(np.einsum('ij,jk,ik->i', delta, inv_cov, delta))
+    malhalanobisDistance = malhalanobisDistance.reshape(X.shape)
+    
+    # Specify darker shades of red
+    colors = ['#CC0000', '#FF6666','#FFCCCC' ] 
+    
+    # Plot filled contours for Mahalanobis distance with darker red shades
+    c = ax.contourf(X, Y, malhalanobisDistance, levels=[0, 1, 2, 3], colors=colors, alpha=0.75)
+    
+    # Mark the pursuer position with a dark red dot
+    ax.scatter(pursuerPosition[0], pursuerPosition[1], color='darkred', label='Pursuer Position', s=100)
+    
+    # Add a color bar and increase font size
+    cbar = plt.colorbar(c, ax=ax, ticks=[0, 1, 2, 3])
+    cbar.set_label("Pursuer Mahalanobis Distance", fontsize=26)
+    cbar.ax.tick_params(labelsize=24)
 
-    for i in range(X.shape[0]):
-        for j in range(X.shape[1]):
-            malhalanobisDistance[i,j] = np.linalg.norm((np.array([[X[i,j]],[Y[i,j]]]) - pursuerPosition).T@np.linalg.inv(pursuerPositionCov)@(np.array([[X[i,j]],[Y[i,j]]]) - pursuerPosition))
-    c = ax.contourf(X, Y, malhalanobisDistance, levels=[0,1,2,3],cmap='Reds')
-    ax.scatter(pursuerPosition[0], pursuerPosition[1], color='red')
 
 def plotEngagementZone(agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax):
     x = np.linspace(-2, 2, 50)
