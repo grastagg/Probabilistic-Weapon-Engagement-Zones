@@ -52,7 +52,7 @@ def plotMalhalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
             malhalanobisDistance[i,j] = np.linalg.norm((np.array([[X[i,j]],[Y[i,j]]]) - pursuerPosition).T@np.linalg.inv(pursuerPositionCov)@(np.array([[X[i,j]],[Y[i,j]]]) - pursuerPosition))
-    c = ax.contourf(X, Y, malhalanobisDistance, levels=[0,1,2,3])
+    c = ax.contourf(X, Y, malhalanobisDistance, levels=[0,1,2,3],cmap='Reds')
     ax.scatter(pursuerPosition[0], pursuerPosition[1], color='red')
 
 def plotEngagementZone(agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax):
@@ -376,19 +376,19 @@ def monte_carlo_probalistic_engagment_zone(agentPosition, agentHeading, pursuerP
 
 def main():
     pursuerRange = 1.0
-    pursuerRangeVar = 0.2
+    pursuerRangeVar = 0.0
     pursuerCaptureRange = 0.1
-    pursuerCaptureRangeVar = 0.02
+    pursuerCaptureRangeVar = 0.00
     pursuerSpeed = 1.0
     pursuerSpeedVar = 0.0
     agentSpeed = .5
 
-    agentPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
+    agentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
     pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
     pursuerInitialPosition = np.array([[0.0], [0.0]])
 
     agentInitialHeading = 0.0
-    agentHeadingVar = 0.2
+    agentHeadingVar = 0.0
     
 
     
@@ -415,17 +415,22 @@ def main():
     # mcFig,mcAx = plt.subplots(1,1)
         mcEz = plotMCProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, mcAx)
         plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,mcAx)   
+        mcAx.set_xlabel("X")
+        mcAx.set_ylabel("Y")
 
 
         if np.any(pursuerPositionCov):
             plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
 
 
-        linFig,linAx = plt.subplots(1,1)
+        # linFig,linAx = plt.subplots(1,1)
+        linAx = axes[0][case]
         linPez = plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,linAx)
         plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,linAx)   
+        linAx.set_xlabel("X")
+        linAx.set_ylabel("Y")
         if np.any(pursuerPositionCov):
-            plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
+            plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, linAx)
 
 
         
