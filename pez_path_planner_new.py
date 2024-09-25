@@ -53,7 +53,7 @@ def plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuer
         
 
     c = ax.scatter(x, y, c = pez, cmap = cmap,s=4)
-    cbar = plt.colorbar(c)
+    cbar = plt.colorbar(c,shrink=0.8)
     cbar.ax.tick_params(labelsize=16)
     
     if pez_constraint_limit == 0.5:
@@ -377,7 +377,7 @@ def main():
     
     useProbabalistic = True
 
-    fig,axes = plt.subplots(2,3)
+    fig,axes = plt.subplots(2,3,layout='constrained')
     fig.set_size_inches(15,10)
 
     for pez_constraint_limit in pez_constraint_limit_list:
