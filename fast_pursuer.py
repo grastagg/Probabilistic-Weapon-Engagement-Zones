@@ -70,8 +70,8 @@ def plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
     
     # Add a color bar and increase font size
     cbar = plt.colorbar(c, ax=ax, ticks=[0, 1, 2, 3])
-    cbar.set_label("Pursuer Mahalanobis Distance", fontsize=26)
-    cbar.ax.tick_params(labelsize=24)
+    cbar.set_label("Pursuer Std Dev", fontsize=16)
+    cbar.ax.tick_params(labelsize=16)
 
 
 def plotEngagementZone(agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax):
@@ -432,31 +432,35 @@ def main():
 
         mcAx = axes[1][case]
     # mcFig,mcAx = plt.subplots(1,1)
-        mcEz = plotMCProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, mcAx)
+        # mcEz = plotMCProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, mcAx)
         plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,mcAx)   
         mcAx.set_xlabel("X")
         mcAx.set_ylabel("Y")
+        mcAx.set_aspect('equal')
 
 
         if np.any(pursuerPositionCov):
-            plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
+
+          plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
 
 
         # linFig,linAx = plt.subplots(1,1)
         linAx = axes[0][case]
-        linPez = plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,linAx)
+        
+        linAx.set_aspect('equal')
+        # linPez = plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,linAx)
         plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,linAx)   
         linAx.set_xlabel("X")
         linAx.set_ylabel("Y")
         if np.any(pursuerPositionCov):
-            plotMalhalanobisDistance(pursuerInitialPosition, pursuerPositionCov, linAx)
+           plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, linAx)
 
 
         
-        mse = np.sqrt(np.mean((mcEz - linPez)**2))
-        print(mse)
-        absPercentError = np.mean(np.abs(mcEz - linPez))
-        print("Absolute Percent Error: ", absPercentError)
+        # mse = np.sqrt(np.mean((mcEz - linPez)**2))
+        # print(mse)
+        # absPercentError = np.mean(np.abs(mcEz - linPez))
+        # print("Absolute Percent Error: ", absPercentError)
     
     
     cols = ['Case 1', 'Case 2', 'Case 3', 'Case 4']
@@ -466,6 +470,7 @@ def main():
     for ax, row in zip(axes[:,0], rows):
         ax.set_ylabel(row, rotation=90,fontsize = 20)
 
+    plt.tight_layout()
     plt.show()
     
 
