@@ -49,7 +49,7 @@ def plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuer
     else:
         cmap = 'viridis'
         cbarLabel = "Engagement Zone Probability"
-        plotMalhalanobisDistance(pursuerPosition, pursuerPositionCov, ax)
+        plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax)
         
 
     c = ax.scatter(x, y, c = pez, cmap = cmap,s=4)
