@@ -27,8 +27,8 @@ def plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuer
         ax.set_title(f"Deterministic", fontsize=20)
     else:
         ax.set_title(f"PEZ Limit: {pez_constraint_limit}", fontsize=20)
-    ax.set_xlabel("x", fontsize=16)
-    ax.set_ylabel("y", fontsize=16)
+    ax.set_xlabel("X", fontsize=16)
+    ax.set_ylabel("Y", fontsize=16)
     ax.tick_params(axis='x', labelsize=16)
     ax.tick_params(axis='y', labelsize=16)
     
@@ -68,8 +68,8 @@ def plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuer
     c = plt.Circle(pursuerPosition, pursuerRange+pursuerCaptureRange, fill=False)
     plt.scatter(pursuerPosition[0], pursuerPosition[1], c='r')
     ax.add_artist(c)
-    plt.xlabel("x")
-    plt.ylabel("y")
+    plt.xlabel("X")
+    plt.ylabel("Y")
 
 def evaluate_spline(controlPoints, knotPoints):
     knotPoints = knotPoints.reshape((-1,))
@@ -378,7 +378,6 @@ def main():
     useProbabalistic = True
 
     fig,axes = plt.subplots(2,3,layout='constrained')
-    fig.set_size_inches(15,10)
 
     for pez_constraint_limit in pez_constraint_limit_list:
         axis = axes.flatten()[pez_constraint_limit_list.index(pez_constraint_limit)]

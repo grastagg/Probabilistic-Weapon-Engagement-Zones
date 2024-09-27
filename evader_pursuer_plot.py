@@ -1,6 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Polygon, Arc
+import matplotlib
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
 
 # Function to draw a more realistic and larger airplane shape
 def draw_airplane(ax, position, color='red', size=1.5, angle=0):
