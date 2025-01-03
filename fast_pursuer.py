@@ -8,8 +8,10 @@ import time
 from jax import jit
 import jax
 from jax import vmap
+
 jax.config.update("jax_enable_x64", True)
 from jax.lib import xla_bridge
+
 jax.default_device(jax.devices("cpu")[0])
 print(xla_bridge.get_backend().platform)
 
@@ -17,9 +19,9 @@ print(xla_bridge.get_backend().platform)
 from math import erf, sqrt
 from math import erfc
 import matplotlib
-matplotlib.rcParams['pdf.fonttype'] = 42
-matplotlib.rcParams['ps.fonttype'] = 42
 
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
 
 
 # pursuerRange = .8
@@ -28,22 +30,51 @@ matplotlib.rcParams['ps.fonttype'] = 42
 # agentSpeed = .9
 
 
-def inEngagementZone(agentPosition,agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed):
-    rotationMinusHeading = np.array([[np.cos(agentHeading), np.sin(agentHeading)], [-np.sin(agentHeading), np.cos(agentHeading)]])
-    pursuerPositionHat = rotationMinusHeading@(pursuerPosition - pursuerPosition)
-    agentPositionHat = rotationMinusHeading@(agentPosition - pursuerPosition)
+def inEngagementZone(
+    agentPosition,
+    agentHeading,
+    pursuerPosition,
+    pursuerRange,
+    pursuerCaptureRange,
+    pursuerSpeed,
+    agentSpeed,
+):
+    rotationMinusHeading = np.array(
+        [
+            [np.cos(agentHeading), np.sin(agentHeading)],
+            [-np.sin(agentHeading), np.cos(agentHeading)],
+        ]
+    )
+    pursuerPositionHat = rotationMinusHeading @ (pursuerPosition - pursuerPosition)
+    agentPositionHat = rotationMinusHeading @ (agentPosition - pursuerPosition)
 
     speedRatio = agentSpeed / pursuerSpeed
     distance = np.linalg.norm(agentPosition - pursuerPosition)
     # epsilon = agentHeading + np.arctan2(agentPosition[1] - pursuerPosition[1], pursuerPosition[0] - agentPosition[0])
     # epsilon = np.arctan2(agentPositionHat[1] - pursuerPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
-    epsilon = np.arctan2(pursuerPositionHat[1] - agentPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
+    epsilon = np.arctan2(
+        pursuerPositionHat[1] - agentPositionHat[1],
+        pursuerPositionHat[0] - agentPositionHat[0],
+    )
     # print(epsilon)
-    rho = speedRatio*pursuerRange*(np.cos(epsilon) + np.sqrt(np.cos(epsilon)**2 - 1+(pursuerRange+pursuerCaptureRange)**2/(speedRatio**2*pursuerRange**2)))
-    
+    rho = (
+        speedRatio
+        * pursuerRange
+        * (
+            np.cos(epsilon)
+            + np.sqrt(
+                np.cos(epsilon) ** 2
+                - 1
+                + (pursuerRange + pursuerCaptureRange) ** 2
+                / (speedRatio**2 * pursuerRange**2)
+            )
+        )
+    )
+
     # return distance < rho
     return distance - rho
     # return rho
+
 
 def plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
     # Define the grid
@@ -53,37 +84,60 @@ def plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
 
     # Stack X, Y coordinates into a single array
     points = np.stack([X.ravel(), Y.ravel()]).T
-    
+
     # Compute the inverse of the covariance matrix
     inv_cov = np.linalg.inv(pursuerPositionCov)
-    
+
     # Compute Mahalanobis distance for each point (vectorized)
     delta = points - pursuerPosition.T
-    malhalanobisDistance = np.sqrt(np.einsum('ij,jk,ik->i', delta, inv_cov, delta))
+    malhalanobisDistance = np.sqrt(np.einsum("ij,jk,ik->i", delta, inv_cov, delta))
     malhalanobisDistance = malhalanobisDistance.reshape(X.shape)
-    
+
     # Specify darker shades of red
-    colors = ['#CC0000', '#FF6666','#FFCCCC' ] 
-    
+    colors = ["#CC0000", "#FF6666", "#FFCCCC"]
+
     # Plot filled contours for Mahalanobis distance with darker red shades
-    c = ax.contourf(X, Y, malhalanobisDistance, levels=[0, 1, 2, 3], colors=colors, alpha=0.75)
-    
+    c = ax.contourf(
+        X, Y, malhalanobisDistance, levels=[0, 1, 2, 3], colors=colors, alpha=0.75
+    )
+
     # Mark the pursuer position with a dark red dot
-    ax.scatter(pursuerPosition[0], pursuerPosition[1], color='darkred', label='Pursuer Position')
-    
+    ax.scatter(
+        pursuerPosition[0],
+        pursuerPosition[1],
+        color="darkred",
+        label="Pursuer Position",
+    )
+
     # Add a color bar and increase font size
-    cbar = plt.colorbar(c, ax=ax, ticks=[0, 1, 2, 3],shrink=0.8)
+    cbar = plt.colorbar(c, ax=ax, ticks=[0, 1, 2, 3], shrink=0.8)
     cbar.set_label("Pursuer Std Dev", fontsize=16)
     cbar.ax.tick_params(labelsize=16)
 
 
-def plotEngagementZone(agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,ax):
+def plotEngagementZone(
+    agentHeading,
+    pursuerPosition,
+    pursuerRange,
+    pursuerCaptureRange,
+    pursuerSpeed,
+    agentSpeed,
+    ax,
+):
     x = np.linspace(-2, 2, 50)
     y = np.linspace(-2, 2, 50)
     [X, Y] = np.meshgrid(x, y)
     agentPositions = jnp.vstack([X.ravel(), Y.ravel()]).T
     agentHeadings = jnp.ones(agentPositions.shape[0]) * agentHeading
-    engagementZonePlot = inEngagementZoneJaxVectorized(agentPositions, agentHeadings, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
+    engagementZonePlot = inEngagementZoneJaxVectorized(
+        agentPositions,
+        agentHeadings,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRange,
+        pursuerSpeed,
+        agentSpeed,
+    )
 
     # engagementZonePlot = np.zeros(X.shape)
 
@@ -95,10 +149,9 @@ def plotEngagementZone(agentHeading, pursuerPosition, pursuerRange, pursuerCaptu
     # c = plt.Circle([0,0], pursuerRange+pursuerCaptureRange, fill=False)
     # ax.add_artist(c)
     # plt.contour(X, Y, engagementZonePlot, levels=[0, 1], colors=['red'])
-    ax.contour(X, Y, engagementZonePlot.reshape((50,50)), levels=[0], colors=['red'])
-    ax.scatter(pursuerPosition[0], pursuerPosition[1], color='red')
+    ax.contour(X, Y, engagementZonePlot.reshape((50, 50)), levels=[0], colors=["red"])
+    ax.scatter(pursuerPosition[0], pursuerPosition[1], color="red")
 
-    
     return
 
 
@@ -107,79 +160,202 @@ def analytic_epsilonJac(agentPositionHat, pursuerPositionHat):
     x_p = pursuerPositionHat[0]
     y_a = agentPositionHat[1]
     x_a = agentPositionHat[0]
-    epsilonJac = np.zeros((1,2))
-    epsilonJac[0][0] = (-(y_p-y_a)/((x_p-x_a)**2*((y_p-y_a)**2/(x_p-x_a)**2+1)))[0]
-    epsilonJac[0][1] = (1/((x_p-x_a)*((y_p-y_a)**2/(x_p-x_a)**2+1)))[0]
-    
-    return epsilonJac.squeeze() 
+    epsilonJac = np.zeros((1, 2))
+    epsilonJac[0][0] = (
+        -(y_p - y_a) / ((x_p - x_a) ** 2 * ((y_p - y_a) ** 2 / (x_p - x_a) ** 2 + 1))
+    )[0]
+    epsilonJac[0][1] = (1 / ((x_p - x_a) * ((y_p - y_a) ** 2 / (x_p - x_a) ** 2 + 1)))[
+        0
+    ]
+
+    return epsilonJac.squeeze()
+
 
 def analytic_rhoJac(epsilon, speedRatio, pursuerRange, pursuerCaptureRange):
-    return (pursuerRange*speedRatio*(-(np.cos(epsilon)*np.sin(epsilon))/np.sqrt(np.cos(epsilon)**2+(pursuerCaptureRange+pursuerRange)**2/(pursuerRange**2*speedRatio**2)-1)-np.sin(epsilon))).squeeze()
+    return (
+        pursuerRange
+        * speedRatio
+        * (
+            -(np.cos(epsilon) * np.sin(epsilon))
+            / np.sqrt(
+                np.cos(epsilon) ** 2
+                + (pursuerCaptureRange + pursuerRange) ** 2
+                / (pursuerRange**2 * speedRatio**2)
+                - 1
+            )
+            - np.sin(epsilon)
+        )
+    ).squeeze()
+
 
 def analytic_distJac(agentPosition, pursuerPosition):
-    return -(agentPosition - pursuerPosition)/np.linalg.norm(agentPosition - pursuerPosition)
+    return -(agentPosition - pursuerPosition) / np.linalg.norm(
+        agentPosition - pursuerPosition
+    )
 
 
-def probabalisticEngagementZone(agentPosition, agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed):
+def probabalisticEngagementZone(
+    agentPosition,
+    agentHeading,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerRange,
+    pursuerCaptureRange,
+    pursuerSpeed,
+    agentSpeed,
+):
     start = time.time()
-    rotationMinusHeading = np.array([[np.cos(agentHeading), np.sin(agentHeading)], [-np.sin(agentHeading), np.cos(agentHeading)]])
+    rotationMinusHeading = np.array(
+        [
+            [np.cos(agentHeading), np.sin(agentHeading)],
+            [-np.sin(agentHeading), np.cos(agentHeading)],
+        ]
+    )
 
-    pursuerPositionHat = rotationMinusHeading@(pursuerPosition - pursuerPosition)
-    agentPositionHat = rotationMinusHeading@(agentPosition - pursuerPosition)
-    epsilon = np.arctan2(pursuerPositionHat[1] - agentPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
+    pursuerPositionHat = rotationMinusHeading @ (pursuerPosition - pursuerPosition)
+    agentPositionHat = rotationMinusHeading @ (agentPosition - pursuerPosition)
+    epsilon = np.arctan2(
+        pursuerPositionHat[1] - agentPositionHat[1],
+        pursuerPositionHat[0] - agentPositionHat[0],
+    )
 
     epsilonJac = analytic_epsilonJac(agentPositionHat, pursuerPositionHat)
     speedRatio = agentSpeed / pursuerSpeed
-    
-    rho = speedRatio*pursuerRange*(np.cos(epsilon) + np.sqrt(np.cos(epsilon)**2 - 1+(pursuerRange+pursuerCaptureRange)**2/(speedRatio**2*pursuerRange**2)))
-    
+
+    rho = (
+        speedRatio
+        * pursuerRange
+        * (
+            np.cos(epsilon)
+            + np.sqrt(
+                np.cos(epsilon) ** 2
+                - 1
+                + (pursuerRange + pursuerCaptureRange) ** 2
+                / (speedRatio**2 * pursuerRange**2)
+            )
+        )
+    )
+
     rhoJac = analytic_rhoJac(epsilon, speedRatio, pursuerRange, pursuerCaptureRange)
 
     dist = np.linalg.norm(agentPosition - pursuerPosition)
     distJac = analytic_distJac(agentPosition, pursuerPosition)
-    
-    
-    overallJac = (distJac).reshape((-1,1)).squeeze() -(rotationMinusHeading.T@epsilonJac*rhoJac).squeeze()
+
+    overallJac = (distJac).reshape((-1, 1)).squeeze() - (
+        rotationMinusHeading.T @ epsilonJac * rhoJac
+    ).squeeze()
 
     mean = dist - rho
-    cov = overallJac@pursuerPositionCov@overallJac.T
+    cov = overallJac @ pursuerPositionCov @ overallJac.T
 
     diffDistribution = norm(mean, np.sqrt(cov))
-    
+
     return diffDistribution.cdf(0)
 
+
 @jit
-def inEngagementZoneJax(agentPosition,agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed):
-    rotationMinusHeading = jnp.array([[jnp.cos(agentHeading), jnp.sin(agentHeading)], [-jnp.sin(agentHeading), jnp.cos(agentHeading)]])
-    pursuerPositionHat = rotationMinusHeading@(pursuerPosition - pursuerPosition)
-    agentPositionHat = rotationMinusHeading@(agentPosition - pursuerPosition)
+def inEngagementZoneJax(
+    agentPosition,
+    agentHeading,
+    pursuerPosition,
+    pursuerRange,
+    pursuerCaptureRange,
+    pursuerSpeed,
+    agentSpeed,
+):
+    rotationMinusHeading = jnp.array(
+        [
+            [jnp.cos(agentHeading), jnp.sin(agentHeading)],
+            [-jnp.sin(agentHeading), jnp.cos(agentHeading)],
+        ]
+    )
+    pursuerPositionHat = rotationMinusHeading @ (pursuerPosition - pursuerPosition)
+    agentPositionHat = rotationMinusHeading @ (agentPosition - pursuerPosition)
 
     speedRatio = agentSpeed / pursuerSpeed
     distance = jnp.linalg.norm(agentPosition - pursuerPosition)
     # epsilon = agentHeading + np.arctan2(agentPosition[1] - pursuerPosition[1], pursuerPosition[0] - agentPosition[0])
     # epsilon = np.arctan2(agentPositionHat[1] - pursuerPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
-    epsilon = jnp.arctan2(pursuerPositionHat[1] - agentPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
+    epsilon = jnp.arctan2(
+        pursuerPositionHat[1] - agentPositionHat[1],
+        pursuerPositionHat[0] - agentPositionHat[0],
+    )
     # print(epsilon)
-    rho = speedRatio*pursuerRange*(jnp.cos(epsilon) + jnp.sqrt(jnp.cos(epsilon)**2 - 1+(pursuerRange+pursuerCaptureRange)**2/(speedRatio**2*pursuerRange**2)))
-    
+    rho = (
+        speedRatio
+        * pursuerRange
+        * (
+            jnp.cos(epsilon)
+            + jnp.sqrt(
+                jnp.cos(epsilon) ** 2
+                - 1
+                + (pursuerRange + pursuerCaptureRange) ** 2
+                / (speedRatio**2 * pursuerRange**2)
+            )
+        )
+    )
+
     # return distnce < rho
     # jax.debug.print("agen: {x}", x=rho)
-    return (distance - rho[0])
+    return distance - rho[0]
 
-def inEngagementZoneJaxVectorized(agentPositions,agentHeadings, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed):
-    single_agent_prob = lambda agentPosition, agentHeading: inEngagementZoneJax(agentPosition.reshape(-1,1), agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
-        # agentPosition = agentPosition.reshape(-1, 1)
+
+def inEngagementZoneJaxVectorized(
+    agentPositions,
+    agentHeadings,
+    pursuerPosition,
+    pursuerRange,
+    pursuerCaptureRange,
+    pursuerSpeed,
+    agentSpeed,
+):
+    single_agent_prob = lambda agentPosition, agentHeading: inEngagementZoneJax(
+        agentPosition.reshape(-1, 1),
+        agentHeading,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRange,
+        pursuerSpeed,
+        agentSpeed,
+    )
+    # agentPosition = agentPosition.reshape(-1, 1)
     return vmap(single_agent_prob)(agentPositions, agentHeadings)
 
 
-    
 # @jit
-def probabalisticEngagementZoneTemp(agentPosition, agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,dPezDPursuerPosition):
-    mean = inEngagementZoneJax(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
-    dPezDPursuerPositionJac = dPezDPursuerPosition(agentPosition,agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
-    cov = dPezDPursuerPositionJac@pursuerPositionCov@dPezDPursuerPositionJac.T
+def probabalisticEngagementZoneTemp(
+    agentPosition,
+    agentHeading,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerRange,
+    pursuerCaptureRange,
+    pursuerSpeed,
+    agentSpeed,
+    dPezDPursuerPosition,
+):
+    mean = inEngagementZoneJax(
+        agentPosition,
+        agentHeading,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRange,
+        pursuerSpeed,
+        agentSpeed,
+    ).squeeze()
+    dPezDPursuerPositionJac = dPezDPursuerPosition(
+        agentPosition,
+        agentHeading,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRange,
+        pursuerSpeed,
+        agentSpeed,
+    ).squeeze()
+    cov = dPezDPursuerPositionJac @ pursuerPositionCov @ dPezDPursuerPositionJac.T
     diffDistribution = norm(mean, np.sqrt(cov))
     return diffDistribution.cdf(0)
+
 
 dPezDPursuerPosition = jacfwd(inEngagementZoneJax, argnums=2)
 dPezDAgentPosition = jacfwd(inEngagementZoneJax, argnums=0)
@@ -188,38 +364,109 @@ dPezDPursuerCaptureRange = jacfwd(inEngagementZoneJax, argnums=4)
 dPezDAgentHeading = jacfwd(inEngagementZoneJax, argnums=1)
 dPezDPusuerSpeed = jacfwd(inEngagementZoneJax, argnums=5)
 
-def probabalisticEngagementZoneVectorizedTemp(agentPositions, agentPositionCov, agentHeadings, agentHeadingVar, 
-                                              pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, 
-                                              pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pusuerSpeedVar, agentSpeed):
-    
+
+def probabalisticEngagementZoneVectorizedTemp(
+    agentPositions,
+    agentPositionCov,
+    agentHeadings,
+    agentHeadingVar,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerRange,
+    pursuerRangeVar,
+    pursuerCaptureRange,
+    pursuerCaptureRangeVar,
+    pursuerSpeed,
+    pusuerSpeedVar,
+    agentSpeed,
+):
     # Define vectorized operations with vmap
     def single_agent_prob(agentPosition, agentHeading):
         agentPosition = agentPosition.reshape(-1, 1)
-        
+
         # Calculate the mean for the engagement zone
-        mean = inEngagementZoneJax(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
+        mean = inEngagementZoneJax(
+            agentPosition,
+            agentHeading,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRange,
+            pursuerSpeed,
+            agentSpeed,
+        ).squeeze()
 
         # Calculate the Jacobian for the engagement zone
-        dPezDPursuerPositionJac = dPezDPursuerPosition(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
-        dPezDAgentPositionJac = dPezDAgentPosition(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
-        dPezDPursuerRangeJac = dPezDPursuerRange(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
-        dPezDPursuerCaptureRangeJac = dPezDPursuerCaptureRange(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
-        dPezDAgentHeadingJac = dPezDAgentHeading(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
-        dPezDPursuerSpeedJac = dPezDPusuerSpeed(agentPosition, agentHeading, pursuerPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed).squeeze()
+        dPezDPursuerPositionJac = dPezDPursuerPosition(
+            agentPosition,
+            agentHeading,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRange,
+            pursuerSpeed,
+            agentSpeed,
+        ).squeeze()
+        dPezDAgentPositionJac = dPezDAgentPosition(
+            agentPosition,
+            agentHeading,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRange,
+            pursuerSpeed,
+            agentSpeed,
+        ).squeeze()
+        dPezDPursuerRangeJac = dPezDPursuerRange(
+            agentPosition,
+            agentHeading,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRange,
+            pursuerSpeed,
+            agentSpeed,
+        ).squeeze()
+        dPezDPursuerCaptureRangeJac = dPezDPursuerCaptureRange(
+            agentPosition,
+            agentHeading,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRange,
+            pursuerSpeed,
+            agentSpeed,
+        ).squeeze()
+        dPezDAgentHeadingJac = dPezDAgentHeading(
+            agentPosition,
+            agentHeading,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRange,
+            pursuerSpeed,
+            agentSpeed,
+        ).squeeze()
+        dPezDPursuerSpeedJac = dPezDPusuerSpeed(
+            agentPosition,
+            agentHeading,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRange,
+            pursuerSpeed,
+            agentSpeed,
+        ).squeeze()
 
         # Compute the covariance matrix
-        cov = (dPezDPursuerPositionJac @ pursuerPositionCov @ dPezDPursuerPositionJac.T + 
-               dPezDAgentPositionJac @ agentPositionCov @ dPezDAgentPositionJac.T + 
-               dPezDPursuerRangeJac**2 * pursuerRangeVar + 
-               dPezDPursuerCaptureRangeJac**2 * pursuerCaptureRangeVar + 
-               dPezDAgentHeadingJac**2 * agentHeadingVar+
-                dPezDPursuerSpeedJac**2 * pusuerSpeedVar)
+        cov = (
+            dPezDPursuerPositionJac @ pursuerPositionCov @ dPezDPursuerPositionJac.T
+            + dPezDAgentPositionJac @ agentPositionCov @ dPezDAgentPositionJac.T
+            + dPezDPursuerRangeJac**2 * pursuerRangeVar
+            + dPezDPursuerCaptureRangeJac**2 * pursuerCaptureRangeVar
+            + dPezDAgentHeadingJac**2 * agentHeadingVar
+            + dPezDPursuerSpeedJac**2 * pusuerSpeedVar
+        )
 
         # Return the CDF at 0
         return jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(cov))
-    
+
     # Apply vectorization over agentPositions and agentHeadings
     return vmap(single_agent_prob)(agentPositions, agentHeadings)
+
 
 # def  probabalisticEngagementZoneVectorizedTemp(agentPositions,agentPositionCov, agentHeading,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed, agentSpeed, dPezDPursuerPosition, dPezDAgentPosition,dPezDPursuerRange,dPezDPursuerCaptureRange,dPezDAgentHeading):
 #     # Define vectorized operations with vmap
@@ -241,11 +488,11 @@ def probabalisticEngagementZoneVectorizedTemp(agentPositions, agentPositionCov, 
 #         # Define the normal distribution based on mean and covariance
 #         # diffDistribution = jax.scipy.stats.norm(mean, jnp.sqrt(cov))
 #         # jax.scipy.stats.norm.
-        
+
 #         # # Return the CDF at 0
 #         # return diffDistribution.cdf(0)
 #         return jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(cov))
-    
+
 
 #     # Apply vectorization over agentPositions
 #     return vmap(single_agent_prob)(agentPositions)
@@ -255,12 +502,12 @@ def probabalisticEngagementZoneVectorizedTemp(agentPositions, agentPositionCov, 
 
 #     dPezDPursuerPosition = jacfwd(inEngagementZoneJax, argnums=2)
 
-    
+
 #     engagementZonePlot = np.zeros(X.shape)
-    
+
 
 #     totalTime = 0
-    
+
 #     engagementZonePlot = probabalisticEngagementZoneVectorizedTemp(agentPositions, agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,dPezDPursuerPosition)
 #     # for i in range(X.shape[0]):
 #     #     print(i)
@@ -275,10 +522,25 @@ def probabalisticEngagementZoneVectorizedTemp(agentPositions, agentPositionCov, 
 #     # ax.add_artist(c)
 #     c = ax.contour(X, Y, engagementZonePlot.reshape(50,50), levels=np.linspace(0,1,11))
 #     ax.clabel(c, inline=True, fontsize=8)
-    
+
+
 #     return
-def plotProbablisticEngagementZone(agentPositionCov,agentHeading,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar,pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, ax):
-    ax.set_aspect('equal')
+def plotProbablisticEngagementZone(
+    agentPositionCov,
+    agentHeading,
+    agentHeadingVar,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerRange,
+    pursuerRangeVar,
+    pursuerCaptureRange,
+    pursuerCaptureRangeVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    agentSpeed,
+    ax,
+):
+    ax.set_aspect("equal")
 
     # Define the grid
     x = jnp.linspace(-2, 2, 50)
@@ -309,7 +571,7 @@ def plotProbablisticEngagementZone(agentPositionCov,agentHeading,agentHeadingVar
         pursuerCaptureRangeVar,
         pursuerSpeed,
         pursuerSpeedVar,
-        agentSpeed
+        agentSpeed,
     )
     print("total time: ", time.time() - start)
 
@@ -320,161 +582,290 @@ def plotProbablisticEngagementZone(agentPositionCov,agentHeading,agentHeadingVar
     engagementZonePlot_reshaped = engagementZonePlot_np.reshape(X.shape)
 
     # Plotting
-    c = ax.contour(X, Y, engagementZonePlot_reshaped, levels=np.linspace(.1, 1, 10))
+    c = ax.contour(X, Y, engagementZonePlot_reshaped, levels=np.linspace(0.1, 1, 10))
     ax.clabel(c, inline=True, fontsize=12)
-    ax.tick_params(axis='x', labelsize=16)
-    ax.tick_params(axis='y', labelsize=16)
-    
+    ax.tick_params(axis="x", labelsize=16)
+    ax.tick_params(axis="y", labelsize=16)
+
     # Add circle representing pursuer's range
     # for i in range(3):
     #     c = plt.Circle(pursuerPosition, pursuerRange + i*np.sqrt(pursuerRangeVar) + pursuerCaptureRange, fill=False, color='r', linestyle='--')
     #     ax.add_artist(c)
-    c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color='black')
+    c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
     ax.add_artist(c)
 
     return engagementZonePlot_reshaped
 
-def plotMCProbablisticEngagementZone(agentPositionCov,agentHeading,agentHeadingVar, pursuerPosition,pursuerPositionCov, pursuerRange,pursuerRangeCov, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,ax):
-    ax.set_aspect('equal')
+
+def plotMCProbablisticEngagementZone(
+    agentPositionCov,
+    agentHeading,
+    agentHeadingVar,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerRange,
+    pursuerRangeCov,
+    pursuerCaptureRange,
+    pursuerCaptureRangeVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    agentSpeed,
+    ax,
+):
+    ax.set_aspect("equal")
     x = np.linspace(-2, 2, 50)
     y = np.linspace(-2, 2, 50)
     [X, Y] = np.meshgrid(x, y)
 
-    
     malhalanobisDistance = np.zeros(X.shape)
     engagementZonePlot = np.zeros(X.shape)
 
     numMcTrials = 2000
     # numMcTrials = 20
 
-    pursuerPositionSamples = np.random.multivariate_normal(pursuerPosition.squeeze(), pursuerPositionCov, numMcTrials)
-    pursuerRangeSamples = np.random.normal(pursuerRange, np.sqrt(pursuerRangeCov), numMcTrials)
-    pursuerCaptureRangeSamples = np.random.normal(pursuerCaptureRange, np.sqrt(pursuerCaptureRangeVar), numMcTrials)
-    agentHeadingSamples = np.random.normal(agentHeading, np.sqrt(agentHeadingVar), numMcTrials)
-    pursuerSpeedSamples = np.random.normal(pursuerSpeed, np.sqrt(pursuerSpeedVar), numMcTrials)
-    
+    pursuerPositionSamples = np.random.multivariate_normal(
+        pursuerPosition.squeeze(), pursuerPositionCov, numMcTrials
+    )
+    pursuerRangeSamples = np.random.normal(
+        pursuerRange, np.sqrt(pursuerRangeCov), numMcTrials
+    )
+    pursuerCaptureRangeSamples = np.random.normal(
+        pursuerCaptureRange, np.sqrt(pursuerCaptureRangeVar), numMcTrials
+    )
+    agentHeadingSamples = np.random.normal(
+        agentHeading, np.sqrt(agentHeadingVar), numMcTrials
+    )
+    pursuerSpeedSamples = np.random.normal(
+        pursuerSpeed, np.sqrt(pursuerSpeedVar), numMcTrials
+    )
 
     for i in range(X.shape[0]):
         print(i)
         for j in range(X.shape[1]):
             # engagementZonePlot[i, j] = probabalisticEngagementZone(np.array([[X[i,j]],[Y[i,j]]]), agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
-            agentPositionSamples = np.random.multivariate_normal(np.array([[X[i,j]],[Y[i,j]]]).squeeze(), agentPositionCov, numMcTrials)
-            engagementZonePlot[i, j] = monte_carlo_probalistic_engagment_zone(np.array([[X[i,j]],[Y[i,j]]]), agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, numMcTrials, pursuerPositionSamples,pursuerRangeSamples,pursuerCaptureRangeSamples,agentHeadingSamples,pursuerSpeedSamples,agentPositionSamples)
+            agentPositionSamples = np.random.multivariate_normal(
+                np.array([[X[i, j]], [Y[i, j]]]).squeeze(),
+                agentPositionCov,
+                numMcTrials,
+            )
+            engagementZonePlot[i, j] = monte_carlo_probalistic_engagment_zone(
+                np.array([[X[i, j]], [Y[i, j]]]),
+                agentHeading,
+                pursuerPosition,
+                pursuerPositionCov,
+                pursuerRange,
+                pursuerCaptureRange,
+                pursuerSpeed,
+                agentSpeed,
+                numMcTrials,
+                pursuerPositionSamples,
+                pursuerRangeSamples,
+                pursuerCaptureRangeSamples,
+                agentHeadingSamples,
+                pursuerSpeedSamples,
+                agentPositionSamples,
+            )
     # c = ax.pcolormesh(X, Y, engagementZonePlot)
     # c = plt.Circle(pursuerPosition, pursuerRange+pursuerCaptureRange, fill=False)
     # ax.add_artist(c)
-    c = ax.contour(X, Y, engagementZonePlot, levels=np.linspace(0.1,1,10))
+    c = ax.contour(X, Y, engagementZonePlot, levels=np.linspace(0.1, 1, 10))
     ax.clabel(c, inline=True, fontsize=12)
-    ax.tick_params(axis='x', labelsize=16)
-    ax.tick_params(axis='y', labelsize=16)
-    c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color='black')
+    ax.tick_params(axis="x", labelsize=16)
+    ax.tick_params(axis="y", labelsize=16)
+    c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
     ax.add_artist(c)
-    
+
     return engagementZonePlot
 
-def monte_carlo_probalistic_engagment_zone(agentPosition, agentHeading, pursuerPosition,pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, numMonteCarloTrials, pursurPositionSamples=None,pursuerRangeSamples=None,pursuerCaptureRangeSamples=None,agentHeadingSamples=None,pursuerSpeedSamples=None,agentPositionSamples=None): 
+
+def monte_carlo_probalistic_engagment_zone(
+    agentPosition,
+    agentHeading,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerRange,
+    pursuerCaptureRange,
+    pursuerSpeed,
+    agentSpeed,
+    numMonteCarloTrials,
+    pursurPositionSamples=None,
+    pursuerRangeSamples=None,
+    pursuerCaptureRangeSamples=None,
+    agentHeadingSamples=None,
+    pursuerSpeedSamples=None,
+    agentPositionSamples=None,
+):
     if pursurPositionSamples is None:
-        #randomly sample from the pursuer position distribution
-        pursurPositionSamples = np.random.multivariate_normal(pursuerPosition.squeeze(), pursuerPositionCov, numMonteCarloTrials)
-    #randomly sample from the pursuer position distribution
-    
+        # randomly sample from the pursuer position distribution
+        pursurPositionSamples = np.random.multivariate_normal(
+            pursuerPosition.squeeze(), pursuerPositionCov, numMonteCarloTrials
+        )
+    # randomly sample from the pursuer position distribution
+
     numInEngagementZone = 0
-    for i,pursuerPositionSample in enumerate(pursurPositionSamples):
-        pursuerPositionSample = pursuerPositionSample.reshape(-1,1)
+    for i, pursuerPositionSample in enumerate(pursurPositionSamples):
+        pursuerPositionSample = pursuerPositionSample.reshape(-1, 1)
 
-
-        ez = inEngagementZone(agentPositionSamples[i].reshape(-1,1), agentHeadingSamples[i], pursuerPositionSample, pursuerRangeSamples[i], pursuerCaptureRangeSamples[i], pursuerSpeedSamples[i], agentSpeed)
+        ez = inEngagementZone(
+            agentPositionSamples[i].reshape(-1, 1),
+            agentHeadingSamples[i],
+            pursuerPositionSample,
+            pursuerRangeSamples[i],
+            pursuerCaptureRangeSamples[i],
+            pursuerSpeedSamples[i],
+            agentSpeed,
+        )
         if ez < 0:
             numInEngagementZone += 1
-    
-    return numInEngagementZone/numMonteCarloTrials
-    
-    
-    
+
+    return numInEngagementZone / numMonteCarloTrials
 
 
 # probabalisticEngagementZone(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, np.array([[0.1, 0], [0, 0.1]]), pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
 # inEngagementZone(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
 
+
 def main():
     pursuerRange = 1.0
     pursuerRangeVar = 0.0
     pursuerCaptureRange = 0.1
-    pursuerCaptureRangeVar = 0.00
+    pursuerCaptureRangeVar = 0.1
     pursuerSpeed = 1.0
     pursuerSpeedVar = 0.0
-    agentSpeed = .5
+    agentSpeed = 0.5
 
     agentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
-    pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
+    pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
     pursuerInitialPosition = np.array([[0.0], [0.0]])
 
     agentInitialHeading = 0.0
     agentHeadingVar = 0.0
-    
 
-    
-    fig,axes = plt.subplots(2,4,layout='constrained')
+    mcFig, mcAx = plt.subplots(1, 1)
+    mcEz = plotMCProbablisticEngagementZone(
+        agentPositionCov,
+        agentInitialHeading,
+        agentHeadingVar,
+        pursuerInitialPosition,
+        pursuerPositionCov,
+        pursuerRange,
+        pursuerRangeVar,
+        pursuerCaptureRange,
+        pursuerCaptureRangeVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        agentSpeed,
+        mcAx,
+    )
+    plotEngagementZone(
+        agentInitialHeading,
+        pursuerInitialPosition,
+        pursuerRange,
+        pursuerCaptureRange,
+        pursuerSpeed,
+        agentSpeed,
+        mcAx,
+    )
+    mcAx.set_xlabel("X", fontsize=16)
+    mcAx.set_ylabel("Y", fontsize=16)
+    mcAx.set_aspect("equal")
+    mcAx.set_title("Monte Carlo PEZ")
+    linFig, linAx = plt.subplots(1, 1)
+    if np.any(pursuerPositionCov):
+        plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, linAx)
 
-
-    for case in range(4):
-        if case == 0:
-            pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
-        
-        elif case == 1:
-            pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
-            pursuerRangeVar = 0.2
-        elif case == 2:
-            pursuerRangeVar = 0.0
-            pursuerCaptureRangeVar = 0.02
-        elif case == 3:
-            pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
-            pursuerRangeVar = 0.2
-            pursuerCaptureRangeVar = 0.02
-
-
-        mcAx = axes[1][case]
-        if np.any(pursuerPositionCov):
-          plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
-    # mcFig,mcAx = plt.subplots(1,1)
-        mcEz = plotMCProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, mcAx)
-        plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,mcAx)   
-        mcAx.set_xlabel("X",fontsize = 16)
-        mcAx.set_ylabel("Y",fontsize = 16)
-        mcAx.set_aspect('equal')
-
-
-
-
-        # linFig,linAx = plt.subplots(1,1)
-        linAx = axes[0][case]
-        if np.any(pursuerPositionCov):
-           plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, linAx)
-        
-        linAx.set_aspect('equal')
-        linPez = plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,linAx)
-        plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,linAx)   
-        linAx.set_xlabel("X",fontsize = 16)
-        linAx.set_ylabel("Y",fontsize = 16)
-
-
-        
-        # mse = np.sqrt(np.mean((mcEz - linPez)**2))
-        # print(mse)
-        # absPercentError = np.mean(np.abs(mcEz - linPez))
-        # print("Absolute Percent Error: ", absPercentError)
-    
-    
-    cols = ['Case 1', 'Case 2', 'Case 3', 'Case 4']
-    rows = ['Linearized', 'Monte Carlo']
-    for ax, col in zip(axes[0], cols):
-        ax.set_title(col,fontsize = 20)
-    for ax, row in zip(axes[:,0], rows):
-        ax.set_ylabel(row, rotation=90,fontsize = 20)
-
-    # plt.tight_layout()
+    linAx.set_aspect("equal")
+    linPez = plotProbablisticEngagementZone(
+        agentPositionCov,
+        agentInitialHeading,
+        agentHeadingVar,
+        pursuerInitialPosition,
+        pursuerPositionCov,
+        pursuerRange,
+        pursuerRangeVar,
+        pursuerCaptureRange,
+        pursuerCaptureRangeVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        agentSpeed,
+        linAx,
+    )
+    plotEngagementZone(
+        agentInitialHeading,
+        pursuerInitialPosition,
+        pursuerRange,
+        pursuerCaptureRange,
+        pursuerSpeed,
+        agentSpeed,
+        linAx,
+    )
+    linAx.set_xlabel("X", fontsize=16)
+    linAx.set_ylabel("Y", fontsize=16)
+    linAx.set_title("Linearized PEZ")
     plt.show()
-    
+    #
+    # fig,axes = plt.subplots(2,4,layout='constrained')
+    #
+    #
+    # for case in range(4):
+    #     if case == 0:
+    #         pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
+    #
+    #     elif case == 1:
+    #         pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
+    #         pursuerRangeVar = 0.2
+    #     elif case == 2:
+    #         pursuerRangeVar = 0.0
+    #         pursuerCaptureRangeVar = 0.02
+    #     elif case == 3:
+    #         pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
+    #         pursuerRangeVar = 0.2
+    #         pursuerCaptureRangeVar = 0.02
+    #
+    #
+    #     mcAx = axes[1][case]
+    #     if np.any(pursuerPositionCov):
+    #       plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
+    # # mcFig,mcAx = plt.subplots(1,1)
+    #     mcEz = plotMCProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, mcAx)
+    #     plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,mcAx)
+    #     mcAx.set_xlabel("X",fontsize = 16)
+    #     mcAx.set_ylabel("Y",fontsize = 16)
+    #     mcAx.set_aspect('equal')
+    #
+    #
+    #
+    #
+    #     # linFig,linAx = plt.subplots(1,1)
+    #     linAx = axes[0][case]
+    #     if np.any(pursuerPositionCov):
+    #        plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, linAx)
+    #
+    #     linAx.set_aspect('equal')
+    #     linPez = plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,linAx)
+    #     plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,linAx)
+    #     linAx.set_xlabel("X",fontsize = 16)
+    #     linAx.set_ylabel("Y",fontsize = 16)
+    #
+    #
+    #
+    #     # mse = np.sqrt(np.mean((mcEz - linPez)**2))
+    #     # print(mse)
+    #     # absPercentError = np.mean(np.abs(mcEz - linPez))
+    #     # print("Absolute Percent Error: ", absPercentError)
+    #
+    #
+    # cols = ['Case 1', 'Case 2', 'Case 3', 'Case 4']
+    # rows = ['Linearized', 'Monte Carlo']
+    # for ax, col in zip(axes[0], cols):
+    #     ax.set_title(col,fontsize = 20)
+    # for ax, row in zip(axes[:,0], rows):
+    #     ax.set_ylabel(row, rotation=90,fontsize = 20)
+    #
+    # # plt.tight_layout()
+    # plt.show()
+    #
+
 
 if __name__ == "__main__":
     main()
