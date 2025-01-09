@@ -100,6 +100,7 @@ def plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
     c = ax.contourf(
         X, Y, malhalanobisDistance, levels=[0, 1, 2, 3], colors=colors, alpha=0.75
     )
+    # c = ax.pcolormesh(X, Y, malhalanobisDistance)
 
     # Mark the pursuer position with a dark red dot
     ax.scatter(
@@ -111,8 +112,8 @@ def plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
 
     # Add a color bar and increase font size
     cbar = plt.colorbar(c, ax=ax, ticks=[0, 1, 2, 3], shrink=0.8)
-    cbar.set_label("Pursuer Std Dev", fontsize=16)
-    cbar.ax.tick_params(labelsize=16)
+    cbar.set_label("Pursuer Std Dev", fontsize=26)
+    cbar.ax.tick_params(labelsize=26)
 
 
 def plotEngagementZone(
