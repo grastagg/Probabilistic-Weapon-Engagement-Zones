@@ -49,6 +49,8 @@ def inEngagementZone(
     agentPositionHat = rotationMinusHeading @ (agentPosition - pursuerPosition)
 
     speedRatio = agentSpeed / pursuerSpeed
+    # print("agentPosition not jax: ", agentPosition)
+    # print("pursuerPosition not jax: ", pursuerPosition)
     distance = np.linalg.norm(agentPosition - pursuerPosition)
     # epsilon = agentHeading + np.arctan2(agentPosition[1] - pursuerPosition[1], pursuerPosition[0] - agentPosition[0])
     # epsilon = np.arctan2(agentPositionHat[1] - pursuerPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
@@ -72,6 +74,8 @@ def inEngagementZone(
     )
 
     # return distance < rho
+    # print("rho not jax: ", rho)
+    # print("distance not jax: ", distance)
     return distance - rho
     # return rho
 
@@ -274,6 +278,8 @@ def inEngagementZoneJax(
     agentPositionHat = rotationMinusHeading @ (agentPosition - pursuerPosition)
 
     speedRatio = agentSpeed / pursuerSpeed
+    # jax.debug.print("agentPosition jax: {x}", x=agentPosition)
+    # jax.debug.print("pursuerPosition jax: {x}", x=pursuerPosition)
     distance = jnp.linalg.norm(agentPosition - pursuerPosition)
     # epsilon = agentHeading + np.arctan2(agentPosition[1] - pursuerPosition[1], pursuerPosition[0] - agentPosition[0])
     # epsilon = np.arctan2(agentPositionHat[1] - pursuerPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
@@ -297,8 +303,10 @@ def inEngagementZoneJax(
     )
 
     # return distnce < rho
-    # jax.debug.print("agen: {x}", x=rho)
-    return distance - rho[0]
+    # jax.debug.print("rho jax: {x}", x=rho)
+    # jax.debug.print("distance jax: {x}", x=distance)
+    # return distance - rho[0]
+    return distance - rho
 
 
 def inEngagementZoneJaxVectorized(
@@ -311,7 +319,7 @@ def inEngagementZoneJaxVectorized(
     agentSpeed,
 ):
     single_agent_prob = lambda agentPosition, agentHeading: inEngagementZoneJax(
-        agentPosition.reshape(-1, 1),
+        agentPosition,
         agentHeading,
         pursuerPosition,
         pursuerRange,
