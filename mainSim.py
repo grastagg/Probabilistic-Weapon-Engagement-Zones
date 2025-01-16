@@ -7,11 +7,19 @@ from pursuer import fastPursuer
 # run main if main
 if __name__ == "__main__":
     # initialize the sacrificial agent
-    sacrificial = sacrificialAgent(1, np.array([0, 0, 0]))
-    pursuerSpeed = 2
-    pursuer = fastPursuer(pursuerSpeed, np.array([1, 1, 0]), 1, 0.1, type="proNav")
-    pursuer2 = fastPursuer(
-        pursuerSpeed, np.array([1, 1, 0]), 1, 0.1, type="proportional"
+    agentSpeed = 1
+    agentInitialPosition = np.array([-0.5, 0.9, 0])
+    sacrificial = sacrificialAgent(agentSpeed, agentInitialPosition)
+    pursuerSpeed = 4
+    pursuerInitialPosition = np.array([0, 0, np.pi / 2])
+    pursuerRange = 1
+    pursuerCaptureRadis = 0.1
+    pursuer = fastPursuer(
+        pursuerSpeed,
+        pursuerInitialPosition,
+        pursuerRange,
+        pursuerCaptureRadis,
+        type="proportional",
     )
     time = 0
     dt = 0.001
@@ -20,30 +28,26 @@ if __name__ == "__main__":
     turnRate = 0.0
     poses = []
     pursuerPoses = []
-    pursuer2Poses = []
 
     captured = pursuer.check_collision(sacrificial.pose)
+    pursuerRangeCheck = pursuer.check_range()
 
-    while time < endTime and not captured:
+    while time < endTime and not captured and pursuerRangeCheck:
         pose = sacrificial.update(speed, turnRate, dt)
         pursuerPose = pursuer.update(pursuer.pose, dt, sacrificial.pose, speed)
-        pursuer2Pose = pursuer2.update(pursuer2.pose, dt, sacrificial.pose, speed)
         poses.append(pose)
         pursuerPoses.append(pursuerPose)
-        pursuer2Poses.append(pursuer2Pose)
-        captured = pursuer2.check_collision(
-            sacrificial.pose
-        ) or pursuer.check_collision(sacrificial.pose)
+        pursuer.check_collision(sacrificial.pose)
+        pursuerRangeCheck = pursuer.check_range()
         time += dt
+    print("Captured: ", captured)
+    print("max range: ", not pursuerRangeCheck)
 
     # plot the poses
     poses = np.array(poses)
     pursuerPoses = np.array(pursuerPoses)
-    pursuer2Poses = np.array(pursuer2Poses)
-    print(pursuerPoses)
     plt.plot(poses[:, 0], poses[:, 1], "b", label="Evader")
     plt.plot(pursuerPoses[:, 0], pursuerPoses[:, 1], "r", label=pursuer.type)
-    plt.plot(pursuer2Poses[:, 0], pursuer2Poses[:, 1], "g", label=pursuer2.type)
     plt.legend()
 
     plt.figure(figsize=(8, 6))

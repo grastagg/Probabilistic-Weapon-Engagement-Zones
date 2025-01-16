@@ -9,7 +9,8 @@ class fastPursuer:
         self.range = range
         self.captureRadius = captureRadius
 
-        self.maxTurnRate = 2.0
+        turnRadus = 0.5
+        self.maxTurnRate = speed / turnRadus
 
         self.distanceTravelled = 0
 
@@ -27,8 +28,12 @@ class fastPursuer:
         newPose[1] = pose[1] + self.speed * np.sin(pose[2]) * dt
         newPose[2] = pose[2] + omega * dt
         self.pose = newPose
+        self.distanceTravelled += self.speed * dt
 
         return newPose
+
+    def check_range(self):
+        return self.distanceTravelled < self.range
 
     def proportional_guidance_control(self, pose, targetPose):
         angleToTarget = np.arctan2(targetPose[1] - pose[1], targetPose[0] - pose[0])

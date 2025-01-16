@@ -56,42 +56,6 @@ def find_clockwise_tangent_point(p1, c, r):
     return pt
 
 
-def temp_BEZ(
-    startPosition,
-    pursuerRange,
-    captureRadius,
-    pursuerSpeed,
-    evaderSpeed,
-    evaPosition,
-    evaHeading,
-):
-    speedRatio = evaderSpeed / pursuerSpeed
-    goalPosition = evaPosition + speedRatio * pursuerRange * np.array(
-        [np.cos(evaHeading), np.sin(evaHeading)]
-    )
-    distanceToGoal = np.linalg.norm(goalPosition - startPosition)
-    # testJax = inEngagementZoneJax(
-    #     evaPosition,
-    #     evaHeading,
-    #     startPosition,
-    #     pursuerRange,
-    #     captureRadius,
-    #     pursuerSpeed,
-    #     evaderSpeed,
-    # )
-    # testNotJax = inEngagementZone(
-    #     evaPosition,
-    #     evaHeading,
-    #     startPosition,
-    #     pursuerRange,
-    #     captureRadius,
-    #     pursuerSpeed,
-    #     evaderSpeed,
-    # )
-    # return testJax
-    return distanceToGoal < (captureRadius + pursuerRange)
-
-
 def clockwise_angle(v1, v2):
     # Calculate determinant and dot product
     det = v1[0] * v2[1] - v1[1] * v2[0]
@@ -160,12 +124,6 @@ def find_dubins_path_length(startPosition, startHeading, goalPosition, radius):
         theta = clockwise_angle(v3, v4)
     else:
         theta = counterclockwise_angle(v3, v4)
-    # cosTheta = np.dot(v3, v4) / (np.linalg.norm(v3) * np.linalg.norm(v4))
-    # theta = np.arccos(cosTheta)
-    # if np.cross(v3, v4) < 0:
-    #     print("TEST")
-    #     theta = 2 * np.pi - theta
-    # print("Theta: ", theta)
 
     straitLineLength = np.linalg.norm(goalPosition - tangentPoint)
     arcLength = radius * np.abs(theta)
@@ -254,7 +212,7 @@ def plot_dubins_engagement_zone(
     y = np.linspace(-2, 2, numPoints)
     [X, Y] = np.meshgrid(x, y)
     Z = np.zeros(X.shape)
-    collisionRegion = np.zeros(X.shape)
+    # collisionRegion = np.zeros(X.shape)
 
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
@@ -269,25 +227,15 @@ def plot_dubins_engagement_zone(
                 evaderHeading,
                 evaderSpeed,
             )
-            collisionRegion[i, j] = collision_region(
-                startPosition,
-                startHeading,
-                turnRadius,
-                captureRadius,
-                pursuerRange,
-                pursuerSpeed,
-                evaderSpeed,
-                np.array([X[i, j], Y[i, j]]),
-            )
-
-            # Z[i, j] = temp_BEZ(
+            # collisionRegion[i, j] = collision_region(
             #     startPosition,
-            #     pursuerRange,
+            #     startHeading,
+            #     turnRadius,
             #     captureRadius,
+            #     pursuerRange,
             #     pursuerSpeed,
             #     evaderSpeed,
             #     np.array([X[i, j], Y[i, j]]),
-            #     0,
             # )
 
     plt.figure()
@@ -314,13 +262,13 @@ def plot_dubins_engagement_zone(
     rightY = rightCenter[1] + turnRadius * np.sin(theta)
     plt.plot(leftX, leftY, "b")
     plt.plot(rightX, rightY, "b")
-    plt.contour(X, Y, collisionRegion, levels=[0])
+    # plt.contour(X, Y, collisionRegion, levels=[0])
     return ax
 
 
 def main():
     startPosition = np.array([0, 0])
-    startHeading = 0
+    startHeading = np.pi / 4
     turnRadius = 0.5
     captureRadius = 0.1
     pursuerRange = 1
