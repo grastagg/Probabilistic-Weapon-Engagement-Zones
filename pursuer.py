@@ -11,10 +11,13 @@ class fastPursuer:
 
         turnRadus = 0.5
         self.maxTurnRate = speed / turnRadus
+        print("max turn rate: ", self.maxTurnRate)
 
         self.distanceTravelled = 0
 
         self.losHistory = []
+
+        self.targetPoint = None
 
     def update(self, pose, dt, targetPose, targetSpeed):
         newPose = np.zeros(3)
@@ -23,6 +26,10 @@ class fastPursuer:
             omega = self.pronav_control(pose, targetPose, targetSpeed)
         if self.type == "proportional":
             omega = self.proportional_guidance_control(pose, targetPose)
+        if self.type == "collision":
+            omega = self.collision_course_control(
+                pose, targetPose, targetPose[2], targetSpeed
+            )
         omega = np.clip(omega, -self.maxTurnRate, self.maxTurnRate)
         newPose[0] = pose[0] + self.speed * np.cos(pose[2]) * dt
         newPose[1] = pose[1] + self.speed * np.sin(pose[2]) * dt
@@ -34,6 +41,29 @@ class fastPursuer:
 
     def check_range(self):
         return self.distanceTravelled < self.range
+
+    def collision_course_control(self, pose, targetPose, targetHeading, targetSpeed):
+        if self.targetPoint is None:
+            speedRatio = targetSpeed / self.speed
+            print("self.targetPoint: ", self.targetPoint)
+            print("targetSpeed: ", targetSpeed)
+            self.targetPoint = targetPose[0:2] + speedRatio * targetSpeed * np.array(
+                [np.cos(targetHeading), np.sin(targetHeading)]
+            )
+
+        desiredHeading = np.arctan2(
+            self.targetPoint[1] - pose[1], self.targetPoint[0] - pose[0]
+        )
+
+        # Compute the shortest angular difference
+        angleDifference = np.arctan2(
+            np.sin(desiredHeading - pose[2]), np.cos(desiredHeading - pose[2])
+        )
+
+        gain = 100000.0  # Adjust as needed
+        omega = gain * angleDifference
+
+        return omega
 
     def proportional_guidance_control(self, pose, targetPose):
         angleToTarget = np.arctan2(targetPose[1] - pose[1], targetPose[0] - pose[0])

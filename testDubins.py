@@ -35,24 +35,25 @@ from fast_pursuer import plotEngagementZone, inEngagementZone, inEngagementZoneJ
 def find_counter_clockwise_tangent_point(p1, c, r):
     v1 = p1 - c
     normV1 = np.linalg.norm(v1)
-    v3Perallel = -(r**2) / normV1**2 * v1
+    v3Perallel = (r**2) / normV1**2 * v1
     vPerpendicularNormalized = np.array([-v1[1], v1[0]]) / normV1
-    v3Perpendicular = np.sqrt(r**2 - r**4 / normV1**2) * vPerpendicularNormalized
+    v3Perpendicular = -np.sqrt(r**2 - r**4 / normV1**2) * vPerpendicularNormalized
 
     v3 = v3Perallel + v3Perpendicular
-    pt = c - v3
+    pt = c + v3
     return pt
 
 
 def find_clockwise_tangent_point(p1, c, r):
     v1 = p1 - c
     normV1 = np.linalg.norm(v1)
-    v3Perallel = -(r**2) / normV1**2 * v1
-    vPerpendicularNormalized = np.array([v1[1], -v1[0]]) / normV1
+    v3Perallel = (r**2) / normV1**2 * v1
+    vPerpendicularNormalized = -np.array([v1[1], -v1[0]]) / normV1
     v3Perpendicular = np.sqrt(r**2 - r**4 / normV1**2) * vPerpendicularNormalized
 
     v3 = v3Perallel + v3Perpendicular
-    pt = c - v3
+    print("v3: ", v3)
+    pt = c + v3
     return pt
 
 
@@ -120,23 +121,26 @@ def find_dubins_path_length(startPosition, startHeading, goalPosition, radius):
 
     v4 = startPosition - centerPoint
     v3 = tangentPoint - centerPoint
+    print("v3: ", v3)
+    print("norm v3: ", np.linalg.norm(v3))
     if clockwise:
         theta = clockwise_angle(v3, v4)
     else:
         theta = counterclockwise_angle(v3, v4)
+    print("Theta: ", theta)
 
     straitLineLength = np.linalg.norm(goalPosition - tangentPoint)
     arcLength = radius * np.abs(theta)
 
     totalLength = arcLength + straitLineLength
 
-    showPlot = False
+    showPlot = True
 
     if showPlot:
         plt.figure()
         plt.scatter(*startPosition, c="g")
         plt.scatter(*goalPosition, c="r")
-        plt.scatter(*leftCenter, c="b")
+        plt.scatter(*leftCenter, c="g")
         plt.scatter(*rightCenter, c="b")
         plt.plot(*v3, "b")
         plt.plot(*v4, "b")
@@ -269,40 +273,42 @@ def plot_dubins_engagement_zone(
 def main():
     startPosition = np.array([0, 0])
     startHeading = np.pi / 4
-    turnRadius = 0.5
+    turnRadius = 0.1
     captureRadius = 0.1
-    pursuerRange = 1
+    pursuerRange = 0.5
     pursuerSpeed = 2
     evaderSpeed = 1
     agentHeading = 0
 
-    # agentPosition = np.array([1.5, -0.5])
-    #
-    # length = find_dubins_path_length(
-    #     startPosition, startHeading, agentPosition, turnRadius
+    agentPosition = np.array([0.0, -0.1])
+
+    length = find_dubins_path_length(
+        startPosition, startHeading, agentPosition, turnRadius
+    )
+    print("Length: ", length)
+
+    # ax = plot_dubins_engagement_zone(
+    #     startPosition,
+    #     startHeading,
+    #     turnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     evaderSpeed,
+    #     agentHeading,
     # )
-    # print("Length: ", length)
-
-    ax = plot_dubins_engagement_zone(
-        startPosition,
-        startHeading,
-        turnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderSpeed,
-        agentHeading,
-    )
-
-    plotEngagementZone(
-        agentHeading,
-        startPosition,
-        pursuerRange,
-        captureRadius,
-        pursuerSpeed,
-        evaderSpeed,
-        ax,
-    )
+    #
+    # plotEngagementZone(
+    #     agentHeading,
+    #     startPosition,
+    #     pursuerRange,
+    #     captureRadius,
+    #     pursuerSpeed,
+    #     evaderSpeed,
+    #     ax,
+    # )
+    # turn on grid
+    plt.grid()
     plt.show()
 
 

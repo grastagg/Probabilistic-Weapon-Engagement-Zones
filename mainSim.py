@@ -8,9 +8,9 @@ from pursuer import fastPursuer
 if __name__ == "__main__":
     # initialize the sacrificial agent
     agentSpeed = 1
-    agentInitialPosition = np.array([-0.5, 0.9, 0])
+    agentInitialPosition = np.array([-0.6, 0.9, 0])
     sacrificial = sacrificialAgent(agentSpeed, agentInitialPosition)
-    pursuerSpeed = 4
+    pursuerSpeed = 2
     pursuerInitialPosition = np.array([0, 0, np.pi / 2])
     pursuerRange = 1
     pursuerCaptureRadis = 0.1
@@ -19,7 +19,7 @@ if __name__ == "__main__":
         pursuerInitialPosition,
         pursuerRange,
         pursuerCaptureRadis,
-        type="proportional",
+        type="collision",
     )
     time = 0
     dt = 0.001
@@ -49,6 +49,8 @@ if __name__ == "__main__":
     plt.plot(poses[:, 0], poses[:, 1], "b", label="Evader")
     plt.plot(pursuerPoses[:, 0], pursuerPoses[:, 1], "r", label=pursuer.type)
     plt.legend()
+    ax = plt.gca()
+    ax.set_aspect("equal")
 
     plt.figure(figsize=(8, 6))
     plt.plot(range(len(pursuer.losHistory)), pursuer.losHistory)
