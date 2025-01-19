@@ -1,37 +1,16 @@
 import numpy as np
+import time
 import matplotlib.pyplot as plt
-
 from fast_pursuer import plotEngagementZone, inEngagementZone, inEngagementZoneJax
+import jax
+import jax.numpy as jnp
 
 
-# def find_counter_clockwise_tangent_point(p1, c, r):
-#     v2 = p1 - c
-#
-#     cosTheta = -r / np.linalg.norm(v2)
-#
-#     v2_normalized = v2 / np.linalg.norm(v2)
-#
-#     nx = v2_normalized[0] * cosTheta - v2_normalized[1] * np.sqrt(1 - cosTheta**2)
-#     ny = v2_normalized[0] * np.sqrt(1 - cosTheta**2) + v2_normalized[1] * cosTheta
-#
-#     n = np.array([nx, ny])
-#
-#     pt = c - r * n
-#     return pt
+jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_platform_name", "cpu")
 
 
-# def fing_clockwise_tangent_point(p1, c, r):
-#     v2 = p1 - c
-#     cosTheta = -r / np.linalg.norm(v2)
 #
-#     v2_normalized = v2 / np.linalg.norm(v2)
-#     nx = v2_normalized[0] * cosTheta + v2_normalized[1] * np.sqrt(1 - cosTheta**2)
-#     ny = v2_normalized[0] * np.sqrt(1 - cosTheta**2) - v2_normalized[1] * cosTheta
-#     n = np.array([nx, ny])
-#     pt = c - r * n
-#     return pt
-
-
 def find_counter_clockwise_tangent_point(p1, c, r):
     v1 = p1 - c
     normV1 = np.linalg.norm(v1)
@@ -44,6 +23,19 @@ def find_counter_clockwise_tangent_point(p1, c, r):
     return pt
 
 
+# @jax.jit
+# def find_counter_clockwise_tangent_point(p1, c, r):
+#     jax.debug.print("p1: {x}", x=p1)
+#     v1 = p1 - c
+#     normV1 = jnp.linalg.norm(v1)
+#     v3Perallel = (r**2) / normV1**2 * v1
+#     vPerpendicularNormalized = jnp.array([-v1[1], v1[0]]) / normV1
+#     v3Perpendicular = -jnp.sqrt(r**2 - r**4 / normV1**2) * vPerpendicularNormalized
+#     v3 = v3Perallel + v3Perpendicular
+#     pt = c + v3
+#     return pt
+
+
 def find_clockwise_tangent_point(p1, c, r):
     v1 = p1 - c
     normV1 = np.linalg.norm(v1)
@@ -52,9 +44,21 @@ def find_clockwise_tangent_point(p1, c, r):
     v3Perpendicular = np.sqrt(r**2 - r**4 / normV1**2) * vPerpendicularNormalized
 
     v3 = v3Perallel + v3Perpendicular
-    print("v3: ", v3)
     pt = c + v3
     return pt
+
+
+# @jax.jit
+# def find_clockwise_tangent_point(p1, c, r):
+#     v1 = p1 - c
+#     normV1 = jnp.linalg.norm(v1)
+#     v3Perallel = (r**2) / normV1**2 * v1
+#     vPerpendicularNormalized = -jnp.array([v1[1], -v1[0]]) / normV1
+#     v3Perpendicular = jnp.sqrt(r**2 - r**4 / normV1**2) * vPerpendicularNormalized
+#
+#     v3 = v3Perallel + v3Perpendicular
+#     pt = c + v3
+#     return pt
 
 
 def clockwise_angle(v1, v2):
@@ -121,20 +125,17 @@ def find_dubins_path_length(startPosition, startHeading, goalPosition, radius):
 
     v4 = startPosition - centerPoint
     v3 = tangentPoint - centerPoint
-    print("v3: ", v3)
-    print("norm v3: ", np.linalg.norm(v3))
     if clockwise:
         theta = clockwise_angle(v3, v4)
     else:
         theta = counterclockwise_angle(v3, v4)
-    print("Theta: ", theta)
 
     straitLineLength = np.linalg.norm(goalPosition - tangentPoint)
     arcLength = radius * np.abs(theta)
 
     totalLength = arcLength + straitLineLength
 
-    showPlot = True
+    showPlot = False
 
     if showPlot:
         plt.figure()
@@ -218,6 +219,7 @@ def plot_dubins_engagement_zone(
     Z = np.zeros(X.shape)
     # collisionRegion = np.zeros(X.shape)
 
+    start = time.time()
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
             Z[i, j] = in_dubins_engagement_zone(
@@ -241,6 +243,7 @@ def plot_dubins_engagement_zone(
             #     evaderSpeed,
             #     np.array([X[i, j], Y[i, j]]),
             # )
+    print("Time: ", time.time() - start)
 
     plt.figure()
     c = plt.contour(X, Y, Z, levels=[0])
@@ -273,41 +276,40 @@ def plot_dubins_engagement_zone(
 def main():
     startPosition = np.array([0, 0])
     startHeading = np.pi / 4
-    turnRadius = 0.1
+    turnRadius = 0.5
     captureRadius = 0.1
-    pursuerRange = 0.5
+    pursuerRange = 1.0
     pursuerSpeed = 2
     evaderSpeed = 1
     agentHeading = 0
 
-    agentPosition = np.array([0.0, -0.1])
-
-    length = find_dubins_path_length(
-        startPosition, startHeading, agentPosition, turnRadius
-    )
-    print("Length: ", length)
-
-    # ax = plot_dubins_engagement_zone(
-    #     startPosition,
-    #     startHeading,
-    #     turnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     evaderSpeed,
-    #     agentHeading,
-    # )
+    # agentPosition = np.array([0.0, -0.1])
     #
-    # plotEngagementZone(
-    #     agentHeading,
-    #     startPosition,
-    #     pursuerRange,
-    #     captureRadius,
-    #     pursuerSpeed,
-    #     evaderSpeed,
-    #     ax,
+    # length = find_dubins_path_length(
+    #     startPosition, startHeading, agentPosition, turnRadius
     # )
-    # turn on grid
+    # print("Length: ", length)
+
+    ax = plot_dubins_engagement_zone(
+        startPosition,
+        startHeading,
+        turnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderSpeed,
+        agentHeading,
+    )
+
+    plotEngagementZone(
+        agentHeading,
+        startPosition,
+        pursuerRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        ax,
+    )
     plt.grid()
     plt.show()
 
