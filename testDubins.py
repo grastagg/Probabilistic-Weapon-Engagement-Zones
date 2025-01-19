@@ -276,7 +276,7 @@ def plot_dubins_engagement_zone(
 def main():
     startPosition = np.array([0, 0])
     startHeading = np.pi / 4
-    turnRadius = 0.5
+    turnRadius = 0.02
     captureRadius = 0.1
     pursuerRange = 1.0
     pursuerSpeed = 2
