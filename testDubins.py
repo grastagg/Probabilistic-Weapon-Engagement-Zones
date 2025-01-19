@@ -133,13 +133,14 @@ def find_dubins_path_length(startPosition, startHeading, goalPosition, radius):
     dist_to_right = jnp.linalg.norm(goalPosition - rightCenter)
 
     # Determine which center to use
-    left_closer = dist_to_left < dist_to_right
+    # left_closer = dist_to_left < dist_to_right
+    right_closer = dist_to_right < dist_to_left
     inside_right_circle = dist_to_right < radius
     inside_left_circle = dist_to_left < radius
     clockwise = jnp.where(
         jnp.logical_or(
-            jnp.logical_and(left_closer, jnp.logical_not(inside_left_circle)),
-            jnp.logical_and(jnp.logical_not(left_closer), inside_right_circle),
+            jnp.logical_and(right_closer, jnp.logical_not(inside_right_circle)),
+            jnp.logical_and(jnp.logical_not(right_closer), inside_left_circle),
         ),
         True,
         False,
@@ -428,7 +429,7 @@ def plot_dubins_engagement_zone(
 def main():
     startPosition = np.array([0, 0])
     startHeading = np.pi / 4
-    turnRadius = 0.02
+    turnRadius = 0.2
     captureRadius = 0.1
     pursuerRange = 1.0
     pursuerSpeed = 2
