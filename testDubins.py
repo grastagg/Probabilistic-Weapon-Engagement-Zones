@@ -133,16 +133,18 @@ def find_dubins_path_length(startPosition, startHeading, goalPosition, radius):
     dist_to_right = jnp.linalg.norm(goalPosition - rightCenter)
 
     # Determine which center to use
-    use_left = dist_to_left < dist_to_right
-    centerPoint = jnp.where(use_left, leftCenter, rightCenter)
-
-    # Determine if it's clockwise
-    inside_left_circle = dist_to_left < radius
+    left_closer = dist_to_left < dist_to_right
     inside_right_circle = dist_to_right < radius
+    inside_left_circle = dist_to_left < radius
     clockwise = jnp.where(
-        use_left, inside_left_circle, jnp.logical_not(inside_right_circle)
-    )  # FIXED HERE
-
+        jnp.logical_or(
+            jnp.logical_and(left_closer, jnp.logical_not(inside_left_circle)),
+            jnp.logical_and(jnp.logical_not(left_closer), inside_right_circle),
+        ),
+        True,
+        False,
+    )
+    centerPoint = jnp.where(clockwise, rightCenter, leftCenter)
     # Compute tangent point
     tangentPoint = jax.lax.cond(
         clockwise,
