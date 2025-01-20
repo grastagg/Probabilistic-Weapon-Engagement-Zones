@@ -35,17 +35,54 @@ def find_clockwise_tangent_point(p1, c, r):
     return pt
 
 
+# @jax.jit
+# def clockwise_angle(v1, v2):
+#     # Calculate determinant and dot product
+#     det = v1[0] * v2[1] - v1[1] * v2[0]
+#     dot = v1[0] * v2[0] + v1[1] * v2[1]
+#
+#     # Compute angle and normalize to [0, 2*pi]
+#     angle = jnp.arctan2(det, dot)
+#     angle_ccw = (angle + 2 * jnp.pi) % (2 * jnp.pi)
+#
+#     return angle_ccw
+
+
 @jax.jit
 def clockwise_angle(v1, v2):
     # Calculate determinant and dot product
-    det = v1[0] * v2[1] - v1[1] * v2[0]
-    dot = v1[0] * v2[0] + v1[1] * v2[1]
+    det = v1[0] * v2[1] - v1[1] * v2[0]  # 2D cross product (determinant)
+    dot = v1[0] * v2[0] + v1[1] * v2[1]  # Dot product
 
-    # Compute angle and normalize to [0, 2*pi]
-    angle = jnp.arctan2(det, dot)
-    angle_ccw = (angle + 2 * jnp.pi) % (2 * jnp.pi)
+    angle = jax.lax.cond(
+        jnp.abs(det) < 1e-8,  # Condition: if det is near zero (collinear)
+        lambda _: jax.lax.cond(
+            dot < 0,  # Further check if the vectors are in opposite directions
+            lambda _: jnp.pi,  # Opposite directions: angle = pi
+            lambda _: 0.0,  # Same direction: angle = 0
+            operand=None,
+        ),
+        lambda _: jnp.arctan2(det, dot),  # Standard angle calculation
+        operand=None,
+    )
 
-    return angle_ccw
+    # Normalize to [0, 2*pi] to ensure the result is in a consistent range
+    angle_cw = (angle + 2 * jnp.pi) % (2 * jnp.pi)
+
+    return angle_cw
+
+
+# @jax.jit
+# def counterclockwise_angle(v1, v2):
+#     # Calculate determinant and dot product
+#     det = v1[0] * v2[1] - v1[1] * v2[0]
+#     dot = v1[0] * v2[0] + v1[1] * v2[1]
+#
+#     # Compute clockwise angle
+#     angle = jnp.arctan2(-det, dot)
+#     angle_cw = (angle + 2 * jnp.pi) % (2 * jnp.pi)
+#
+#     return angle_cw
 
 
 @jax.jit
@@ -54,8 +91,20 @@ def counterclockwise_angle(v1, v2):
     det = v1[0] * v2[1] - v1[1] * v2[0]
     dot = v1[0] * v2[0] + v1[1] * v2[1]
 
-    # Compute clockwise angle
-    angle = jnp.arctan2(-det, dot)
+    # Use jax.lax.cond for the collinearity check and handling the angle
+    angle = jax.lax.cond(
+        jnp.abs(det) < 1e-8,  # Condition: if det is near zero (collinear)
+        lambda _: jax.lax.cond(
+            dot < 0,  # Further check if the vectors are in opposite directions
+            lambda _: jnp.pi,  # Opposite directions: angle = pi
+            lambda _: 0.0,  # Same direction: angle = 0
+            operand=None,
+        ),
+        lambda _: jnp.arctan2(-det, dot),  # Standard angle calculation
+        operand=None,
+    )
+
+    # Ensure the angle is in the range [0, 2*pi)
     angle_cw = (angle + 2 * jnp.pi) % (2 * jnp.pi)
 
     return angle_cw
@@ -115,6 +164,12 @@ def find_dubins_path_length(startPosition, startHeading, goalPosition, radius):
         lambda _: counterclockwise_angle(v3, v4),
         operand=None,
     )
+    # jax.debug.print(
+    #     "goalPosition: {goalPosition}, Theta:{theta}, Clockwise: {cw}",
+    #     goalPosition=goalPosition,
+    #     theta=theta,
+    #     cw=clockwise,
+    # )
 
     # Compute final path length
     straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
@@ -122,6 +177,179 @@ def find_dubins_path_length(startPosition, startHeading, goalPosition, radius):
     totalLength = arcLength + straightLineLength
 
     return totalLength
+
+
+# Vectorized version over goalPosition
+find_dubins_path_length_vectorized = jax.jit(
+    jax.vmap(find_dubins_path_length, in_axes=(None, None, 0, None))
+)
+
+
+# @jax.jit
+def in_dubins_ez_objective_function(
+    lam,
+    startPosition,
+    startHeading,
+    evaderStart,
+    evaderHeading,
+    pursuerRange,
+    turnRadius,
+    captureRadius,
+):
+    # Compute goal positions
+    direction = jnp.array(
+        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
+    )  # Heading unit vector
+    goalPosition = evaderStart + lam * pursuerRange * direction
+    dubinsLengths = find_dubins_path_length(
+        startPosition, startHeading, goalPosition, turnRadius
+    )
+    ez = dubinsLengths - lam * pursuerRange - captureRadius
+    return ez
+
+
+in_dubins_ez_objective_function_dLambda = jax.jit(
+    jax.grad(in_dubins_ez_objective_function, argnums=0)
+)
+in_dubins_ez_objective_function_dLambda = jax.grad(
+    in_dubins_ez_objective_function, argnums=0
+)
+
+
+# @jax.jit
+def newtons_method(f, df, x0, args=(), tol=1e-6, max_iter=50):
+    """Newton's method for root-finding in JAX with extra arguments.
+
+    Args:
+        f: Function whose root we want to find. Should accept x and *args.
+        df: Derivative of f. Should accept x and *args.
+        x0: Initial guess.
+        args: Tuple of extra arguments to pass to f and df.
+        tol: Convergence tolerance.
+        max_iter: Maximum number of iterations.
+
+    Returns:
+        Approximate root of the function.
+    """
+
+    def body_fn(state):
+        i, x, error = state
+        step = f(x, *args) / df(x, *args)  # Newton step
+        alpha = 0.1
+
+        x_new = x - step  # Newton update
+        # x_new = x - f(x, *args) / df(x, *args)  # Newton update
+        x_new = jnp.clip(x_new, 0, 1)  # Ensure the root stays within [0, 1]
+
+        return i + 1, x_new, jnp.abs(x_new - x)  # Update error
+
+    def cond_fn(state):
+        i, _, error = state
+        return jnp.logical_and(error > tol, i < max_iter)  # Use logical_and
+
+    # Run the while loop for Newton's method
+    i, x_final, _ = jax.lax.while_loop(cond_fn, body_fn, (0, x0, jnp.inf))
+
+    # jax.debug.print(
+    #     "Final x: {x}, Final f(x): {f}, iterations: {iter}",
+    #     x=x_final,
+    #     f=f(x_final, *args),
+    #     iter=i,
+    # )
+
+    return jnp.isclose(
+        f(x_final, *args), 0
+    )  # Return the root, not the function value at the root
+
+
+@jax.jit
+def new_in_dubins_engagement_zone_single(
+    startPosition,
+    startHeading,
+    turnRadius,
+    captureRadius,
+    pursuerRange,
+    pursuerSpeed,
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+):
+    speedRatio = evaderSpeed / pursuerSpeed
+    # root = newtons_method(
+    #     f=in_dubins_ez_objective_function,
+    #     df=in_dubins_ez_objective_function_dLambda,
+    #     x0=0.0,
+    #     args=(
+    #         startPosition,
+    #         startHeading,
+    #         evaderPosition,
+    #         evaderHeading,
+    #         pursuerRange,
+    #         turnRadius,
+    #         captureRadius,
+    #     ),
+    # )
+    lam = jnp.linspace(0, 1, 500)[:, None]  # Shape (100, 1) for broadcasting
+
+    # Compute goal positions
+    direction = jnp.array(
+        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
+    )  # Heading unit vector
+    goalPositions = evaderPosition + lam * speedRatio * pursuerRange * direction
+    dubinsLengths = find_dubins_path_length_vectorized(
+        startPosition, startHeading, goalPositions, turnRadius
+    )
+
+    ez = dubinsLengths - lam.flatten() * pursuerRange - captureRadius
+
+    root = jnp.min(ez) < 0
+
+    #
+    # showPlot = True
+    # if showPlot:
+    #     fig, ax = plt.subplots()
+    #     ax.plot(lam, ez)
+    #     fig2, ax2 = plt.subplots()
+    #     ax2.plot(goalPositions[:, 0], goalPositions[:, 1])
+    #     theta = np.linspace(0, 2 * np.pi, 100)
+    #     leftCenter = np.array(
+    #         [
+    #             startPosition[0] - turnRadius * np.sin(startHeading),
+    #             startPosition[1] + turnRadius * np.cos(startHeading),
+    #         ]
+    #     )
+    #     rightCenter = np.array(
+    #         [
+    #             startPosition[0] + turnRadius * np.sin(startHeading),
+    #             startPosition[1] - turnRadius * np.cos(startHeading),
+    #         ]
+    #     )
+    #     leftX = leftCenter[0] + turnRadius * np.cos(theta)
+    #     leftY = leftCenter[1] + turnRadius * np.sin(theta)
+    #     rightX = rightCenter[0] + turnRadius * np.cos(theta)
+    #     rightY = rightCenter[1] + turnRadius * np.sin(theta)
+    #     ax2.plot(leftX, leftY)
+    #     ax2.plot(rightX, rightY)
+    return root
+
+
+# Vectorized function using vmap
+new_in_dubins_engagement_zone = jax.jit(
+    jax.vmap(
+        new_in_dubins_engagement_zone_single,
+        in_axes=(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            0,
+            None,
+        ),  # Vectorizing over evaderPosition & evaderHeading
+    )
+)
 
 
 @jax.jit
@@ -204,7 +432,7 @@ def plot_dubins_engagement_zone(
     headingsVec = np.ones(X.shape) * evaderHeading
 
     start = time.time()
-    Z = in_dubins_engagement_zone(
+    Z = new_in_dubins_engagement_zone(
         startPosition,
         startHeading,
         turnRadius,
@@ -215,6 +443,7 @@ def plot_dubins_engagement_zone(
         headingsVec,
         evaderSpeed,
     )
+    print(Z)
 
     print("Time: ", time.time() - start)
 
@@ -267,6 +496,19 @@ def main():
     #     startPosition, startHeading, agentPosition, turnRadius
     # )
     # print("Length: ", length)
+    # evaderPosition = np.array([-1.0, -1.0])
+    # inEZ = new_in_dubins_engagement_zone_single(
+    #     startPosition,
+    #     startHeading,
+    #     turnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     evaderPosition,
+    #     agentHeading,
+    #     evaderSpeed,
+    # )
+    # print("In EZ: ", inEZ)
 
     ax = plot_dubins_engagement_zone(
         startPosition,
