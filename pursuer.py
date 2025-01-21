@@ -156,8 +156,6 @@ class fastPursuer:
 
     def check_collision(self, targetPose):
         dist = np.linalg.norm(self.pose[0:2] - targetPose[0:2])
-        print("Distance: ", dist)
-        print("Capture Radius: ", self.captureRadius)
         if dist < self.captureRadius:
             return True
         return False
