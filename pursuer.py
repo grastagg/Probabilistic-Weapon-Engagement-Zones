@@ -1,22 +1,35 @@
 import numpy as np
 
+from testDubins import find_closest_collision_point
+
 
 class fastPursuer:
-    def __init__(self, speed, startPose, range, captureRadius, type="proportional"):
+    def __init__(
+        self,
+        speed,
+        startPose,
+        range,
+        captureRadius,
+        type="proportional",
+        turnRadius=0.5,
+    ):
         self.pose = startPose
         self.speed = speed
         self.type = type
         self.range = range
         self.captureRadius = captureRadius
 
-        turnRadus = 0.5
-        self.maxTurnRate = speed / turnRadus
-        print("max turn rate: ", self.maxTurnRate)
+        self.turnRadius = turnRadius
+        self.maxTurnRate = speed / self.turnRadius
 
         self.distanceTravelled = 0
 
         self.losHistory = []
 
+        self.targetPoint = None
+        # [-0.14408818 -0.25      ]
+        # self.targetPoint = np.array([-0.14408818, -0.25])
+        # self.targetPoint = np.array([0.5, -0.6])
         self.targetPoint = None
 
     def update(self, pose, dt, targetPose, targetSpeed):
@@ -44,12 +57,18 @@ class fastPursuer:
 
     def collision_course_control(self, pose, targetPose, targetHeading, targetSpeed):
         if self.targetPoint is None:
-            speedRatio = targetSpeed / self.speed
-            print("self.targetPoint: ", self.targetPoint)
-            print("targetSpeed: ", targetSpeed)
-            self.targetPoint = targetPose[0:2] + speedRatio * targetSpeed * np.array(
-                [np.cos(targetHeading), np.sin(targetHeading)]
+            self.targetPoint = find_closest_collision_point(
+                pose[0:2],
+                pose[2],
+                self.turnRadius,
+                self.captureRadius,
+                self.range,
+                self.speed,
+                targetPose[0:2],
+                targetPose[2],
+                targetSpeed,
             )
+            print("Target Point: ", self.targetPoint)
 
         desiredHeading = np.arctan2(
             self.targetPoint[1] - pose[1], self.targetPoint[0] - pose[0]
@@ -137,6 +156,8 @@ class fastPursuer:
 
     def check_collision(self, targetPose):
         dist = np.linalg.norm(self.pose[0:2] - targetPose[0:2])
+        print("Distance: ", dist)
+        print("Capture Radius: ", self.captureRadius)
         if dist < self.captureRadius:
             return True
         return False

@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from fast_pursuer import plotEngagementZone, inEngagementZone, inEngagementZoneJax
 import jax
 import jax.numpy as jnp
+from matplotlib.patches import Circle
 
 
 jax.config.update("jax_enable_x64", True)
@@ -111,7 +112,9 @@ def counterclockwise_angle(v1, v2):
 
 
 @jax.jit
-def find_dubins_path_length(startPosition, startHeading, goalPosition, radius):
+def find_dubins_path_length(
+    startPosition, startHeading, goalPosition, radius, captureRadius
+):
     # Compute left and right turn centers
     leftCenter = jnp.array(
         [
@@ -133,16 +136,32 @@ def find_dubins_path_length(startPosition, startHeading, goalPosition, radius):
     # Determine which center to use
     # left_closer = dist_to_left < dist_to_right
     right_closer = dist_to_right < dist_to_left
-    inside_right_circle = dist_to_right < radius
-    inside_left_circle = dist_to_left < radius
+    not_inside_right_circle = dist_to_right > (radius)
+    inside_left_circle = dist_to_left < (radius)
     clockwise = jnp.where(
         jnp.logical_or(
-            jnp.logical_and(right_closer, jnp.logical_not(inside_right_circle)),
+            jnp.logical_and(right_closer, not_inside_right_circle),
             jnp.logical_and(jnp.logical_not(right_closer), inside_left_circle),
         ),
         True,
         False,
     )
+    # inside_right_circle = dist_to_right < radius
+    # inside_left_circle = dist_to_left < radius
+    # inside_right_circle_close_enough_to_edge = np.logical_and(
+    #     inside_right_circle, dist_to_right > radius + captureRadius
+    # )
+    # inside_left_circle_close_enough_to_edge = np.logical_and(
+    #     inside_left_circle, dist_to_left > radius + captureRadius
+    # )
+    # clockwise = jnp.where(
+    #     jnp.logical_or(
+    #         jnp.logical_and(right_closer, jnp.logical_not(inside_right_circle)),
+    #         jnp.logical_and(jnp.logical_not(right_closer), inside_left_circle),
+    #     ),
+    #     True,
+    #     False,
+    # )
     centerPoint = jnp.where(clockwise, rightCenter, leftCenter)
     # Compute tangent point
     tangentPoint = jax.lax.cond(
@@ -179,9 +198,188 @@ def find_dubins_path_length(startPosition, startHeading, goalPosition, radius):
     return totalLength
 
 
+@jax.jit
+def counterclockwise_circle_intersection(x1, y1, r1, x2, y2, r2):
+    """
+    Finds the counterclockwise-most intersection point of two circles using JAX.
+
+    Parameters:
+        x1, y1, r1 : float - Center (x1, y1) and radius r1 of the first circle.
+        x2, y2, r2 : float - Center (x2, y2) and radius r2 of the second circle.
+
+    Returns:
+        Tuple (x, y): The counterclockwise-most intersection point.
+    """
+    # Distance between centers
+    d = jnp.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+    # Compute intersection points
+    a = (r1**2 - r2**2 + d**2) / (2 * d)
+    h = jnp.sqrt(r1**2 - a**2)
+
+    x3 = x1 + a * (x2 - x1) / d
+    y3 = y1 + a * (y2 - y1) / d
+
+    x_offset = h * (y2 - y1) / d
+    y_offset = h * (x2 - x1) / d
+
+    intersection1 = (x3 + x_offset, y3 - y_offset)
+    intersection2 = (x3 - x_offset, y3 + y_offset)
+
+    # Compute angles relative to the second circle's center
+    angle1 = jnp.arctan2(intersection1[1] - y1, intersection1[0] - x1)
+    angle2 = jnp.arctan2(intersection2[1] - y1, intersection2[0] - x1)
+
+    # Return the counterclockwise-most intersection first
+    ccw_intersection, other_intersection = jax.lax.cond(
+        angle1 > angle2,
+        lambda _: (intersection1, intersection2),
+        lambda _: (intersection2, intersection1),
+        None,
+    )
+
+    return ccw_intersection, other_intersection
+
+
+def plot_circles_and_intersection(
+    x1, y1, r1, x2, y2, r2, intersection, otherIntersection
+):
+    """Plots the two circles and highlights the intersection points."""
+    fig, ax = plt.subplots(figsize=(6, 6))
+    circle1 = plt.Circle(
+        (x1, y1), r1, color="b", fill=False, linestyle="dashed", label="Circle 1"
+    )
+    circle2 = plt.Circle(
+        (x2, y2), r2, color="r", fill=False, linestyle="dashed", label="Circle 2"
+    )
+
+    ax.add_patch(circle1)
+    ax.add_patch(circle2)
+    ax.set_xlim(min(x1, x2) - max(r1, r2), max(x1, x2) + max(r1, r2))
+    ax.set_ylim(min(y1, y2) - max(r1, r2), max(y1, y2) + max(r1, r2))
+    ax.set_aspect("equal")
+
+    # Plot centers and intersection points
+    ax.plot([x1, x2], [y1, y2], "ko", markersize=5, label="Centers")
+    ax.plot(
+        *intersection,
+        "ro",
+        markersize=10,
+        markeredgecolor="k",
+        label="Counterclockwise-most",
+    )
+    ax.plot(
+        *otherIntersection,
+        markersize=10,
+        markeredgecolor="k",
+        label="Other Intersection",
+    )
+
+    plt.legend()
+    plt.xlabel("X-axis")
+    plt.ylabel("Y-axis")
+    plt.title("Circle Intersections")
+    plt.grid()
+    plt.show()
+
+
+# Example Usage
+x1, y1, r1 = 0.0, 0.0, 1.0
+x2, y2, r2 = 0.0, 0.91, 0.1
+
+ccw_point, otherIntersection = counterclockwise_circle_intersection(
+    x1, y1, r1, x2, y2, r2
+)
+ccw_point = tuple(ccw_point)  # Convert from JAX array to tuple for plotting
+otherIntersection = tuple(otherIntersection)
+print("Clockwise-most intersection:", otherIntersection)
+print("Counterclockwise-most intersection:", ccw_point)
+
+plot_circles_and_intersection(x1, y1, r1, x2, y2, r2, ccw_point, otherIntersection)
+
+
+def find_dubins_path_length_no_jax(
+    startPosition, startHeading, goalPosition, radius, ax
+):
+    leftCenter = np.array(
+        [
+            startPosition[0] - radius * np.sin(startHeading),
+            startPosition[1] + radius * np.cos(startHeading),
+        ]
+    )
+    rightCenter = np.array(
+        [
+            startPosition[0] + radius * np.sin(startHeading),
+            startPosition[1] - radius * np.cos(startHeading),
+        ]
+    )
+
+    clockwise = False
+    if np.linalg.norm(goalPosition - leftCenter) < np.linalg.norm(
+        goalPosition - rightCenter
+    ):
+        centerPoint = leftCenter
+        clockwise = False
+        if np.linalg.norm(goalPosition - leftCenter) < radius:
+            clockwise = True
+            centerPoint = rightCenter
+
+    else:
+        centerPoint = rightCenter
+        clockwise = True
+        if np.linalg.norm(goalPosition - rightCenter) < radius:
+            clockwise = False
+            centerPoint = leftCenter
+
+    if clockwise:
+        tangentPoint = find_clockwise_tangent_point(goalPosition, centerPoint, radius)
+    else:
+        tangentPoint = find_counter_clockwise_tangent_point(
+            goalPosition, centerPoint, radius
+        )
+
+    v4 = startPosition - centerPoint
+    v3 = tangentPoint - centerPoint
+    if clockwise:
+        theta = clockwise_angle(v3, v4)
+    else:
+        theta = counterclockwise_angle(v3, v4)
+
+    straitLineLength = np.linalg.norm(goalPosition - tangentPoint)
+    arcLength = radius * np.abs(theta)
+
+    totalLength = arcLength + straitLineLength
+
+    showPlot = True
+
+    if showPlot:
+        ax.scatter(*startPosition, c="g")
+        ax.scatter(*goalPosition, c="r")
+        ax.scatter(*leftCenter, c="g")
+        ax.scatter(*rightCenter, c="b")
+        ax.plot(*v3, "b")
+        ax.plot(*v4, "b")
+        theta = np.linspace(0, 2 * np.pi, 100)
+        xl = leftCenter[0] + radius * np.cos(theta)
+        yl = leftCenter[1] + radius * np.sin(theta)
+
+        xr = rightCenter[0] + radius * np.cos(theta)
+        yr = rightCenter[1] + radius * np.sin(theta)
+
+        ax.plot(xl, yl, "b")
+        ax.plot(xr, yr, "b")
+        ax.scatter(*tangentPoint, c="y")
+        ax.plot(
+            [goalPosition[0], tangentPoint[0]], [goalPosition[1], tangentPoint[1]], "y"
+        )
+        ax = plt.gca()
+        ax.set_aspect("equal", "box")
+    return totalLength
+
+
 # Vectorized version over goalPosition
 find_dubins_path_length_vectorized = jax.jit(
-    jax.vmap(find_dubins_path_length, in_axes=(None, None, 0, None))
+    jax.vmap(find_dubins_path_length, in_axes=(None, None, 0, None, None))
 )
 
 
@@ -262,6 +460,38 @@ def newtons_method(f, df, x0, args=(), tol=1e-6, max_iter=50):
     )  # Return the root, not the function value at the root
 
 
+def find_closest_collision_point(
+    startPosition,
+    startHeading,
+    turnRadius,
+    captureRadius,
+    pursuerRange,
+    pursuerSpeed,
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+):
+    speedRatio = evaderSpeed / pursuerSpeed
+    lam = jnp.linspace(0, 1, 500)[:, None]  # Shape (100, 1) for broadcasting
+
+    # Compute goal positions
+    direction = jnp.array(
+        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
+    )  # Heading unit vector
+    goalPositions = evaderPosition + lam * speedRatio * pursuerRange * direction
+    dubinsLengths = find_dubins_path_length_vectorized(
+        startPosition, startHeading, goalPositions, turnRadius, captureRadius
+    )
+
+    ez = dubinsLengths - lam.flatten() * pursuerRange - captureRadius
+
+    lamClosestToZero = lam[jnp.argmin(jnp.abs(ez))]
+    xClosestToZero = (
+        evaderPosition + lamClosestToZero * speedRatio * pursuerRange * direction
+    )
+    return xClosestToZero
+
+
 @jax.jit
 def new_in_dubins_engagement_zone_single(
     startPosition,
@@ -297,18 +527,18 @@ def new_in_dubins_engagement_zone_single(
     )  # Heading unit vector
     goalPositions = evaderPosition + lam * speedRatio * pursuerRange * direction
     dubinsLengths = find_dubins_path_length_vectorized(
-        startPosition, startHeading, goalPositions, turnRadius
+        startPosition, startHeading, goalPositions, turnRadius, captureRadius
     )
 
     ez = dubinsLengths - lam.flatten() * pursuerRange - captureRadius
-
-    root = jnp.min(ez) < 0
+    inEz = jnp.min(ez) < 0
 
     #
     # showPlot = True
     # if showPlot:
     #     fig, ax = plt.subplots()
-    #     ax.plot(lam, ez)
+    #
+    #     ax.plot(lam, dubinsLengths)
     #     fig2, ax2 = plt.subplots()
     #     ax2.plot(goalPositions[:, 0], goalPositions[:, 1])
     #     theta = np.linspace(0, 2 * np.pi, 100)
@@ -330,7 +560,7 @@ def new_in_dubins_engagement_zone_single(
     #     rightY = rightCenter[1] + turnRadius * np.sin(theta)
     #     ax2.plot(leftX, leftY)
     #     ax2.plot(rightX, rightY)
-    return root
+    return inEz
 
 
 # Vectorized function using vmap
@@ -482,13 +712,13 @@ def plot_dubins_engagement_zone(
 
 def main():
     startPosition = np.array([0, 0])
-    startHeading = -np.pi / 2
+    startHeading = np.pi / 2
     turnRadius = 0.5
-    captureRadius = 0.1
+    captureRadius = 0.0
     pursuerRange = 1.0
     pursuerSpeed = 2
     evaderSpeed = 1
-    agentHeading = np.pi / 2
+    agentHeading = -np.pi
 
     # agentPosition = np.array([0.0, -0.1])
     #
@@ -496,40 +726,48 @@ def main():
     #     startPosition, startHeading, agentPosition, turnRadius
     # )
     # print("Length: ", length)
-    # evaderPosition = np.array([-1.0, -1.0])
-    # inEZ = new_in_dubins_engagement_zone_single(
-    #     startPosition,
-    #     startHeading,
-    #     turnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     evaderPosition,
-    #     agentHeading,
-    #     evaderSpeed,
-    # )
-    # print("In EZ: ", inEZ)
+    evaderPosition = np.array([0.25, 0.4])
 
-    ax = plot_dubins_engagement_zone(
+    inEZ = new_in_dubins_engagement_zone_single(
         startPosition,
         startHeading,
         turnRadius,
         captureRadius,
         pursuerRange,
         pursuerSpeed,
-        evaderSpeed,
+        evaderPosition,
         agentHeading,
+        evaderSpeed,
     )
+    print("In EZ: ", inEZ)
 
-    plotEngagementZone(
-        agentHeading,
-        startPosition,
-        pursuerRange,
-        captureRadius,
-        pursuerSpeed,
-        evaderSpeed,
-        ax,
-    )
+    # targetPoint = np.array([-0.14408818, -0.25])
+    # length = find_dubins_path_length_no_jax(
+    #     startPosition, startHeading, targetPoint, turnRadius
+    # )
+    # print("Length: ", length)
+
+    # ax = plot_dubins_engagement_zone(
+    #     startPosition,
+    #     startHeading,
+    #     turnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     evaderSpeed,
+    #     agentHeading,
+    # )
+    # #
+    # plotEngagementZone(
+    #     agentHeading,
+    #     startPosition,
+    #     pursuerRange,
+    #     captureRadius,
+    #     pursuerSpeed,
+    #     evaderSpeed,
+    #     ax,
+    # )
+    # plt.scatter(*evaderPosition)
     plt.grid()
     plt.show()
 
