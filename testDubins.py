@@ -211,6 +211,8 @@ def find_dubins_path_length(
             startPosition, startHeading, goalPosition, radius, captureRadius
         )
     )
+    # jax.debug.print("clockwise: {x}",x = clockwise)
+    # jax.debug.print("goalPosition: {x}",x = goalPosition)
     goalPosition = jnp.where(
         within_capture_radius,
         move_goal_point_if_within_capture_radius(
@@ -218,6 +220,7 @@ def find_dubins_path_length(
         ),
         goalPosition,
     )
+    # jax.debug.print("goalPosition: {x}",x = jnp.linalg.norm(goalPosition-centerPoint))
 
     # Compute tangent point
     tangentPoint = jax.lax.cond(
@@ -289,8 +292,24 @@ def counterclockwise_circle_intersection(startPosition, c1, r1, x2, y2, r2):
     v2 = intersection1 - c1
     v3 = intersection2 - c1
 
-    intersection1 += 1e-9 * (v1 / jnp.linalg.norm(v1))
-    intersection2 += 1e-9 * (v2 / jnp.linalg.norm(v2))
+    dist1 = jnp.linalg.norm(intersection1-c1)
+    dist2 = jnp.linalg.norm(intersection2-c1)
+    scale1 = jnp.abs(dist1-r1)*2.1
+    scale2 = jnp.abs(dist2-r1)*2.1
+    scale1 = 1e-4
+    scale2 = 1e-4
+
+    # jax.debug.print("norm1: {x}",x=jnp.linalg.norm(intersection1-c1))
+    # jax.debug.print("norm2: {x}",x=jnp.linalg.norm(intersection2-c1))
+
+    # jax.debug.print("scale1: {x}",x=scale1)
+    # jax.debug.print("scale2: {x}",x=scale2)
+    intersection1 += scale1 * (v2 / jnp.linalg.norm(v2))
+    intersection2 += scale2 * (v3 / jnp.linalg.norm(v3))
+    # jax.debug.print("norm1: {x}",x=jnp.linalg.norm(intersection1-c1))
+    # jax.debug.print("norm2: {x}",x=jnp.linalg.norm(intersection2-c1))
+    # intersection1 += 1e-2 * (v1 / jnp.linalg.norm(v1))
+    # intersection2 += 1e-2 * (v2 / jnp.linalg.norm(v2))
 
     # computer counter clockwise angle
     angle1 = counterclockwise_angle(v1, v2)
@@ -543,12 +562,6 @@ find_dubins_path_length_vectorized = jax.jit(
 #     # Run the while loop for Newton's method
 #     i, x_final, _ = jax.lax.while_loop(cond_fn, body_fn, (0, x0, jnp.inf))
 #
-#     # jax.debug.print(
-#     #     "Final x: {x}, Final f(x): {f}, iterations: {iter}",
-#     #     x=x_final,
-#     #     f=f(x_final, *args),
-#     #     iter=i,
-#     # )
 #
 #     return jnp.isclose(
 #         f(x_final, *args), 0
@@ -615,7 +628,7 @@ def new_in_dubins_engagement_zone_single(
     #         captureRadius,
     #     ),
     # )
-    lam = jnp.linspace(0, 1, 500)[:, None]  # Shape (100, 1) for broadcasting
+    lam = jnp.linspace(0, 1, 20)[:, None]  # Shape (100, 1) for broadcasting
 
     # Compute goal positions
     direction = jnp.array(
@@ -631,6 +644,9 @@ def new_in_dubins_engagement_zone_single(
         dubinsLengths - lam.flatten() * pursuerRange,
         dubinsLengths - lam.flatten() * pursuerRange - captureRadius,
     )
+    # jax.debug.print("goalPositions: {x}",x=goalPositions)
+    # jax.debug.print("ez: {x}",x=ez)
+    # jax.debug.print("length: {x}",x=dubinsLengths)
     ezMin = jnp.min(ez)
 
     # ez = dubinsLengths - lam.flatten() * pursuerRange - captureRadius
@@ -755,7 +771,7 @@ def plot_dubins_engagement_zone(
     evaderSpeed,
     evaderHeading,
 ):
-    numPoints = 600
+    numPoints = 500
     x = np.linspace(-2, 2, numPoints)
     y = np.linspace(-2, 2, numPoints)
     [X, Y] = np.meshgrid(x, y)
@@ -817,12 +833,12 @@ def plot_dubins_engagement_zone(
 def main():
     startPosition = np.array([0, 0])
     startHeading = np.pi / 2
-    turnRadius = 0.5
+    turnRadius = .01
     captureRadius = 0.1
     pursuerRange = 1.0
     pursuerSpeed = 2
     evaderSpeed = 1
-    agentHeading = np.pi / 2
+    agentHeading = -np.pi/2
 
     # agentPosition = np.array([0.0, -0.1])
     #
@@ -830,8 +846,8 @@ def main():
     #     startPosition, startHeading, agentPosition, turnRadius
     # )
     # print("Length: ", length)
-    # evaderPosition = np.array([0.25, 0.4])
-    #
+    evaderPosition = np.array([-0.6, 0.9])
+    # #
     # inEZ = new_in_dubins_engagement_zone_single(
     #     startPosition,
     #     startHeading,
@@ -844,9 +860,11 @@ def main():
     #     evaderSpeed,
     # )
     # print("In EZ: ", inEZ)
-    # # point = np.array([0.751, 0.4])
-    # # point = np.array([0.751, 0.4])
-    # point = np.array([0.25, 0.40501002])
+    # # # point = np.array([0.751, 0.4])
+    # # # point = np.array([0.751, 0.4])
+    # #
+    # point = np.array([-0.6, 0.42631579])
+    # # point = np.array([-0.6, 0.48862876])
     # length, tangetPoint, _ = find_dubins_path_length(
     #     startPosition, startHeading, point, turnRadius, captureRadius
     # )
@@ -880,7 +898,7 @@ def main():
         evaderSpeed,
         ax,
     )
-    # plt.scatter(*evaderPosition)
+    plt.scatter(*evaderPosition)
     plt.grid()
     plt.show()
 
