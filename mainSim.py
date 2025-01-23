@@ -15,13 +15,13 @@ if __name__ == "__main__":
     # [-0.14408818 -0.25      ]
     #
     agentSpeed = 1
-    agentInitialPosition = np.array([-0.71, 0.25, 0])
+    agentInitialPosition = np.array([0.05, -0.56, np.pi / 2])
     sacrificial = sacrificialAgent(agentSpeed, agentInitialPosition)
     pursuerSpeed = 2
     pursuerInitialPosition = np.array([0, 0, np.pi / 2])
     pursuerRange = 1
     pursuerCaptureRadis = 0.1
-    pursuerTurnRadius = 0.5
+    pursuerTurnRadius = 0.2
     pursuer = fastPursuer(
         pursuerSpeed,
         pursuerInitialPosition,

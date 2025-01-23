@@ -5,6 +5,7 @@ from fast_pursuer import plotEngagementZone, inEngagementZone, inEngagementZoneJ
 import jax
 import jax.numpy as jnp
 from matplotlib.patches import Circle
+import matplotlib.cm as cm
 
 
 jax.config.update("jax_enable_x64", True)
@@ -36,19 +37,6 @@ def find_clockwise_tangent_point(p1, c, r):
     return pt
 
 
-# @jax.jit
-# def clockwise_angle(v1, v2):
-#     # Calculate determinant and dot product
-#     det = v1[0] * v2[1] - v1[1] * v2[0]
-#     dot = v1[0] * v2[0] + v1[1] * v2[1]
-#
-#     # Compute angle and normalize to [0, 2*pi]
-#     angle = jnp.arctan2(det, dot)
-#     angle_ccw = (angle + 2 * jnp.pi) % (2 * jnp.pi)
-#
-#     return angle_ccw
-
-
 @jax.jit
 def clockwise_angle(v1, v2):
     # Calculate determinant and dot product
@@ -71,19 +59,6 @@ def clockwise_angle(v1, v2):
     angle_cw = (angle + 2 * jnp.pi) % (2 * jnp.pi)
 
     return angle_cw
-
-
-# @jax.jit
-# def counterclockwise_angle(v1, v2):
-#     # Calculate determinant and dot product
-#     det = v1[0] * v2[1] - v1[1] * v2[0]
-#     dot = v1[0] * v2[0] + v1[1] * v2[1]
-#
-#     # Compute clockwise angle
-#     angle = jnp.arctan2(-det, dot)
-#     angle_cw = (angle + 2 * jnp.pi) % (2 * jnp.pi)
-#
-#     return angle_cw
 
 
 @jax.jit
@@ -158,20 +133,6 @@ def determine_clockwise_or_counterclockwise_turn(
         inside_right_circle_within_capture_radius,
     )
     clockwise = jnp.where(within_capture_radius, jnp.logical_not(clockwise), clockwise)
-    # clockwise = jnp.where(
-    #     jnp.logical_or(
-    #         jnp.logical_or(
-    #             jnp.logical_and(right_closer, not_inside_right_circle),
-    #             jnp.logical_and(
-    #                 jnp.logical_not(right_closer),
-    #                 inside_left_circle_not_within_capture_radius,
-    #             ),
-    #         ),
-    #         jnp.logical_and(right_closer, inside_right_circle_within_capture_radius),
-    #     ),
-    #     True,
-    #     False,
-    # )
     centerPoint = jnp.where(clockwise, rightCenter, leftCenter)
 
     return clockwise, centerPoint, within_capture_radius
@@ -211,8 +172,6 @@ def find_dubins_path_length(
             startPosition, startHeading, goalPosition, radius, captureRadius
         )
     )
-    # jax.debug.print("clockwise: {x}",x = clockwise)
-    # jax.debug.print("goalPosition: {x}",x = goalPosition)
     goalPosition = jnp.where(
         within_capture_radius,
         move_goal_point_if_within_capture_radius(
@@ -220,7 +179,6 @@ def find_dubins_path_length(
         ),
         goalPosition,
     )
-    # jax.debug.print("goalPosition: {x}",x = jnp.linalg.norm(goalPosition-centerPoint))
 
     # Compute tangent point
     tangentPoint = jax.lax.cond(
@@ -235,6 +193,8 @@ def find_dubins_path_length(
     # Compute angles for arc length
     v4 = startPosition - centerPoint
     v3 = tangentPoint - centerPoint
+    # jax.debug.print("v3: {x}", x=jnp.linalg.norm(v3))
+    # jax.debug.print("right center: {x}", x=jnp.linalg.norm(centerPoint))
 
     theta = jax.lax.cond(
         clockwise,
@@ -243,12 +203,16 @@ def find_dubins_path_length(
         operand=None,
     )
 
+    distToStart = jnp.linalg.norm(startPosition - goalPosition)
+
     # Compute final path length
 
     straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
     # straightLineLength = jnp.where(within_capture_radius, 0, straightLineLength)
     arcLength = radius * theta
     totalLength = arcLength + straightLineLength
+
+    totalLength = jnp.where(distToStart < captureRadius, 0, totalLength)
 
     return totalLength, tangentPoint, within_capture_radius
 
@@ -292,24 +256,11 @@ def counterclockwise_circle_intersection(startPosition, c1, r1, x2, y2, r2):
     v2 = intersection1 - c1
     v3 = intersection2 - c1
 
-    dist1 = jnp.linalg.norm(intersection1-c1)
-    dist2 = jnp.linalg.norm(intersection2-c1)
-    scale1 = jnp.abs(dist1-r1)*2.1
-    scale2 = jnp.abs(dist2-r1)*2.1
     scale1 = 1e-4
     scale2 = 1e-4
 
-    # jax.debug.print("norm1: {x}",x=jnp.linalg.norm(intersection1-c1))
-    # jax.debug.print("norm2: {x}",x=jnp.linalg.norm(intersection2-c1))
-
-    # jax.debug.print("scale1: {x}",x=scale1)
-    # jax.debug.print("scale2: {x}",x=scale2)
     intersection1 += scale1 * (v2 / jnp.linalg.norm(v2))
     intersection2 += scale2 * (v3 / jnp.linalg.norm(v3))
-    # jax.debug.print("norm1: {x}",x=jnp.linalg.norm(intersection1-c1))
-    # jax.debug.print("norm2: {x}",x=jnp.linalg.norm(intersection2-c1))
-    # intersection1 += 1e-2 * (v1 / jnp.linalg.norm(v1))
-    # intersection2 += 1e-2 * (v2 / jnp.linalg.norm(v2))
 
     # computer counter clockwise angle
     angle1 = counterclockwise_angle(v1, v2)
@@ -628,7 +579,8 @@ def new_in_dubins_engagement_zone_single(
     #         captureRadius,
     #     ),
     # )
-    lam = jnp.linspace(0, 1, 20)[:, None]  # Shape (100, 1) for broadcasting
+    numPoints = 50
+    lam = jnp.linspace(0, 1, numPoints)[:, None]
 
     # Compute goal positions
     direction = jnp.array(
@@ -644,23 +596,25 @@ def new_in_dubins_engagement_zone_single(
         dubinsLengths - lam.flatten() * pursuerRange,
         dubinsLengths - lam.flatten() * pursuerRange - captureRadius,
     )
-    # jax.debug.print("goalPositions: {x}",x=goalPositions)
-    # jax.debug.print("ez: {x}",x=ez)
-    # jax.debug.print("length: {x}",x=dubinsLengths)
-    ezMin = jnp.min(ez)
 
-    # ez = dubinsLengths - lam.flatten() * pursuerRange - captureRadius
-    inEz = jnp.min(ez) < 0
-    # inEz = jnp.any(jnp.isclose(ez, 0, atol=1e-2))
+    # ezMin = jnp.nanmin(ez)
+    inEz = ez < 0
+    inEz = jnp.any(inEz)
+    # jax.debug.print("inEz: {x}", x=goalPositions[np.argmin(ez)])
+    # inEz = jnp.any(jnp.isclose(ez, 0.0, atol=1e-5))
+
+    # inEz = ezMin < 0
 
     #
     # showPlot = True
     # if showPlot:
     #     fig, ax = plt.subplots()
     #
-    #     ax.plot(lam, dubinsLengths)
+    #     ax.scatter(lam, ez, c=np.linspace(0, 1, numPoints))
     #     fig2, ax2 = plt.subplots()
-    #     ax2.plot(goalPositions[:, 0], goalPositions[:, 1])
+    #     ax2.scatter(
+    #         goalPositions[:, 0], goalPositions[:, 1], c=np.linspace(0, 1, numPoints)
+    #     )
     #     theta = np.linspace(0, 2 * np.pi, 100)
     #     leftCenter = np.array(
     #         [
@@ -771,7 +725,7 @@ def plot_dubins_engagement_zone(
     evaderSpeed,
     evaderHeading,
 ):
-    numPoints = 500
+    numPoints = 501
     x = np.linspace(-2, 2, numPoints)
     y = np.linspace(-2, 2, numPoints)
     [X, Y] = np.meshgrid(x, y)
@@ -832,21 +786,20 @@ def plot_dubins_engagement_zone(
 
 def main():
     startPosition = np.array([0, 0])
-    startHeading = np.pi / 2
-    turnRadius = .01
+    startHeading = np.pi / 4
+    turnRadius = 0.01
     captureRadius = 0.1
     pursuerRange = 1.0
     pursuerSpeed = 2
     evaderSpeed = 1
-    agentHeading = -np.pi/2
-
-    # agentPosition = np.array([0.0, -0.1])
+    agentHeading = 0.0
     #
     # length = find_dubins_path_length(
     #     startPosition, startHeading, agentPosition, turnRadius
     # )
     # print("Length: ", length)
-    evaderPosition = np.array([-0.6, 0.9])
+    # closest point:  [-0.10821643 -0.54108216]
+    # evaderPosition = np.array([0.0, -0.1])
     # #
     # inEZ = new_in_dubins_engagement_zone_single(
     #     startPosition,
@@ -860,24 +813,22 @@ def main():
     #     evaderSpeed,
     # )
     # print("In EZ: ", inEZ)
-    # # # point = np.array([0.751, 0.4])
-    # # # point = np.array([0.751, 0.4])
+    # print("Time: ", time.time() - start)
+    # evaderPosition = np.array([0.0, -0.09])
     # #
-    # point = np.array([-0.6, 0.42631579])
-    # # point = np.array([-0.6, 0.48862876])
+    # # ez: [0.05 - 0.06]
+    # point = np.array([-0.10821643, -0.04108216])
+    #
+    # # point = np.array([0.0, -0.09])
     # length, tangetPoint, _ = find_dubins_path_length(
     #     startPosition, startHeading, point, turnRadius, captureRadius
     # )
+    # print("Length: ", length)
     # plot_dubins_path(
     #     startPosition, startHeading, point, turnRadius, captureRadius, tangetPoint
     # )
     # print("Length: ", length)
-    # targetPoint = np.array([-0.14408818, -0.25])
-    # length = find_dubins_path_length_no_jax(
-    #     startPosition, startHeading, targetPoint, turnRadius
-    # )
-    # print("Length: ", length)
-
+    #
     ax = plot_dubins_engagement_zone(
         startPosition,
         startHeading,
@@ -898,7 +849,14 @@ def main():
         evaderSpeed,
         ax,
     )
-    plt.scatter(*evaderPosition)
+    # numPoints = 500
+    # x = np.linspace(-2, 2, numPoints)
+    # y = np.linspace(-2, 2, numPoints)
+    # [X, Y] = np.meshgrid(x, y)
+    # X = X.flatten()
+    # Y = Y.flatten()
+    # # ax.scatter(X, Y)
+    # # plt.scatter(*evaderPosition)
     plt.grid()
     plt.show()
 
