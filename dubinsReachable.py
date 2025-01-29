@@ -1,81 +1,54 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle
 
 
-class CircleArc:
-    def __init__(self, startTheta, endTheta, radius, center, clockwise):
-        print("startTheta: ", startTheta)
-        print("endTheta: ", endTheta)
-        self.startTheta = startTheta
-        self.endTheta = endTheta
-        self.radius = radius
-        self.center = np.array(center)  # Ensure center is a NumPy array
-        self.clockwise = clockwise
+def dubins_reachable_set(heading, velocity, minimumTurnRadius, time, theta):
+    """
+    This computes the boundary (distance from origin) of the reachable set of a dubins vehicle using equations 10 and 11 from
+    Cockayne, E. J., and G. W. C. Hall. "Plane motion of a particle subject to curvature constraints." SIAM Journal on Control 13.1 (1975): 197-220.
+    """
+    rho = 1 / minimumTurnRadius
+    vt = velocity * time
+    print(vt / rho)
 
-    def evaluate(self, numSamples):
-        if self.clockwise:
-            theta = np.linspace(self.startTheta, self.endTheta, numSamples)[
-                ::-1
-            ]  # Reverse order
-        else:
-            theta = np.linspace(self.startTheta, self.endTheta, numSamples)
+    cosTheta = np.cos(theta)
+    sinTheta = np.sin(theta)
 
-        x = self.center[0] + self.radius * np.cos(theta)
-        y = self.center[1] + self.radius * np.sin(theta)
+    if 0 <= theta <= vt / rho:
+        print(theta)
+        x = rho * (1 - cosTheta) + (vt - rho * theta) * sinTheta
+        y = rho * sinTheta + (vt - rho * theta) * cosTheta
+    else:
+        # x = rho * (2 * cosTheta - 1 - np.cos(2 * theta - vt / rho))
+        # y = rho * (2 * sinTheta - np.sin(2 * theta - vt / rho))
+        x = 0
+        y = 0
 
-        return np.vstack((x, y))  # Stack x and y as rows
+    return np.array([x, y])
 
 
-def reachable_set(initialPose, minimumTurnRadius, maxRange):
-    turnTheta = maxRange / minimumTurnRadius
-    heading = initialPose[2]
-    leftCenter = np.array(
-        [
-            initialPose[0] - minimumTurnRadius * np.sin(heading),
-            initialPose[0] + minimumTurnRadius * np.cos(heading),
-        ]
-    )
-    rightCenter = np.array(
-        [
-            initialPose[0] + minimumTurnRadius * np.sin(heading),
-            initialPose[1] - minimumTurnRadius * np.cos(heading),
-        ]
-    )
-    leftArc = CircleArc(
-        heading - np.pi / 2,
-        heading - np.pi / 2 + turnTheta,
-        minimumTurnRadius,
-        leftCenter,
-        False,
-    )
-    print("right")
-    rightArc = CircleArc(
-        heading + np.pi / 2,
-        heading + np.pi / 2 - turnTheta,
-        minimumTurnRadius,
-        rightCenter,
-        True,
-    )
+def plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time):
+    numSamples = 100
+    theta = np.linspace(0, 2 * np.pi, numSamples)
+    print(theta)
 
-    fig, ax = plt.subplots()
-    # plot right circle
-    ax.add_patch(Circle(rightCenter, minimumTurnRadius, fill=False))
-    # plot left circle
-    ax.add_patch(Circle(leftCenter, minimumTurnRadius, fill=False))
-    rightCircle = rightArc.evaluate(100)
-    leftCircle = leftArc.evaluate(100)
-    ax.plot(rightCircle[0], rightCircle[1], "r")
-    ax.plot(leftCircle[0], leftCircle[1], "r")
+    points = []
 
-    ax.set_xlim(-2, 2)
-    ax.set_ylim(-2, 2)
+    for i in range(numSamples):
+        points.append(
+            dubins_reachable_set(heading, velocity, minimumTurnRadius, time, theta[i])
+        )
+
+    points = np.array(points)
+    plt.plot(points[:, 0], points[:, 1])
+    ax = plt.gca()
     ax.set_aspect("equal")
     plt.show()
 
 
 if __name__ == "__main__":
-    initialPose = np.array([0, 0, np.pi / 2])
-    minimumTurnRadius = 1
-    maxRange = 10
-    reachable_set(initialPose, minimumTurnRadius, maxRange)
+    heading = 0
+    velocity = 1
+    minimumTurnRadius = np.pi
+    time = 1
+    plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time)
