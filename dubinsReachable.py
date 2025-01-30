@@ -66,7 +66,7 @@ def find_theta_backward_boundary(heading, velocity, minimumTurnRadius, time):
             )
         )
 
-    theta_solutions = fsolve(equation, [0.9])
+    theta_solutions = fsolve(equation, [0.0, 0.5, 0.9])
     print("equation", equation(theta_solutions))
     theta_solutions = theta_solutions[
         (theta_solutions >= 0) & (theta_solutions <= 2 * np.pi)
@@ -131,19 +131,31 @@ def plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time):
     plt.plot(xRight, yRight)
     plt.plot(xLeft, yLeft)
     plt.plot(points[:, 0], points[:, 1])
-    # plt.plot(pointsBackward[:, 0], pointsBackward[:, 1], c="g")
-    # plt.plot(-pointsBackward[:, 0], pointsBackward[:, 1], c="g")
+    plt.plot(pointsBackward[:, 0], pointsBackward[:, 1], c="g")
+    plt.plot(-pointsBackward[:, 0], pointsBackward[:, 1], c="g")
     ax = plt.gca()
     ax.set_aspect("equal")
     plt.grid()
-    plt.show()
+    return ax
 
 
 if __name__ == "__main__":
     heading = 0
     velocity = 1
     minimumTurnRadius = 1
-    time = (3.0 / 2.0) * np.pi + 1
+    pursuerRange = np.pi
+    time = pursuerRange / velocity
+    print("time", time)
+    point = np.array([2, 2])
     # time = (6.0 / 3.0) * np.pi
     # time = 1
-    plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time)
+    ax = plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time)
+    ax.scatter(*point, c="r")
+    theta = -(np.arctan2(point[1], point[0]) - np.pi / 2)
+    # print("theta", theta)
+    # [x, y] = dubins_reachable_set_foward_boundary(
+    #     heading, velocity, minimumTurnRadius, time, theta
+    # )
+    # ax.scatter(x, y, c="b")
+    # ax.plot([0, x], [0, y], c="b")
+    plt.show()
