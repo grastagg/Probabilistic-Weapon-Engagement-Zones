@@ -562,7 +562,7 @@ def find_closest_collision_point(
     return xClosestToZero
 
 
-# @jax.jit
+@jax.jit
 def new_in_dubins_engagement_zone_single(
     startPosition,
     startHeading,
@@ -589,7 +589,7 @@ def new_in_dubins_engagement_zone_single(
     #         captureRadius,
     #     ),
     # )
-    numPoints = 1000
+    numPoints = 100
     lam = jnp.linspace(0, 1, numPoints)[:, None]
 
     # Compute goal positions
@@ -616,50 +616,50 @@ def new_in_dubins_engagement_zone_single(
     # inEz = ezMin < 0
 
     #
-    showPlot = True
-    if showPlot:
-        fig, ax = plt.subplots()
-
-        # ax.scatter(lam, ez, c=np.linspace(0, 1, numPoints))
-        ax.scatter(lam, ez, c=np.linspace(0, 1, numPoints))
-        fig2, ax2 = plt.subplots()
-        ax2.scatter(
-            goalPositions[:, 0], goalPositions[:, 1], c=np.linspace(0, 1, numPoints)
-        )
-        theta = np.linspace(0, 2 * np.pi, 100)
-        leftCenter = np.array(
-            [
-                startPosition[0] - turnRadius * np.sin(startHeading),
-                startPosition[1] + turnRadius * np.cos(startHeading),
-            ]
-        )
-        rightCenter = np.array(
-            [
-                startPosition[0] + turnRadius * np.sin(startHeading),
-                startPosition[1] - turnRadius * np.cos(startHeading),
-            ]
-        )
-        leftX = leftCenter[0] + turnRadius * np.cos(theta)
-        leftY = leftCenter[1] + turnRadius * np.sin(theta)
-        rightX = rightCenter[0] + turnRadius * np.cos(theta)
-        rightY = rightCenter[1] + turnRadius * np.sin(theta)
-        ax2.plot(leftX, leftY)
-        ax2.plot(rightX, rightY)
-
-        initialCaptureCircleX = startPosition[0] + captureRadius * np.cos(theta)
-        intialCaptureCircleY = startPosition[1] + captureRadius * np.sin(theta)
-        ax2.plot(initialCaptureCircleX, intialCaptureCircleY, "r")
-
-        leftXInnerCircle = leftCenter[0] + (turnRadius - captureRadius) * np.cos(theta)
-        leftYInnerCircle = leftCenter[1] + (turnRadius - captureRadius) * np.sin(theta)
-        rightXInnerCircle = rightCenter[0] + (turnRadius - captureRadius) * np.cos(
-            theta
-        )
-        rightYInnerCircle = rightCenter[1] + (turnRadius - captureRadius) * np.sin(
-            theta
-        )
-        ax2.plot(leftXInnerCircle, leftYInnerCircle)
-        ax2.plot(rightXInnerCircle, rightYInnerCircle)
+    # showPlot = True
+    # if showPlot:
+    #     fig, ax = plt.subplots()
+    #
+    #     # ax.scatter(lam, ez, c=np.linspace(0, 1, numPoints))
+    #     ax.scatter(lam, ez, c=np.linspace(0, 1, numPoints))
+    #     fig2, ax2 = plt.subplots()
+    #     ax2.scatter(
+    #         goalPositions[:, 0], goalPositions[:, 1], c=np.linspace(0, 1, numPoints)
+    #     )
+    #     theta = np.linspace(0, 2 * np.pi, 100)
+    #     leftCenter = np.array(
+    #         [
+    #             startPosition[0] - turnRadius * np.sin(startHeading),
+    #             startPosition[1] + turnRadius * np.cos(startHeading),
+    #         ]
+    #     )
+    #     rightCenter = np.array(
+    #         [
+    #             startPosition[0] + turnRadius * np.sin(startHeading),
+    #             startPosition[1] - turnRadius * np.cos(startHeading),
+    #         ]
+    #     )
+    #     leftX = leftCenter[0] + turnRadius * np.cos(theta)
+    #     leftY = leftCenter[1] + turnRadius * np.sin(theta)
+    #     rightX = rightCenter[0] + turnRadius * np.cos(theta)
+    #     rightY = rightCenter[1] + turnRadius * np.sin(theta)
+    #     ax2.plot(leftX, leftY)
+    #     ax2.plot(rightX, rightY)
+    #
+    #     initialCaptureCircleX = startPosition[0] + captureRadius * np.cos(theta)
+    #     intialCaptureCircleY = startPosition[1] + captureRadius * np.sin(theta)
+    #     ax2.plot(initialCaptureCircleX, intialCaptureCircleY, "r")
+    #
+    #     leftXInnerCircle = leftCenter[0] + (turnRadius - captureRadius) * np.cos(theta)
+    #     leftYInnerCircle = leftCenter[1] + (turnRadius - captureRadius) * np.sin(theta)
+    #     rightXInnerCircle = rightCenter[0] + (turnRadius - captureRadius) * np.cos(
+    #         theta
+    #     )
+    #     rightYInnerCircle = rightCenter[1] + (turnRadius - captureRadius) * np.sin(
+    #         theta
+    #     )
+    #     ax2.plot(leftXInnerCircle, leftYInnerCircle)
+    #     ax2.plot(rightXInnerCircle, rightYInnerCircle)
 
     return inEz
 
@@ -826,20 +826,20 @@ def main():
     # )
     # print("Length: ", length)
     # closest point:  [-0.10821643 -0.54108216]
-    evaderPosition = np.array([-0.2, 0.1])
-    # #
-    inEZ = new_in_dubins_engagement_zone_single(
-        startPosition,
-        startHeading,
-        turnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPosition,
-        agentHeading,
-        evaderSpeed,
-    )
-    print("In EZ: ", inEZ)
+    # evaderPosition = np.array([-0.2, 0.1])
+    # # #
+    # inEZ = new_in_dubins_engagement_zone_single(
+    #     startPosition,
+    #     startHeading,
+    #     turnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     evaderPosition,
+    #     agentHeading,
+    #     evaderSpeed,
+    # )
+    # print("In EZ: ", inEZ)
     # evaderPosition = np.array([0.0, -0.09])
     # #
     # # ez: [0.05 - 0.06]
@@ -857,26 +857,26 @@ def main():
     # )
     # print("Length: ", length)
     #
-    # ax = plot_dubins_engagement_zone(
-    #     startPosition,
-    #     startHeading,
-    #     turnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     evaderSpeed,
-    #     agentHeading,
-    # )
-    # #
-    # plotEngagementZone(
-    #     agentHeading,
-    #     startPosition,
-    #     pursuerRange,
-    #     captureRadius,
-    #     pursuerSpeed,
-    #     evaderSpeed,
-    #     ax,
-    # )
+    ax = plot_dubins_engagement_zone(
+        startPosition,
+        startHeading,
+        turnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderSpeed,
+        agentHeading,
+    )
+    #
+    plotEngagementZone(
+        agentHeading,
+        startPosition,
+        pursuerRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        ax,
+    )
     # numPoints = 500
     # x = np.linspace(-2, 2, numPoints)
     # y = np.linspace(-2, 2, numPoints)
