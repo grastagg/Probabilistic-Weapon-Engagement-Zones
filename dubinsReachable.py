@@ -254,12 +254,14 @@ def plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time):
     xLeft = leftCenter[0] + minimumTurnRadius * np.cos(theta)
     yLeft = leftCenter[1] + minimumTurnRadius * np.sin(theta)
 
-    plt.plot(xRight, yRight, c="k")
-    plt.plot(xLeft, yLeft, c="k")
-    plt.plot(pointsForwardLeft[:, 0], pointsForwardLeft[:, 1], c="r")
-    plt.plot(pointsForwardRight[:, 0], pointsForwardRight[:, 1], c="r")
-    plt.plot(pointsBackwardLeft[:, 0], pointsBackwardLeft[:, 1], c="r")
-    plt.plot(pointsBackwardRight[:, 0], pointsBackwardRight[:, 1], c="r")
+    fig, ax = plt.subplots()
+
+    ax.plot(xRight, yRight, c="k")
+    ax.plot(xLeft, yLeft, c="k")
+    ax.plot(pointsForwardLeft[:, 0], pointsForwardLeft[:, 1], c="r")
+    ax.plot(pointsForwardRight[:, 0], pointsForwardRight[:, 1], c="r")
+    ax.plot(pointsBackwardLeft[:, 0], pointsBackwardLeft[:, 1], c="r")
+    ax.plot(pointsBackwardRight[:, 0], pointsBackwardRight[:, 1], c="r")
 
     ax = plt.gca()
     ax.set_aspect("equal")

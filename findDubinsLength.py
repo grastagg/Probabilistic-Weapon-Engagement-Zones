@@ -8,11 +8,14 @@ from matplotlib.patches import Circle
 import matplotlib.cm as cm
 
 
+import dubinsReachable
+
+
 jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "cpu")
 
 
-# @jax.jit
+@jax.jit
 def find_counter_clockwise_tangent_point(p1, c, r):
     v1 = p1 - c
     normV1 = jnp.linalg.norm(v1)
@@ -24,7 +27,7 @@ def find_counter_clockwise_tangent_point(p1, c, r):
     return pt
 
 
-# @jax.jit
+@jax.jit
 def find_clockwise_tangent_point(p1, c, r):
     v1 = p1 - c
     normV1 = jnp.linalg.norm(v1)
@@ -37,7 +40,7 @@ def find_clockwise_tangent_point(p1, c, r):
     return pt
 
 
-# @jax.jit
+@jax.jit
 def counterclockwise_angle(v1, v2):
     # Calculate determinant and dot product
     det = v1[0] * v2[1] - v1[1] * v2[0]  # 2D cross product (determinant)
@@ -61,7 +64,7 @@ def counterclockwise_angle(v1, v2):
     return angle_cw
 
 
-# @jax.jit
+@jax.jit
 def clockwise_angle(v1, v2):
     # Calculate determinant and dot product
     det = v1[0] * v2[1] - v1[1] * v2[0]
@@ -86,6 +89,7 @@ def clockwise_angle(v1, v2):
     return angle_cw
 
 
+@jax.jit
 def find_dubins_path_length_right_strait(
     startPosition, startHeading, goalPosition, radius
 ):
@@ -102,7 +106,6 @@ def find_dubins_path_length_right_strait(
     v3 = tangentPoint - centerPoint
 
     theta = clockwise_angle(v4, v3)
-    print(theta)
 
     # Compute final path length
     straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
@@ -112,13 +115,14 @@ def find_dubins_path_length_right_strait(
     return totalLength, tangentPoint
 
 
+@jax.jit
 def find_dubins_path_length_left_strait(
     startPosition, startHeading, goalPosition, radius
 ):
     centerPoint = jnp.array(
         [
-            startPosition[0] - radius * np.sin(startHeading),
-            startPosition[1] + radius * np.cos(startHeading),
+            startPosition[0] - radius * jnp.sin(startHeading),
+            startPosition[1] + radius * jnp.cos(startHeading),
         ]
     )
     tangentPoint = find_counter_clockwise_tangent_point(
@@ -130,7 +134,6 @@ def find_dubins_path_length_left_strait(
     v3 = tangentPoint - centerPoint
 
     theta = counterclockwise_angle(v4, v3)
-    print(theta)
 
     # Compute final path length
     straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
@@ -140,102 +143,89 @@ def find_dubins_path_length_left_strait(
     return totalLength, tangentPoint
 
 
+@jax.jit
 def circle_intersection(c1, c2, r1, r2):
-    """
-    Computes the intersection point of two circles in 2D.
-    If the circles intersect tangentially, returns a single point.
-
-    Parameters:
-    c1 : tuple (x1, y1) - Center of the first circle
-    c2 : tuple (x2, y2) - Center of the second circle
-    r1 : float - Radius of the first circle
-    r2 : float - Radius of the second circle
-
-    Returns:
-    A list of intersection points [(x, y)] or an empty list if no intersection.
-    """
     x1, y1 = c1
     x2, y2 = c2
 
     # Distance between centers
-    d = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+    d = jnp.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
-    # Check if there is no intersection or if the circles are identical
-    if d > r1 + r2 or d < abs(r1 - r2) or d == 0:
-        return []  # No intersection or coincident circles
+    # Check for no intersection or identical circles
+    no_intersection = (d > r1 + r2) | (d < jnp.abs(r1 - r2)) | (d == 0)
 
-    # If the circles intersect tangentially
-    if d == r1 + r2 or d == abs(r1 - r2):
+    def no_intersect_case():
+        return jnp.full((2, 2), jnp.nan)  # Return NaN-filled array of shape (2,2)
+
+    def intersect_case():
         a = (r1**2 - r2**2 + d**2) / (2 * d)
-        h = 0  # No height since it’s a single point
+        h = jnp.sqrt(r1**2 - a**2)
 
-        # Midpoint between the centers
         xm = x1 + a * (x2 - x1) / d
         ym = y1 + a * (y2 - y1) / d
 
-        # Single intersection point
-        return [(xm, ym)]
+        x3_1 = xm + h * (y2 - y1) / d
+        y3_1 = ym - h * (x2 - x1) / d
+        x3_2 = xm - h * (y2 - y1) / d
+        y3_2 = ym + h * (x2 - x1) / d
 
-    # If the circles intersect at two points (not tangential)
-    a = (r1**2 - r2**2 + d**2) / (2 * d)
-    h = np.sqrt(r1**2 - a**2)
+        return jnp.array([[x3_1, y3_1], [x3_2, y3_2]])
 
-    # Midpoint between the centers
-    xm = x1 + a * (x2 - x1) / d
-    ym = y1 + a * (y2 - y1) / d
-
-    # Two intersection points
-    x3_1 = xm + h * (y2 - y1) / d
-    y3_1 = ym - h * (x2 - x1) / d
-
-    x3_2 = xm - h * (y2 - y1) / d
-    y3_2 = ym + h * (x2 - x1) / d
-
-    return np.array([[x3_1, y3_1], [x3_2, y3_2]])
+    return jax.lax.cond(no_intersection, no_intersect_case, intersect_case)
 
 
+@jax.jit
 def find_dubins_path_length_left_right(
     startPosition, startHeading, goalPosition, radius
 ):
     centerPoint = jnp.array(
         [
-            startPosition[0] - radius * np.sin(startHeading),
-            startPosition[1] + radius * np.cos(startHeading),
+            startPosition[0] - radius * jnp.sin(startHeading),
+            startPosition[1] + radius * jnp.cos(startHeading),
         ]
     )
+
     secondTurnCenterPoints = circle_intersection(
         centerPoint, goalPosition, 2 * radius, radius
     )
-    if len(secondTurnCenterPoints) == 0:
-        return np.nan, None
-    secondTurnCenterPoint1 = secondTurnCenterPoints[0]
-    secondTurnCenterPoint2 = secondTurnCenterPoints[1]
 
-    tangent1 = (secondTurnCenterPoint1 + centerPoint) / 2
-    tangent2 = (secondTurnCenterPoint2 + centerPoint) / 2
+    # Check if no intersection points exist
+    no_intersection = secondTurnCenterPoints.shape[0] == 0
 
-    v4 = startPosition - centerPoint
+    def nan_case():
+        return jnp.nan, jnp.array([jnp.nan, jnp.nan])
 
-    theta1 = counterclockwise_angle(v4, tangent1 - centerPoint)
-    theta2 = counterclockwise_angle(v4, tangent2 - centerPoint)
+    def valid_case():
+        secondTurnCenterPoint1 = secondTurnCenterPoints[0]
+        secondTurnCenterPoint2 = secondTurnCenterPoints[1]
 
-    secondCenterPoint = secondTurnCenterPoint1
-    arcDistanceAroundTurn1 = theta1
-    tangentPoint = tangent1
-    if theta1 > theta2:
-        secondCenterPoint = secondTurnCenterPoint2
-        arcDistanceAroundTurn1 = theta2
-        tangentPoint = tangent2
+        tangent1 = (secondTurnCenterPoint1 + centerPoint) / 2
+        tangent2 = (secondTurnCenterPoint2 + centerPoint) / 2
 
-    arcDistanceAroundTurn2 = clockwise_angle(
-        tangentPoint - secondCenterPoint, goalPosition - secondCenterPoint
-    )
+        v4 = startPosition - centerPoint
 
-    length = radius * (arcDistanceAroundTurn1 + arcDistanceAroundTurn2)
+        theta1 = counterclockwise_angle(v4, tangent1 - centerPoint)
+        theta2 = counterclockwise_angle(v4, tangent2 - centerPoint)
 
-    return length, secondCenterPoint
+        use_second = theta1 > theta2
+        secondCenterPoint = jax.lax.select(
+            use_second, secondTurnCenterPoint2, secondTurnCenterPoint1
+        )
+        arcDistanceAroundTurn1 = jax.lax.select(use_second, theta2, theta1)
+        tangentPoint = jax.lax.select(use_second, tangent2, tangent1)
+
+        arcDistanceAroundTurn2 = clockwise_angle(
+            tangentPoint - secondCenterPoint, goalPosition - secondCenterPoint
+        )
+
+        length = radius * (arcDistanceAroundTurn1 + arcDistanceAroundTurn2)
+
+        return length, secondCenterPoint
+
+    return jax.lax.cond(no_intersection, nan_case, valid_case)
 
 
+@jax.jit
 def find_dubins_path_length_right_left(
     startPosition, startHeading, goalPosition, radius
 ):
@@ -245,38 +235,48 @@ def find_dubins_path_length_right_left(
             startPosition[1] - radius * jnp.cos(startHeading),
         ]
     )
+
     secondTurnCenterPoints = circle_intersection(
         centerPoint, goalPosition, 2 * radius, radius
     )
-    if len(secondTurnCenterPoints) == 0:
-        return np.nan, None
-    secondTurnCenterPoint1 = secondTurnCenterPoints[0]
-    secondTurnCenterPoint2 = secondTurnCenterPoints[1]
 
-    tangent1 = (secondTurnCenterPoint1 + centerPoint) / 2
-    tangent2 = (secondTurnCenterPoint2 + centerPoint) / 2
+    # Check if no intersection points exist
+    no_intersection = secondTurnCenterPoints.shape[0] == 0
 
-    v4 = startPosition - centerPoint
+    def nan_case():
+        return jnp.nan, jnp.array([jnp.nan, jnp.nan])
 
-    theta1 = clockwise_angle(v4, tangent1 - centerPoint)
-    theta2 = clockwise_angle(v4, tangent2 - centerPoint)
+    def valid_case():
+        secondTurnCenterPoint1 = secondTurnCenterPoints[0]
+        secondTurnCenterPoint2 = secondTurnCenterPoints[1]
 
-    secondCenterPoint = secondTurnCenterPoint1
-    arcDistanceAroundTurn1 = theta1
-    tangentPoint = tangent1
-    if theta1 > theta2:
-        secondCenterPoint = secondTurnCenterPoint2
-        arcDistanceAroundTurn1 = theta2
-        tangentPoint = tangent2
+        tangent1 = (secondTurnCenterPoint1 + centerPoint) / 2
+        tangent2 = (secondTurnCenterPoint2 + centerPoint) / 2
 
-    arcDistanceAroundTurn2 = counterclockwise_angle(
-        tangentPoint - secondCenterPoint, goalPosition - secondCenterPoint
-    )
-    length = radius * (arcDistanceAroundTurn1 + arcDistanceAroundTurn2)
+        v4 = startPosition - centerPoint
 
-    return length, secondCenterPoint
+        theta1 = clockwise_angle(v4, tangent1 - centerPoint)
+        theta2 = clockwise_angle(v4, tangent2 - centerPoint)
+
+        use_second = theta1 > theta2
+        secondCenterPoint = jax.lax.select(
+            use_second, secondTurnCenterPoint2, secondTurnCenterPoint1
+        )
+        arcDistanceAroundTurn1 = jax.lax.select(use_second, theta2, theta1)
+        tangentPoint = jax.lax.select(use_second, tangent2, tangent1)
+
+        arcDistanceAroundTurn2 = counterclockwise_angle(
+            tangentPoint - secondCenterPoint, goalPosition - secondCenterPoint
+        )
+
+        length = radius * (arcDistanceAroundTurn1 + arcDistanceAroundTurn2)
+
+        return length, secondCenterPoint
+
+    return jax.lax.cond(no_intersection, nan_case, valid_case)
 
 
+@jax.jit
 def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, radius):
     leftRightLength, _ = find_dubins_path_length_left_right(
         pursuerPosition, pursuerHeading, goalPosition, radius
@@ -290,11 +290,19 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
     straitRightLength, _ = find_dubins_path_length_left_strait(
         pursuerPosition, pursuerHeading, goalPosition, radius
     )
-    lengths = np.array(
+
+    lengths = jnp.array(
         [leftRightLength, rightLeftLength, straitLeftLength, straitRightLength]
     )
-    print(lengths)
-    return np.nanmin(lengths)
+
+    return jnp.nanmin(lengths)
+
+
+# Vectorized version over goalPosition
+vectorized_find_shortest_dubins_path = jax.vmap(
+    find_shortest_dubins_path,
+    in_axes=(None, None, 0, None),  # Vectorize over goalPosition (3rd argument)
+)
 
 
 def plot_dubins_path(
@@ -336,20 +344,45 @@ def plot_dubins_path(
     ax.set_aspect("equal", "box")
 
 
+def plot_dubins_reachable_set(pursuerPosition, pursuerHeading, pursuerRange, radius):
+    numPoints = 1000
+    x = np.linspace(-5, 5, numPoints)
+    y = np.linspace(-5, 5, numPoints)
+    [X, Y] = np.meshgrid(x, y)
+    Z = np.zeros_like(X)
+
+    X = X.flatten()
+    Y = Y.flatten()
+    Z = vectorized_find_shortest_dubins_path(
+        pursuerPosition, pursuerHeading, np.array([X, Y]).T, radius
+    )
+    Z = Z.reshape(numPoints, numPoints) < pursuerRange
+    # Z = np.isclose(Z, pursuerRange, atol=1e-1)
+    print(Z)
+    Z = Z.reshape(numPoints, numPoints)
+    X = X.reshape(numPoints, numPoints)
+    Y = Y.reshape(numPoints, numPoints)
+
+    fig, ax = plt.subplots()
+    ax.pcolormesh(X, Y, Z)
+    ax.scatter(*pursuerPosition, c="r")
+    ax.set_aspect("equal", "box")
+    return ax
+
+
 def main():
-    velocity = 1
-    minimumTurnRadius = 0.5
-    pursuerRange = 1
+    pursuerVelocity = 1
+    minimumTurnRadius = 1
+    pursuerRange = 1 * np.pi
     pursuerPosition = np.array([0, 0])
     pursuerHeading = np.pi / 2
 
     # point = np.array([1.0, -2.5])
     point = np.array([1.0, 1.0])
 
-    length = find_shortest_dubins_path(
-        pursuerPosition, pursuerHeading, point, minimumTurnRadius
-    )
-    print("length", length)
+    # length = find_shortest_dubins_path(
+    #     pursuerPosition, pursuerHeading, point, minimumTurnRadius
+    # )
     leftCenter = np.array(
         [
             pursuerPosition[0] - minimumTurnRadius * np.sin(pursuerHeading),
@@ -371,7 +404,9 @@ def main():
     # xcr = centerPoint2[0] + minimumTurnRadius * np.cos(theta)
     # ycr = centerPoint2[1] + minimumTurnRadius * np.sin(theta)
 
-    fig, ax = plt.subplots()
+    ax = plot_dubins_reachable_set(
+        pursuerPosition, pursuerHeading, pursuerRange, minimumTurnRadius
+    )
     ax.plot(xl, yl)
     # ax.plot(xcr, ycr, c="g")
 
@@ -384,6 +419,11 @@ def main():
     # plot_dubins_path(
     #     pursuerPosition, pursuerHeading, point, minimumTurnRadius, 0.0, tangentPoint
     # )
+    # pursuerTime = pursuerRange / pursuerVelocity
+    # ax2 = dubinsReachable.plot_dubins_reachable_set(
+    #     pursuerHeading - np.pi / 2, pursuerVelocity, minimumTurnRadius, pursuerTime
+    # )
+
     plt.show()
 
 
