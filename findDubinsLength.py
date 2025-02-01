@@ -194,7 +194,7 @@ def circle_intersection(c1, c2, r1, r2):
     return np.array([[x3_1, y3_1], [x3_2, y3_2]])
 
 
-def find_dunbins_path_length_left_right(
+def find_dubins_path_length_left_right(
     startPosition, startHeading, goalPosition, radius
 ):
     centerPoint = jnp.array(
@@ -206,20 +206,18 @@ def find_dunbins_path_length_left_right(
     secondTurnCenterPoints = circle_intersection(
         centerPoint, goalPosition, 2 * radius, radius
     )
+    if len(secondTurnCenterPoints) == 0:
+        return np.nan, None
     secondTurnCenterPoint1 = secondTurnCenterPoints[0]
     secondTurnCenterPoint2 = secondTurnCenterPoints[1]
 
     tangent1 = (secondTurnCenterPoint1 + centerPoint) / 2
     tangent2 = (secondTurnCenterPoint2 + centerPoint) / 2
-    print("tangent1", tangent1)
-    print("tangent2", tangent2)
 
     v4 = startPosition - centerPoint
 
     theta1 = counterclockwise_angle(v4, tangent1 - centerPoint)
     theta2 = counterclockwise_angle(v4, tangent2 - centerPoint)
-    print("theta1", theta1)
-    print("theta2", theta2)
 
     secondCenterPoint = secondTurnCenterPoint1
     arcDistanceAroundTurn1 = theta1
@@ -232,12 +230,71 @@ def find_dunbins_path_length_left_right(
     arcDistanceAroundTurn2 = clockwise_angle(
         tangentPoint - secondCenterPoint, goalPosition - secondCenterPoint
     )
-    print("arcDistanceAroundTurn1", arcDistanceAroundTurn1)
-    print("arcDistanceAroundTurn2", arcDistanceAroundTurn2)
 
     length = radius * (arcDistanceAroundTurn1 + arcDistanceAroundTurn2)
 
     return length, secondCenterPoint
+
+
+def find_dubins_path_length_right_left(
+    startPosition, startHeading, goalPosition, radius
+):
+    centerPoint = jnp.array(
+        [
+            startPosition[0] + radius * jnp.sin(startHeading),
+            startPosition[1] - radius * jnp.cos(startHeading),
+        ]
+    )
+    secondTurnCenterPoints = circle_intersection(
+        centerPoint, goalPosition, 2 * radius, radius
+    )
+    if len(secondTurnCenterPoints) == 0:
+        return np.nan, None
+    secondTurnCenterPoint1 = secondTurnCenterPoints[0]
+    secondTurnCenterPoint2 = secondTurnCenterPoints[1]
+
+    tangent1 = (secondTurnCenterPoint1 + centerPoint) / 2
+    tangent2 = (secondTurnCenterPoint2 + centerPoint) / 2
+
+    v4 = startPosition - centerPoint
+
+    theta1 = clockwise_angle(v4, tangent1 - centerPoint)
+    theta2 = clockwise_angle(v4, tangent2 - centerPoint)
+
+    secondCenterPoint = secondTurnCenterPoint1
+    arcDistanceAroundTurn1 = theta1
+    tangentPoint = tangent1
+    if theta1 > theta2:
+        secondCenterPoint = secondTurnCenterPoint2
+        arcDistanceAroundTurn1 = theta2
+        tangentPoint = tangent2
+
+    arcDistanceAroundTurn2 = counterclockwise_angle(
+        tangentPoint - secondCenterPoint, goalPosition - secondCenterPoint
+    )
+    length = radius * (arcDistanceAroundTurn1 + arcDistanceAroundTurn2)
+
+    return length, secondCenterPoint
+
+
+def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, radius):
+    leftRightLength, _ = find_dubins_path_length_left_right(
+        pursuerPosition, pursuerHeading, goalPosition, radius
+    )
+    rightLeftLength, _ = find_dubins_path_length_right_left(
+        pursuerPosition, pursuerHeading, goalPosition, radius
+    )
+    straitLeftLength, _ = find_dubins_path_length_right_strait(
+        pursuerPosition, pursuerHeading, goalPosition, radius
+    )
+    straitRightLength, _ = find_dubins_path_length_left_strait(
+        pursuerPosition, pursuerHeading, goalPosition, radius
+    )
+    lengths = np.array(
+        [leftRightLength, rightLeftLength, straitLeftLength, straitRightLength]
+    )
+    print(lengths)
+    return np.nanmin(lengths)
 
 
 def plot_dubins_path(
@@ -287,13 +344,9 @@ def main():
     pursuerHeading = np.pi / 2
 
     # point = np.array([1.0, -2.5])
-    point = np.array([-1.9999, 0])
+    point = np.array([1.0, 1.0])
 
-    # length, tangentPoint = find_dubins_path_length_left_strait(
-    #     pursuerPosition, pursuerHeading, point, minimumTurnRadius
-    # )
-
-    length, centerPoint2 = find_dunbins_path_length_left_right(
+    length = find_shortest_dubins_path(
         pursuerPosition, pursuerHeading, point, minimumTurnRadius
     )
     print("length", length)
@@ -303,19 +356,29 @@ def main():
             pursuerPosition[1] + minimumTurnRadius * np.cos(pursuerHeading),
         ]
     )
+    rightCenter = np.array(
+        [
+            pursuerPosition[0] + minimumTurnRadius * np.sin(pursuerHeading),
+            pursuerPosition[1] - minimumTurnRadius * np.cos(pursuerHeading),
+        ]
+    )
     theta = np.linspace(0, 2 * np.pi, 100)
     xl = leftCenter[0] + minimumTurnRadius * np.cos(theta)
     yl = leftCenter[1] + minimumTurnRadius * np.sin(theta)
+    xr = rightCenter[0] + minimumTurnRadius * np.cos(theta)
+    yr = rightCenter[1] + minimumTurnRadius * np.sin(theta)
 
-    xcr = centerPoint2[0] + minimumTurnRadius * np.cos(theta)
-    ycr = centerPoint2[1] + minimumTurnRadius * np.sin(theta)
+    # xcr = centerPoint2[0] + minimumTurnRadius * np.cos(theta)
+    # ycr = centerPoint2[1] + minimumTurnRadius * np.sin(theta)
 
     fig, ax = plt.subplots()
     ax.plot(xl, yl)
-    ax.plot(xcr, ycr, c="g")
+    # ax.plot(xcr, ycr, c="g")
+
     ax.scatter(*pursuerPosition, c="r")
     ax.scatter(*point, c="k", marker="x")
-    ax.scatter(centerPoint2[0], centerPoint2[1], c="g")
+    # ax.scatter(centerPoint2[0], centerPoint2[1], c="g")
+    ax.plot(xr, yr)
 
     ax.set_aspect("equal", "box")
     # plot_dubins_path(
