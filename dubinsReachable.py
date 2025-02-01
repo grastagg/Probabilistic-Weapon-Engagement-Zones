@@ -2,6 +2,8 @@ from jaxlib.xla_client import make_convolution_dimension_numbers
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
+from scipy.optimize import root, root_scalar
+import scipy
 
 
 def dubins_reachable_set_foward_boundary_right(
@@ -20,7 +22,7 @@ def dubins_reachable_set_foward_boundary_right(
     x = rho * (1 - cosTheta) + (vt - rho * theta) * sinTheta
     y = rho * sinTheta + (vt - rho * theta) * cosTheta
 
-    return np.array([x, y])
+    return np.vstack([x, y]).T
 
 
 def dubins_reachable_set_foward_boundary_left(
@@ -39,7 +41,7 @@ def dubins_reachable_set_foward_boundary_left(
     x = -(rho * (1 - cosTheta) + (vt - rho * theta) * sinTheta)
     y = rho * sinTheta + (vt - rho * theta) * cosTheta
 
-    return np.array([x, y])
+    return np.vstack([x, y]).T
 
 
 def dubins_reachable_set_backward_boundary_right(
@@ -52,7 +54,7 @@ def dubins_reachable_set_backward_boundary_right(
 
     x = rho * (2 * np.cos(theta) - 1 - np.cos(2 * theta - vt / rho))
     y = rho * (2 * sinTheta - np.sin(2 * theta - vt / rho))
-    return np.array([x, y])
+    return np.vstack([x, y]).T
 
 
 def dubins_reachable_set_backward_boundary_left(
@@ -68,7 +70,7 @@ def dubins_reachable_set_backward_boundary_left(
     # y = rho * (2 * sinTheta - np.sin(2 * theta - vt / rho))
     x = -rho * (2 * np.cos(theta) - 1 - np.cos(2 * theta - vt / rho))
     y = rho * (2 * sinTheta - np.sin(2 * theta - vt / rho))
-    return np.array([x, y])
+    return np.vstack([x, y]).T
 
 
 def find_theta_backward_boundary(heading, velocity, minimumTurnRadius, time):
@@ -100,22 +102,52 @@ def check_forward_boundaries_going_right(
             rho * np.sin(theta)
             + (velocity * time - rho * theta) * np.cos(theta)
             - point[1]
+        ) ** 2
+
+    def func_prime(theta):
+        return (
+            2
+            * (
+                rho * np.sin(theta)
+                + (velocity * time - rho * theta) * np.cos(theta)
+                - point[1]
+            )
+            * (-(velocity * time - rho * theta) * np.sin(theta))
         )
+        # return -(velocity * time - rho * theta) * np.sin(theta)
 
     thetaLimit = velocity * time * minimumTurnRadius
+    initialGuesses = [0.0, thetaLimit / 2, thetaLimit]
+    thetaSolutions = []
+    for initialGuess in initialGuesses:
+        thetaSol = root(
+            func,
+            x0=initialGuess,
+            jac=func_prime,
+        ).x[0]
+        if np.isclose(func(thetaSol), 0, atol=1e-6):
+            thetaSolutions.append(thetaSol)
+    thetaSolutions = np.array(thetaSolutions)
+    thetaSolutions = np.unique(thetaSolutions)
+    print("thetaSolutions", thetaSolutions)
+    print("func(thetaSolutions)", func(thetaSolutions))
 
-    theta_solutions = fsolve(func, [thetaLimit / 2])
-    thetaSolutions = np.array(theta_solutions)
-    thetaSolutions = theta_solutions[thetaSolutions > 0]
-    thetaSolutions = theta_solutions[thetaSolutions < thetaLimit]
+    if len(thetaSolutions) == 0:
+        return np.array([[-np.inf, -np.inf]])
+
+    print("thetaLimit", thetaLimit)
+    thetaSolutions = np.array(thetaSolutions)
+    # thetaSolutions = thetaSolutions[thetaSolutions > 0]
+    # thetaSolutions = thetaSolutions[thetaSolutions < thetaLimit]
+    print("thetaSolutions", thetaSolutions)
     intersectionPoint = dubins_reachable_set_foward_boundary_right(
-        heading, velocity, minimumTurnRadius, time, theta_solutions[0]
+        heading, velocity, minimumTurnRadius, time, thetaSolutions
     )
     return intersectionPoint
 
 
 def check_backward_boundaries_going_right(
-    point, heading, velocity, minimumTurnRadius, time
+    point, heading, velocity, minimumTurnRadius, time, thetaLimit
 ):
     rho = 1 / minimumTurnRadius
 
@@ -125,19 +157,25 @@ def check_backward_boundaries_going_right(
             - point[1]
         )
 
-    thetaLimit = velocity * time * minimumTurnRadius
+    def func_prime(theta):
+        return 2 * rho * (np.cos(theta) - np.cos(2 * theta - velocity * time / rho))
 
-    theta_solutions = fsolve(func, [0.0])
-    thetaSolutions = np.array(theta_solutions)
-    thetaSolutions = theta_solutions[thetaSolutions > 0]
-    thetaSolutions = theta_solutions[thetaSolutions < thetaLimit]
+    thetaSolutions = root(func, x0=thetaLimit / 2, jac=func_prime).x
+
+    thetaSolutions = np.array(thetaSolutions)
+    thetaSolutions = thetaSolutions[thetaSolutions > 0]
+    thetaSolutions = thetaSolutions[thetaSolutions < thetaLimit]
+    if thetaSolutions.size == 0:
+        return np.array([[-np.inf, -np.inf]])
     intersectionPoint = dubins_reachable_set_backward_boundary_right(
-        heading, velocity, minimumTurnRadius, time, theta_solutions[0]
+        heading, velocity, minimumTurnRadius, time, thetaSolutions[0]
     )
     return intersectionPoint
 
 
-def point_in_dubins_reachable_set(point, heading, velocity, minimumTurnRadius, time):
+def point_in_dubins_reachable_set(
+    point, heading, velocity, minimumTurnRadius, time, backThetaLimit
+):
     leftHalfPlane = False
     if point[0] < 0:
         # if point is in left half plan, reflect accross y-axis and check ray going right
@@ -147,66 +185,56 @@ def point_in_dubins_reachable_set(point, heading, velocity, minimumTurnRadius, t
     intersectionPointForwardBoundary = check_forward_boundaries_going_right(
         point, heading, velocity, minimumTurnRadius, time
     )
+    print("intersectionPointForwardBoundary", intersectionPointForwardBoundary)
     intersectionPointBackwardBoundary = check_backward_boundaries_going_right(
-        point, heading, velocity, minimumTurnRadius, time
+        point, heading, velocity, minimumTurnRadius, time, backThetaLimit
     )
-
-    intersectionPointXValues = np.array(
-        [intersectionPointForwardBoundary[0], intersectionPointBackwardBoundary[0]]
+    print("intersectionPointBackwardBoundary", intersectionPointBackwardBoundary)
+    intersectionPointXValues = np.hstack(
+        [
+            intersectionPointForwardBoundary[:, 0],
+            intersectionPointBackwardBoundary[:, 0],
+        ]
     )
     numIntersection = np.count_nonzero(intersectionPointXValues > point[0])
     inReachable = numIntersection % 2 == 1
     print("inReachable", inReachable)
     if leftHalfPlane:
-        intersectionPointForwardBoundary[0] = -intersectionPointForwardBoundary[0]
-        intersectionPointBackwardBoundary[0] = -intersectionPointBackwardBoundary[0]
-    return intersectionPointForwardBoundary, intersectionPointBackwardBoundary
+        intersectionPointForwardBoundary[:, 0] = -intersectionPointForwardBoundary[:, 0]
+        intersectionPointBackwardBoundary[:, 0] = -intersectionPointBackwardBoundary[
+            :, 0
+        ]
+        point[0] = -point[0]
+    return (
+        inReachable,
+        intersectionPointForwardBoundary,
+        intersectionPointBackwardBoundary,
+    )
 
 
 def plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time):
     numSamples = 100
-    theta = np.linspace(
-        -velocity * time * minimumTurnRadius,
-        velocity * time * minimumTurnRadius,
-        numSamples,
-    )
     maxTheta = find_theta_backward_boundary(heading, velocity, minimumTurnRadius, time)
     thetaBackwardRight = np.linspace(0, maxTheta[0], numSamples)
     thetaBackwardLeft = np.linspace(0, maxTheta[0], numSamples)
     thetaForwardRight = np.linspace(0, velocity * time * minimumTurnRadius, numSamples)
     thetaForwardLeft = np.linspace(0, velocity * time * minimumTurnRadius, numSamples)
 
-    pointsForwardLeft = []
-    pointsForwardRight = []
-    pointsBackwardLeft = []
-    pointsBackwardRight = []
+    pointsForwardLeft = dubins_reachable_set_foward_boundary_left(
+        heading, velocity, minimumTurnRadius, time, thetaForwardLeft
+    )
 
-    for i in range(numSamples):
-        pointsForwardLeft.append(
-            dubins_reachable_set_foward_boundary_left(
-                heading, velocity, minimumTurnRadius, time, thetaForwardLeft[i]
-            )
-        )
-        pointsForwardRight.append(
-            dubins_reachable_set_foward_boundary_right(
-                heading, velocity, minimumTurnRadius, time, thetaForwardRight[i]
-            )
-        )
-        pointsBackwardLeft.append(
-            dubins_reachable_set_backward_boundary_left(
-                heading, velocity, minimumTurnRadius, time, thetaBackwardLeft[i]
-            )
-        )
-        pointsBackwardRight.append(
-            dubins_reachable_set_backward_boundary_right(
-                heading, velocity, minimumTurnRadius, time, thetaBackwardRight[i]
-            )
-        )
+    pointsForwardRight = dubins_reachable_set_foward_boundary_right(
+        heading, velocity, minimumTurnRadius, time, thetaForwardRight
+    )
 
-    pointsForwardLeft = np.array(pointsForwardLeft)
-    pointsForwardRight = np.array(pointsForwardRight)
-    pointsBackwardLeft = np.array(pointsBackwardLeft)
-    pointsBackwardRight = np.array(pointsBackwardRight)
+    pointsBackwardLeft = dubins_reachable_set_backward_boundary_left(
+        heading, velocity, minimumTurnRadius, time, thetaBackwardLeft
+    )
+    pointsBackwardRight = dubins_reachable_set_backward_boundary_right(
+        heading, velocity, minimumTurnRadius, time, thetaBackwardRight
+    )
+
     startPosition = np.array([0, 0])
     leftCenter = np.array(
         [
@@ -226,12 +254,12 @@ def plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time):
     xLeft = leftCenter[0] + minimumTurnRadius * np.cos(theta)
     yLeft = leftCenter[1] + minimumTurnRadius * np.sin(theta)
 
-    plt.plot(xRight, yRight)
-    plt.plot(xLeft, yLeft)
-    plt.plot(pointsForwardLeft[:, 0], pointsForwardLeft[:, 1])
-    plt.plot(pointsForwardRight[:, 0], pointsForwardRight[:, 1])
-    plt.plot(pointsBackwardLeft[:, 0], pointsBackwardLeft[:, 1])
-    plt.plot(pointsBackwardRight[:, 0], pointsBackwardRight[:, 1])
+    plt.plot(xRight, yRight, c="k")
+    plt.plot(xLeft, yLeft, c="k")
+    plt.plot(pointsForwardLeft[:, 0], pointsForwardLeft[:, 1], c="r")
+    plt.plot(pointsForwardRight[:, 0], pointsForwardRight[:, 1], c="r")
+    plt.plot(pointsBackwardLeft[:, 0], pointsBackwardLeft[:, 1], c="r")
+    plt.plot(pointsBackwardRight[:, 0], pointsBackwardRight[:, 1], c="r")
 
     ax = plt.gca()
     ax.set_aspect("equal")
@@ -245,17 +273,25 @@ def main():
     minimumTurnRadius = 1
     pursuerRange = 1.5 * np.pi
     time = pursuerRange / velocity
-    point = np.array([2, 2])
-    intersectionPointF, intersectionPointB = point_in_dubins_reachable_set(
-        point, heading, velocity, minimumTurnRadius, time
+    point = np.array([-0.5, -1.1])
+    thetaLimit = find_theta_backward_boundary(
+        heading, velocity, minimumTurnRadius, time
+    )
+    inReachable, intersectionPointF, intersectionPointB = point_in_dubins_reachable_set(
+        point, heading, velocity, minimumTurnRadius, time, thetaLimit
     )
 
     # time = (6.0 / 3.0) * np.pi
     # time = 1
     ax = plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time)
-    ax.scatter(*point, c="r")
-    ax.scatter(*intersectionPointF, c="g")
-    ax.scatter(*intersectionPointB, c="g")
+
+    c = "g"
+    if inReachable:
+        c = "r"
+
+    ax.scatter(*point, c=c)
+    ax.scatter(intersectionPointF[:, 0], intersectionPointF[:, 1], c="g", marker="x")
+    ax.scatter(intersectionPointB[:, 0], intersectionPointB[:, 1], c="g", marker="x")
     plt.show()
 
 
