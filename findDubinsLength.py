@@ -9,6 +9,7 @@ import matplotlib.cm as cm
 
 
 import dubinsReachable
+import testDubins
 
 
 jax.config.update("jax_enable_x64", True)
@@ -305,6 +306,117 @@ vectorized_find_shortest_dubins_path = jax.vmap(
 )
 
 
+@jax.jit
+def in_dubins_engagement_zone_single(
+    startPosition,
+    startHeading,
+    turnRadius,
+    captureRadius,
+    pursuerRange,
+    pursuerSpeed,
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+):
+    speedRatio = evaderSpeed / pursuerSpeed
+    numPoints = 100
+    lam = jnp.linspace(0, 1, numPoints)[:, None]
+
+    # Compute goal positions
+    direction = jnp.array(
+        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
+    )  # Heading unit vector
+    goalPositions = evaderPosition + lam * speedRatio * pursuerRange * direction
+    dubinsPathLengths = vectorized_find_shortest_dubins_path(
+        startPosition, startHeading, goalPositions, turnRadius
+    )
+
+    ez = dubinsPathLengths - lam.flatten() * (captureRadius + pursuerRange)
+
+    # ezMin = jnp.nanmin(ez)
+    inEz = ez < 0
+    inEz = jnp.any(inEz)
+    return inEz
+
+
+# Vectorized function using vmap
+in_dubins_engagement_zone = jax.jit(
+    jax.vmap(
+        in_dubins_engagement_zone_single,
+        in_axes=(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            0,
+            None,
+        ),  # Vectorizing over evaderPosition & evaderHeading
+    )
+)
+
+
+def plot_dubins_EZ(
+    pursuerPosition,
+    pursuerHeading,
+    pursuerSpeed,
+    minimumTurnRadius,
+    captureRadius,
+    pursuerRange,
+    evaderHeading,
+    evaderSpeed,
+):
+    numPoints = 500
+    x = jnp.linspace(-2, 2, numPoints)
+    y = jnp.linspace(-2, 2, numPoints)
+    [X, Y] = jnp.meshgrid(x, y)
+    Z = jnp.zeros_like(X)
+    X = X.flatten()
+    Y = Y.flatten()
+    evaderHeadings = np.ones_like(X) * evaderHeading
+    Z = in_dubins_engagement_zone(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        jnp.array([X, Y]).T,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    Z = Z.reshape(numPoints, numPoints)
+    X = X.reshape(numPoints, numPoints)
+    Y = Y.reshape(numPoints, numPoints)
+    fig, ax = plt.subplots()
+    ax.contour(X, Y, Z)
+    ax.scatter(*pursuerPosition, c="r")
+    ax.set_aspect("equal", "box")
+    ax.set_aspect("equal", "box")
+    theta = np.linspace(0, 2 * np.pi, 100)
+    leftCenter = np.array(
+        [
+            pursuerPosition[0] - minimumTurnRadius * np.sin(pursuerHeading),
+            pursuerPosition[1] + minimumTurnRadius * np.cos(pursuerHeading),
+        ]
+    )
+    rightCenter = np.array(
+        [
+            pursuerPosition[0] + minimumTurnRadius * np.sin(pursuerHeading),
+            pursuerPosition[1] - minimumTurnRadius * np.cos(pursuerHeading),
+        ]
+    )
+    leftX = leftCenter[0] + minimumTurnRadius * np.cos(theta)
+    leftY = leftCenter[1] + minimumTurnRadius * np.sin(theta)
+    rightX = rightCenter[0] + minimumTurnRadius * np.cos(theta)
+    rightY = rightCenter[1] + minimumTurnRadius * np.sin(theta)
+    plt.plot(leftX, leftY, "b")
+    plt.plot(rightX, rightY, "b")
+    return ax
+
+
 def plot_dubins_path(
     startPosition, startHeading, goalPosition, radius, captureRadius, tangentPoint
 ):
@@ -367,13 +479,33 @@ def plot_dubins_reachable_set(pursuerPosition, pursuerHeading, pursuerRange, rad
     ax.pcolormesh(X, Y, Z)
     ax.scatter(*pursuerPosition, c="r")
     ax.set_aspect("equal", "box")
+    ax.set_aspect("equal", "box")
+    theta = np.linspace(0, 2 * np.pi, 100)
+    leftCenter = np.array(
+        [
+            pursuerPosition[0] - radius * np.sin(pursuerHeading),
+            pursuerPosition[1] + radius * np.cos(pursuerHeading),
+        ]
+    )
+    rightCenter = np.array(
+        [
+            pursuerPosition[0] + radius * np.sin(pursuerHeading),
+            pursuerPosition[1] - radius * np.cos(pursuerHeading),
+        ]
+    )
+    leftX = leftCenter[0] + radius * np.cos(theta)
+    leftY = leftCenter[1] + radius * np.sin(theta)
+    rightX = rightCenter[0] + radius * np.cos(theta)
+    rightY = rightCenter[1] + radius * np.sin(theta)
+    plt.plot(leftX, leftY, "b")
+    plt.plot(rightX, rightY, "b")
     return ax
 
 
 def main():
     pursuerVelocity = 1
     minimumTurnRadius = 1
-    pursuerRange = 1 * np.pi
+    pursuerRange = 1.5 * np.pi
     pursuerPosition = np.array([0, 0])
     pursuerHeading = np.pi / 2
 
@@ -401,6 +533,13 @@ def main():
     xr = rightCenter[0] + minimumTurnRadius * np.cos(theta)
     yr = rightCenter[1] + minimumTurnRadius * np.sin(theta)
 
+    offset = 0.5
+    length_temp = pursuerRange - offset
+    arcAngle = length_temp / minimumTurnRadius
+    thetaTemp = -np.linspace(0, arcAngle, 100) - np.pi
+    xr_temp = rightCenter[0] + minimumTurnRadius * np.cos(thetaTemp)
+    yr_temp = (rightCenter[1] + offset) + minimumTurnRadius * np.sin(thetaTemp)
+
     # xcr = centerPoint2[0] + minimumTurnRadius * np.cos(theta)
     # ycr = centerPoint2[1] + minimumTurnRadius * np.sin(theta)
 
@@ -408,6 +547,7 @@ def main():
         pursuerPosition, pursuerHeading, pursuerRange, minimumTurnRadius
     )
     ax.plot(xl, yl)
+    ax.plot(xr_temp, yr_temp)
     # ax.plot(xcr, ycr, c="g")
 
     ax.scatter(*pursuerPosition, c="r")
@@ -427,5 +567,49 @@ def main():
     plt.show()
 
 
+def main_EZ():
+    pursuerPosition = np.array([0, 0])
+    pursuerHeading = np.pi / 2
+    pursuerSpeed = 2
+    pursuerRange = 1
+    minimumTurnRadius = 0.2
+    captureRadius = 0.0
+    evaderHeading = np.pi / 2
+    evaderSpeed = 1
+    evaderPosition = np.array([0.0, 0.9])
+    inEz = in_dubins_engagement_zone_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+    )
+    print(inEz)
+    ax = plot_dubins_EZ(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        evaderHeading,
+        evaderSpeed,
+    )
+    plotEngagementZone(
+        evaderHeading,
+        pursuerPosition,
+        pursuerRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        ax,
+    )
+    plt.show()
+
+
 if __name__ == "__main__":
-    main()
+    main_EZ()

@@ -751,6 +751,7 @@ def plot_dubins_engagement_zone(
     pursuerSpeed,
     evaderSpeed,
     evaderHeading,
+    ax,
 ):
     numPoints = 501
     x = np.linspace(-2, 2, numPoints)
@@ -778,16 +779,15 @@ def plot_dubins_engagement_zone(
 
     print("Time: ", time.time() - start)
 
-    plt.figure()
-    c = plt.contour(
+    c = ax.contour(
         X.reshape((numPoints, numPoints)),
         Y.reshape((numPoints, numPoints)),
         Z.reshape((numPoints, numPoints)),
         levels=[0],
+        cmap="coolwarm",
     )
-    ax = plt.gca()
     ax.set_aspect("equal", "box")
-    plt.scatter(*startPosition, c="g")
+    ax.scatter(*startPosition, c="g")
     theta = np.linspace(0, 2 * np.pi, 100)
     leftCenter = np.array(
         [
@@ -805,8 +805,8 @@ def plot_dubins_engagement_zone(
     leftY = leftCenter[1] + turnRadius * np.sin(theta)
     rightX = rightCenter[0] + turnRadius * np.cos(theta)
     rightY = rightCenter[1] + turnRadius * np.sin(theta)
-    plt.plot(leftX, leftY, "b")
-    plt.plot(rightX, rightY, "b")
+    ax.plot(leftX, leftY, "b")
+    ax.plot(rightX, rightY, "b")
     # plt.contour(X, Y, collisionRegion, levels=[0])
     return ax
 
@@ -814,49 +814,13 @@ def plot_dubins_engagement_zone(
 def main():
     startPosition = np.array([0, 0])
     startHeading = np.pi / 2
-    turnRadius = 0.5
+    turnRadius = 1.0
     captureRadius = 0.0
     pursuerRange = 1.0
     pursuerSpeed = 2
     evaderSpeed = 1
-    agentHeading = 0
-    #
-    # length = find_dubins_path_length(
-    #     startPosition, startHeading, agentPosition, turnRadius
-    # )
-    # print("Length: ", length)
-    # closest point:  [-0.10821643 -0.54108216]
-    # evaderPosition = np.array([-0.2, 0.1])
-    # # #
-    # inEZ = new_in_dubins_engagement_zone_single(
-    #     startPosition,
-    #     startHeading,
-    #     turnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     evaderPosition,
-    #     agentHeading,
-    #     evaderSpeed,
-    # )
-    # print("In EZ: ", inEZ)
-    # evaderPosition = np.array([0.0, -0.09])
-    # #
-    # # ez: [0.05 - 0.06]
-    # point = np.array([-0.10821643, -0.04108216])
-    # [0.0042828  0.00437127]
-    # [ 0.10379988 -0.00620012]
-    # point = np.array([0.10379988, -0.00620012])
-    # point = np.array([-0.5, 0.5])
-    # length, tangetPoint, _ = find_dubins_path_length(
-    #     startPosition, startHeading, point, turnRadius, captureRadius
-    # )
-    # print("Length: ", length)
-    # plot_dubins_path(
-    #     startPosition, startHeading, point, turnRadius, captureRadius, tangetPoint
-    # )
-    # print("Length: ", length)
-    #
+    agentHeading = np.pi / 2
+    evaderPosition = np.array([1, 0])
     ax = plot_dubins_engagement_zone(
         startPosition,
         startHeading,
