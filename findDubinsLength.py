@@ -574,7 +574,7 @@ def main_EZ():
     pursuerRange = 1
     minimumTurnRadius = 0.2
     captureRadius = 0.0
-    evaderHeading = np.pi / 2
+    evaderHeading = np.pi / 4
     evaderSpeed = 1
     evaderPosition = np.array([0.0, 0.9])
     inEz = in_dubins_engagement_zone_single(
@@ -606,6 +606,17 @@ def main_EZ():
         captureRadius,
         pursuerSpeed,
         evaderSpeed,
+        ax,
+    )
+    testDubins.plot_dubins_engagement_zone(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderSpeed,
+        evaderHeading,
         ax,
     )
     plt.show()
