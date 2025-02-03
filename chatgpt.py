@@ -1,35 +1,65 @@
-import numpy as np
-import matplotlib.pyplot as plt
+import jax.numpy as jnp
+from jax import jit, lax
 
 
-def minkowski_sum(A, B):
+@jit
+def circle_segment_intersection_jax(circle_center, radius, A, B):
     """
-    Computes the Minkowski sum of two sets A and B.
+    Computes the single intersection point of a line segment AB with a circle using JAX.
 
-    Parameters:
-        A (ndarray): An (m, n) array representing m points in n-dimensional space.
-        B (ndarray): A (p, n) array representing p points in n-dimensional space.
+    Args:
+        circle_center (tuple): (h, k) center of the circle.
+        radius (float): Radius of the circle.
+        A (tuple): (x1, y1) first point of the segment.
+        B (tuple): (x2, y2) second point of the segment.
 
     Returns:
-        ndarray: The Minkowski sum of A and B.
+        jnp.ndarray: Intersection point (x, y) or empty array if no intersection.
     """
-    A = A[:, np.newaxis, :]  # Reshape A to (m,1,n)
-    B = B[np.newaxis, :, :]  # Reshape B to (1,p,n)
-    return (A + B).reshape(-1, A.shape[2])  # Compute sum and reshape to (m*p, n)
+    h, k = jnp.array(circle_center, dtype=jnp.float32)
+    r = radius
+    A = jnp.array(A, dtype=jnp.float32)
+    B = jnp.array(B, dtype=jnp.float32)
+
+    # Direction vector of the line segment
+    d = B - A
+
+    # Quadratic coefficients
+    A_coeff = jnp.dot(d, d)
+    B_coeff = 2 * jnp.dot(d, A - jnp.array([h, k]))
+    C_coeff = jnp.dot(A - jnp.array([h, k]), A - jnp.array([h, k])) - r**2
+
+    # Compute discriminant
+    discriminant = B_coeff**2 - 4 * A_coeff * C_coeff
+
+    def compute_intersection():
+        sqrt_disc = jnp.sqrt(discriminant)
+        t = (-B_coeff + sqrt_disc) / (
+            2 * A_coeff
+        )  # Only considering one root (single intersection)
+
+        # Check if t is within the segment range [0, 1]
+        valid_t = jnp.logical_and(0 <= t, t <= 1)
+
+        # Compute the intersection point
+        intersection_point = A + t * d
+
+        # Ensure the shape is consistent for both branches
+        intersection_point = jnp.expand_dims(intersection_point, axis=0)  # (1, 2)
+        empty_point = jnp.empty((0, 2))  # (0, 2) for no intersection
+
+        # Use jax.lax.select for conditional result based on valid_t
+        return lax.select(valid_t, intersection_point, empty_point)
+
+    # Use JAX conditional execution: return the intersection if discriminant >= 0
+    return lax.cond(discriminant >= 0, compute_intersection, lambda: jnp.empty((0, 2)))
 
 
-# Example: Minkowski Sum of Two 2D Shapes
-square = np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]])  # A square
-diamond = np.array([[0, 2], [2, 0], [0, -2], [-2, 0]])  # A diamond (rotated square)
+# Example usage
+circle_center = (0, 0)
+radius = 5
+A = (-6, 0)
+B = (6, 0)
 
-result = minkowski_sum(square, diamond)
-
-# Plot the original shapes and their Minkowski sum
-plt.figure(figsize=(6, 6))
-plt.scatter(square[:, 0], square[:, 1], color="blue", label="Square")
-plt.scatter(diamond[:, 0], diamond[:, 1], color="red", label="Diamond")
-plt.scatter(result[:, 0], result[:, 1], color="green", alpha=0.5, label="Minkowski Sum")
-plt.legend()
-plt.grid(True)
-plt.show()
-
+intersection = circle_segment_intersection_jax(circle_center, radius, A, B)
+print("Intersection point within segment:\n", intersection)
