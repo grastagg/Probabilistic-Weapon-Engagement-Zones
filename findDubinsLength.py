@@ -936,11 +936,23 @@ def plot_dubins_EZ(
     ZGeometricLeft = ZGeometricLeft.reshape(numPoints, numPoints)
     Z = jnp.logical_or(ZRight, ZLeft)
     ZGeometric = jnp.logical_or(ZGeometricRight, ZGeometricLeft)
+    ZTrue = in_dubins_engagement_zone(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        jnp.array([X, Y]).T,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    ZTrue = ZTrue.reshape(numPoints, numPoints)
 
-    # ZGeometric = ZGeometric.reshape(numPoints, numPoints)
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
     ax.contour(X, Y, Z)
+    # ax.contour(X, Y, ZTrue, cmap="summer")
     # ax.contour(X, Y, ZRight)
     # ax.contour(X, Y, Z)
     ax.contour(X, Y, ZGeometric, cmap="summer")
@@ -1125,7 +1137,7 @@ def main_EZ():
     pursuerSpeed = 2
 
     pursuerRange = 1
-    minimumTurnRadius = 0.1
+    minimumTurnRadius = 0.2
     captureRadius = 0.0
     evaderHeading = 0
     evaderSpeed = 1
