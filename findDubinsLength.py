@@ -171,6 +171,11 @@ def find_dubins_path_length_left_strait(
     return totalLength, tangentPoint
 
 
+find_dubins_path_length_left_strait_vec = jax.vmap(
+    find_dubins_path_length_left_strait, in_axes=(None, None, 0, None)
+)
+
+
 @jax.jit
 def circle_intersection(c1, c2, r1, r2):
     x1, y1 = c1
@@ -383,6 +388,55 @@ def in_dubins_engagement_zone_right_strait_single(
     return inEz
 
 
+def in_dubins_engagement_zone_left_strait_single(
+    startPosition,
+    startHeading,
+    turnRadius,
+    captureRadius,
+    pursuerRange,
+    pursuerSpeed,
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+):
+    speedRatio = evaderSpeed / pursuerSpeed
+    numPoints = 100
+    lam = jnp.linspace(0, 1, numPoints)[:, None]
+
+    # Compute goal positions
+    direction = jnp.array(
+        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
+    )  # Heading unit vector
+    goalPositions = evaderPosition + lam * speedRatio * pursuerRange * direction
+    dubinsPathLengths, _ = find_dubins_path_length_left_strait_vec(
+        startPosition, startHeading, goalPositions, turnRadius
+    )
+
+    ez = dubinsPathLengths - lam.flatten() * (captureRadius + pursuerRange)
+
+    # ezMin = jnp.nanmin(ez)
+    inEz = ez < 0
+    inEz = jnp.any(inEz)
+    # print("min lam", lam[jnp.argmin(ez)])
+    # print("min ez", jnp.min(ez))
+    # print("min goal", goalPositions[jnp.argmin(ez)])
+    # fig, ax = plt.subplots()
+    # ax.scatter(lam, dubinsPathLengths, label="dubinsPathLengths")
+    # ax.scatter(lam, ez, label="ez")
+    # ax.scatter(lam, dubinsPathLengths, label="dubinsPathLengths")
+    # ax.scatter(lam, ez, label="ez")
+    # plt.legend()
+    # fig2, axis = plt.subplots()
+    # axis.scatter(
+    #     goalPositions[:, 0],
+    #     goalPositions[:, 1],
+    # )
+    # plot_turn_radius_circles(startPosition, startHeading, turnRadius, axis)
+    # axis.set_aspect("equal", "box")
+    # axis.plot([0, 0], [0, 3])
+    return inEz
+
+
 @jax.jit
 def circle_segment_intersection(circle_center, radius, A, B, startPoint):
     """
@@ -503,22 +557,16 @@ def find_goal_point_and_lam_circle_intersection(
     evaderFinalPosition,
     pursuerRange,
     speedRatio,
+    circleCenter,
 ):
-    rightCenter = jnp.array(
-        [
-            pursuerPosition[0] + turnRadius * jnp.sin(pursuerHeading),
-            pursuerPosition[1] - turnRadius * jnp.cos(pursuerHeading),
-        ]
-    )
-
     intersectionPoints = circle_segment_intersection(
-        rightCenter, turnRadius, evaderPosition, evaderFinalPosition, evaderPosition
+        circleCenter, turnRadius, evaderPosition, evaderFinalPosition, evaderPosition
     )
     goalPosition = intersectionPoints
     # ensure goal position is slightly outside circle
-    directionVector = goalPosition - rightCenter
+    directionVector = goalPosition - circleCenter
     directionVector = directionVector / jnp.linalg.norm(directionVector)
-    goalPosition = rightCenter + (turnRadius * 1.001) * directionVector
+    goalPosition = circleCenter + (turnRadius * 1.001) * directionVector
 
     lam = jnp.linalg.norm(goalPosition - evaderPosition) / (speedRatio * pursuerRange)
     lam = jnp.where(lam > 1, jnp.nan, lam)
@@ -547,8 +595,8 @@ def find_goal_point_and_lam_line_intersection(
     return lam, goalPosition
 
 
-# @jax.jit
-def new_in_dubins_engagement_zone_right_strait_geometric_single(
+@jax.jit
+def in_dubins_engagement_zone_right_strait_geometric_single(
     pursuerPosition,
     pursuerHeading,
     turnRadius,
@@ -564,6 +612,12 @@ def new_in_dubins_engagement_zone_right_strait_geometric_single(
     finalPoint = evaderPosition + speedRatio * pursuerRange * jnp.array(
         [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
     )
+    rightCenter = jnp.array(
+        [
+            pursuerPosition[0] + turnRadius * jnp.sin(pursuerHeading),
+            pursuerPosition[1] - turnRadius * jnp.cos(pursuerHeading),
+        ]
+    )
 
     lamCircleIntersection, goalPositionCicleIntersection = (
         find_goal_point_and_lam_circle_intersection(
@@ -574,6 +628,7 @@ def new_in_dubins_engagement_zone_right_strait_geometric_single(
             finalPoint,
             pursuerRange,
             speedRatio,
+            rightCenter,
         )
     )
 
@@ -615,9 +670,102 @@ def new_in_dubins_engagement_zone_right_strait_geometric_single(
     return inEz
 
 
+@jax.jit
+def in_dubins_engagement_zone_left_strait_geometric_single(
+    pursuerPosition,
+    pursuerHeading,
+    turnRadius,
+    captureRadius,
+    pursuerRange,
+    pursuerSpeed,
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+):
+    speedRatio = evaderSpeed / pursuerSpeed
+
+    finalPoint = evaderPosition + speedRatio * pursuerRange * jnp.array(
+        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
+    )
+
+    leftCenter = jnp.array(
+        [
+            pursuerPosition[0] - turnRadius * jnp.sin(pursuerHeading),
+            pursuerPosition[1] + turnRadius * jnp.cos(pursuerHeading),
+        ]
+    )
+
+    lamCircleIntersection, goalPositionCicleIntersection = (
+        find_goal_point_and_lam_circle_intersection(
+            pursuerPosition,
+            pursuerHeading,
+            turnRadius,
+            evaderPosition,
+            finalPoint,
+            pursuerRange,
+            speedRatio,
+            leftCenter,
+        )
+    )
+
+    lamLineIntersection, goalPositionLineIntersection = (
+        find_goal_point_and_lam_line_intersection(
+            pursuerPosition,
+            pursuerHeading,
+            evaderPosition,
+            finalPoint,
+            pursuerRange,
+            speedRatio,
+        )
+    )
+
+    lamFinal = 1.0
+    goalPositionFinal = finalPoint
+
+    dubinsPathLengthsCircleIntersection, _ = find_dubins_path_length_left_strait(
+        pursuerPosition, pursuerHeading, goalPositionCicleIntersection, turnRadius
+    )
+    dubinsPathLengthsFinal, _ = find_dubins_path_length_left_strait(
+        pursuerPosition, pursuerHeading, goalPositionFinal, turnRadius
+    )
+    dubinsPathLengthsLineIntersection, _ = find_dubins_path_length_left_strait(
+        pursuerPosition, pursuerHeading, goalPositionLineIntersection, turnRadius
+    )
+
+    ezCircleIntersection = (
+        dubinsPathLengthsCircleIntersection
+        - lamCircleIntersection * (captureRadius + pursuerRange)
+    )
+    ezFinal = dubinsPathLengthsFinal - lamFinal * (captureRadius + pursuerRange)
+    ezLineIntersection = dubinsPathLengthsLineIntersection - lamLineIntersection * (
+        captureRadius + pursuerRange
+    )
+    ez = nanmin_jax(ezCircleIntersection, ezFinal, ezLineIntersection)
+
+    inEz = ez < 0
+    return inEz
+
+
 in_dubins_engagement_zone_right_strait_geometric = jax.jit(
     jax.vmap(
-        new_in_dubins_engagement_zone_right_strait_geometric_single,
+        in_dubins_engagement_zone_right_strait_geometric_single,
+        in_axes=(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            0,
+            None,
+        ),  # Vectorizing over evaderPosition & evaderHeading
+    )
+)
+
+in_dubins_engagement_zone_left_strait_geometric = jax.jit(
+    jax.vmap(
+        in_dubins_engagement_zone_left_strait_geometric_single,
         in_axes=(
             None,
             None,
@@ -635,6 +783,23 @@ in_dubins_engagement_zone_right_strait_geometric = jax.jit(
 in_dubins_engagement_zone_right_strait = jax.jit(
     jax.vmap(
         in_dubins_engagement_zone_right_strait_single,
+        in_axes=(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            0,
+            None,
+        ),  # Vectorizing over evaderPosition & evaderHeading
+    )
+)
+
+in_dubins_engagement_zone_left_strait = jax.jit(
+    jax.vmap(
+        in_dubins_engagement_zone_left_strait_single,
         in_axes=(
             None,
             None,
@@ -720,7 +885,7 @@ def plot_dubins_EZ(
     X = X.flatten()
     Y = Y.flatten()
     evaderHeadings = np.ones_like(X) * evaderHeading
-    Z = in_dubins_engagement_zone_right_strait(
+    ZLeft = in_dubins_engagement_zone_left_strait(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -731,8 +896,7 @@ def plot_dubins_EZ(
         evaderHeadings,
         evaderSpeed,
     )
-    startTime = time.time()
-    Z = in_dubins_engagement_zone_right_strait(
+    ZRight = in_dubins_engagement_zone_right_strait(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -743,9 +907,7 @@ def plot_dubins_EZ(
         evaderHeadings,
         evaderSpeed,
     )
-    print("Z", Z)
-    print("time for sampling", time.time() - startTime)
-    ZGeometric = in_dubins_engagement_zone_right_strait_geometric(
+    ZGeometricRight = in_dubins_engagement_zone_right_strait_geometric(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -756,8 +918,7 @@ def plot_dubins_EZ(
         evaderHeadings,
         evaderSpeed,
     )
-    startTime = time.time()
-    ZGeometric = in_dubins_engagement_zone_right_strait_geometric(
+    ZGeometricLeft = in_dubins_engagement_zone_left_strait_geometric(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -768,18 +929,20 @@ def plot_dubins_EZ(
         evaderHeadings,
         evaderSpeed,
     )
-    print("ZGeometric", ZGeometric)
-    print("time for geometric", time.time() - startTime)
-    print("not matching X", X[Z != ZGeometric])
-    print("not matching Y", Y[Z != ZGeometric])
-    print("Z at not matching", Z[Z != ZGeometric])
-    print("ZGeometric at not matching", ZGeometric[Z != ZGeometric])
     fig, ax = plt.subplots()
-    Z = Z.reshape(numPoints, numPoints)
-    ZGeometric = ZGeometric.reshape(numPoints, numPoints)
+    ZRight = ZRight.reshape(numPoints, numPoints)
+    ZLeft = ZLeft.reshape(numPoints, numPoints)
+    ZGeometricRight = ZGeometricRight.reshape(numPoints, numPoints)
+    ZGeometricLeft = ZGeometricLeft.reshape(numPoints, numPoints)
+    Z = jnp.logical_or(ZRight, ZLeft)
+    ZGeometric = jnp.logical_or(ZGeometricRight, ZGeometricLeft)
+
+    # ZGeometric = ZGeometric.reshape(numPoints, numPoints)
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
     ax.contour(X, Y, Z)
+    # ax.contour(X, Y, ZRight)
+    # ax.contour(X, Y, Z)
     ax.contour(X, Y, ZGeometric, cmap="summer")
     ax.scatter(*pursuerPosition, c="r")
     ax.set_aspect("equal", "box")
@@ -962,7 +1125,7 @@ def main_EZ():
     pursuerSpeed = 2
 
     pursuerRange = 1
-    minimumTurnRadius = 0.5
+    minimumTurnRadius = 0.1
     captureRadius = 0.0
     evaderHeading = 0
     evaderSpeed = 1
@@ -988,54 +1151,30 @@ def main_EZ():
     # X = X.flatten()
     # Y = Y.flatten()
     # evaderHeadings = np.ones_like(X) * evaderHeading
-    inEz = in_dubins_engagement_zone_right_strait_single(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-    )
-    print(inEz)
-    inEZ = new_in_dubins_engagement_zone_right_strait_geometric_single(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-    )
-    print(inEZ)
-    # Z = in_dubins_engagement_zone_right_strait(
+    # inEz = in_dubins_engagement_zone_right_strait_single(
     #     pursuerPosition,
     #     pursuerHeading,
     #     minimumTurnRadius,
     #     captureRadius,
     #     pursuerRange,
     #     pursuerSpeed,
-    #     jnp.array([X, Y]).T,
-    #     evaderHeadings,
+    #     evaderPosition,
+    #     evaderHeading,
     #     evaderSpeed,
     # )
-    # print(Z)
-    # ZG = in_dubins_engagement_zone_right_strait_geometric(
+    # print(inEz)
+    # inEZ = new_in_dubins_engagement_zone_right_strait_geometric_single(
     #     pursuerPosition,
     #     pursuerHeading,
     #     minimumTurnRadius,
     #     captureRadius,
     #     pursuerRange,
     #     pursuerSpeed,
-    #     jnp.array([X, Y]).T,
-    #     evaderHeadings,
+    #     evaderPosition,
+    #     evaderHeading,
     #     evaderSpeed,
     # )
-    # print(format(Y[Z != ZG][0], ".60g"))
+    # print(inEZ)
     ax = plot_dubins_EZ(
         pursuerPosition,
         pursuerHeading,
