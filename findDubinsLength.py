@@ -467,7 +467,7 @@ def in_dubins_engagement_zone_left_right_single(
         [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
     )  # Heading unit vector
     goalPositions = evaderPosition + lam * speedRatio * pursuerRange * direction
-    dubinsPathLengths, secondCenterPoint = find_dubins_path_length_left_right_vec(
+    dubinsPathLengths, secondCenterPoints = find_dubins_path_length_left_right_vec(
         startPosition, startHeading, goalPositions, turnRadius
     )
 
@@ -476,6 +476,7 @@ def in_dubins_engagement_zone_left_right_single(
     # ezMin = jnp.nanmin(ez)
     inEz = ez < 0
     inEz = jnp.any(inEz)
+
     print("min lam", lam[jnp.nanargmin(ez)])
     print("min ez", jnp.nanmin(ez))
     print("min goal", goalPositions[jnp.nanargmin(ez)])
@@ -484,6 +485,9 @@ def in_dubins_engagement_zone_left_right_single(
     ax.scatter(lam, ez, label="ez")
     ax.scatter(lam, dubinsPathLengths, label="dubinsPathLengths")
     ax.scatter(lam, ez, label="ez")
+
+    testGoalPositions = goalPositions[::5]
+    testSecondCenters = secondCenterPoints[::5]
 
     plt.legend()
     fig2, axis = plt.subplots()
@@ -494,10 +498,30 @@ def in_dubins_engagement_zone_left_right_single(
     plot_turn_radius_circles(startPosition, startHeading, turnRadius, axis)
     theta = np.linspace(0, 2 * np.pi, 100)
 
-    secondCenterPoint = secondCenterPoint[jnp.nanargmin(ez)]
+    secondCenterPoint = secondCenterPoints[jnp.nanargmin(ez)]
+
+    leftCenter = np.array(
+        [
+            startPosition[0] - turnRadius * np.sin(startHeading),
+            startPosition[1] + turnRadius * np.cos(startHeading),
+        ]
+    )
+    print(
+        "angle",
+        np.arctan2(
+            secondCenterPoint[1] - leftCenter[1], secondCenterPoint[0] - leftCenter[0]
+        ),
+    )
+    print("TEST", np.pi / 4)
 
     cx = secondCenterPoint[0] + turnRadius * np.cos(theta)
     cy = secondCenterPoint[1] + turnRadius * np.sin(theta)
+
+    # for i, _ in enumerate(testSecondCenters):
+    #     cxTemp = testSecondCenters[i][0] + turnRadius * np.cos(theta)
+    #     cyTemp = testSecondCenters[i][1] + turnRadius * np.sin(theta)
+    #     axis.plot(cxTemp, cyTemp)
+    #     axis.scatter(testGoalPositions[i][0], testGoalPositions[i][2])
 
     axis.plot(cx, cy)
 
@@ -1321,7 +1345,7 @@ def main_EZ():
     captureRadius = 0.0
     evaderHeading = (10 / 20) * np.pi
     evaderSpeed = 1
-    evaderPosition = np.array([0.3, 0.0])
+    evaderPosition = np.array([0.1, 0.1])
     inEz = in_dubins_engagement_zone_left_right_single(
         pursuerPosition,
         pursuerHeading,
