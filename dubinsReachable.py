@@ -212,7 +212,7 @@ def point_in_dubins_reachable_set(
     )
 
 
-def plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time):
+def plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time, ax):
     numSamples = 100
     maxTheta = find_theta_backward_boundary(heading, velocity, minimumTurnRadius, time)
     thetaBackwardRight = np.linspace(0, maxTheta[0], numSamples)
@@ -253,8 +253,6 @@ def plot_dubins_reachable_set(heading, velocity, minimumTurnRadius, time):
     yRight = rightCenter[1] + minimumTurnRadius * np.sin(theta)
     xLeft = leftCenter[0] + minimumTurnRadius * np.cos(theta)
     yLeft = leftCenter[1] + minimumTurnRadius * np.sin(theta)
-
-    fig, ax = plt.subplots()
 
     ax.plot(xRight, yRight, c="k")
     ax.plot(xLeft, yLeft, c="k")
