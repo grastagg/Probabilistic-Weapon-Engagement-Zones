@@ -11,7 +11,7 @@ import jax.numpy as jnp
 
 
 jax.config.update("jax_enable_x64", True)
-jax.config.update("jax_platform_name", "gpu")
+jax.config.update("jax_platform_name", "cpu")
 
 print(jax.devices())
 print(jax.default_backend())
@@ -114,8 +114,116 @@ def clockwise_angle(v1, v2):
 
 
 @jax.jit
+def circle_intersection(c1, c2, r1, r2):
+    x1, y1 = c1
+    x2, y2 = c2
+
+    # Distance between centers
+    d = jnp.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+    # No intersection cases: too far apart, one circle inside another, or identical circles
+    no_intersection = (d > r1 + r2) | (d < jnp.abs(r1 - r2))
+
+    def no_intersect_case():
+        return jnp.full((2, 2), jnp.nan)  # Use NaN instead of inf for clarity
+
+    def intersect_case():
+        a = (r1**2 - r2**2 + d**2) / (2 * d)
+        h_sq = jnp.maximum(
+            0, r1**2 - a**2
+        )  # Prevent negative sqrt due to precision issues
+        h = jnp.sqrt(h_sq)
+
+        xm = x1 + a * (x2 - x1) / d
+        ym = y1 + a * (y2 - y1) / d
+
+        x3_1 = xm + h * (y2 - y1) / d
+        y3_1 = ym - h * (x2 - x1) / d
+        x3_2 = xm - h * (y2 - y1) / d
+        y3_2 = ym + h * (x2 - x1) / d
+
+        return jnp.array([[x3_1, y3_1], [x3_2, y3_2]])
+
+    return jax.lax.cond(no_intersection, no_intersect_case, intersect_case)
+
+
+def move_goal_point_turn_strait_by_capture_radius_right(
+    pursuerPosition, centerPoint, goalPosition, turnRadius, captureRadius
+):
+    """To find the shortest path to a circle, move the goal position,
+    if it is more than sqrt(cap^2 + turn^2) away from the centerPoint don't move it
+    if it is inside that distance, move it to the edge of the circle"""
+    distance = jnp.linalg.norm(goalPosition - centerPoint)
+
+    def move_point_circle():
+        interseciontPoint1, intersectionPoint2 = circle_intersection(
+            centerPoint, goalPosition, turnRadius, captureRadius
+        )
+        v1 = pursuerPosition - centerPoint
+        v2 = interseciontPoint1 - centerPoint
+        v3 = intersectionPoint2 - centerPoint
+        theta1 = clockwise_angle(v1, v2)
+        theta2 = clockwise_angle(v1, v3)
+
+        return jnp.where(
+            theta1 < theta2, interseciontPoint1, intersectionPoint2
+        ), jnp.where(theta1 < theta2, interseciontPoint1, intersectionPoint2)
+
+    def move_point():
+        tangentPoint = find_clockwise_tangent_point(
+            goalPosition, centerPoint, turnRadius
+        )
+        direction = goalPosition - tangentPoint
+        direction = direction / jnp.linalg.norm(direction)
+        return goalPosition - captureRadius * direction, tangentPoint
+
+    return jax.lax.cond(
+        distance < jnp.sqrt(captureRadius**2 + turnRadius**2),
+        move_point_circle,
+        move_point,
+    )
+
+
+def move_goal_point_turn_strait_by_capture_radius_left(
+    pursuerPosition, centerPoint, goalPosition, turnRadius, captureRadius
+):
+    """To find the shortest path to a circle, move the goal position,
+    if it is more than sqrt(cap^2 + turn^2) away from the centerPoint don't move it
+    if it is inside that distance, move it to the edge of the circle"""
+    distance = jnp.linalg.norm(goalPosition - centerPoint)
+
+    def move_point_circle():
+        interseciontPoint1, intersectionPoint2 = circle_intersection(
+            centerPoint, goalPosition, turnRadius, captureRadius
+        )
+        v1 = pursuerPosition - centerPoint
+        v2 = interseciontPoint1 - centerPoint
+        v3 = intersectionPoint2 - centerPoint
+        theta1 = counterclockwise_angle(v1, v2)
+        theta2 = counterclockwise_angle(v1, v3)
+
+        return jnp.where(
+            theta1 < theta2, interseciontPoint1, intersectionPoint2
+        ), jnp.where(theta1 < theta2, interseciontPoint1, intersectionPoint2)
+
+    def move_point():
+        tangentPoint = find_counter_clockwise_tangent_point(
+            goalPosition, centerPoint, turnRadius
+        )
+        direction = goalPosition - tangentPoint
+        direction = direction / jnp.linalg.norm(direction)
+        return goalPosition - captureRadius * direction, tangentPoint
+
+    return jax.lax.cond(
+        distance < jnp.sqrt(captureRadius**2 + turnRadius**2),
+        move_point_circle,
+        move_point,
+    )
+
+
+@jax.jit
 def find_dubins_path_length_right_strait(
-    startPosition, startHeading, goalPosition, radius
+    startPosition, startHeading, goalPosition, radius, captureRadius
 ):
     centerPoint = jnp.array(
         [
@@ -123,7 +231,10 @@ def find_dubins_path_length_right_strait(
             startPosition[1] - radius * jnp.cos(startHeading),
         ]
     )
-    tangentPoint = find_clockwise_tangent_point(goalPosition, centerPoint, radius)
+    newGoalPosition, tangentPoint = move_goal_point_turn_strait_by_capture_radius_right(
+        startPosition, centerPoint, goalPosition, radius, captureRadius
+    )
+    # tangentPoint = find_clockwise_tangent_point(goalPosition, centerPoint, radius)
 
     # Compute angles for arc length
     v4 = startPosition - centerPoint
@@ -146,7 +257,7 @@ find_dubins_path_length_right_strait_vec = jax.vmap(
 
 @jax.jit
 def find_dubins_path_length_left_strait(
-    startPosition, startHeading, goalPosition, radius
+    startPosition, startHeading, goalPosition, radius, captureRadius
 ):
     centerPoint = jnp.array(
         [
@@ -154,9 +265,12 @@ def find_dubins_path_length_left_strait(
             startPosition[1] + radius * jnp.cos(startHeading),
         ]
     )
-    tangentPoint = find_counter_clockwise_tangent_point(
-        goalPosition, centerPoint, radius
+    newGoalPosition, tangentPoint = move_goal_point_turn_strait_by_capture_radius_left(
+        startPosition, centerPoint, goalPosition, radius, captureRadius
     )
+    # tangentPoint = find_counter_clockwise_tangent_point(
+    #     goalPosition, centerPoint, radius
+    # )
 
     # Compute angles for arc length
     v4 = startPosition - centerPoint
@@ -170,42 +284,6 @@ def find_dubins_path_length_left_strait(
     totalLength = arcLength + straightLineLength
 
     return totalLength, tangentPoint
-
-
-find_dubins_path_length_left_strait_vec = jax.vmap(
-    find_dubins_path_length_left_strait, in_axes=(None, None, 0, None)
-)
-
-
-@jax.jit
-def circle_intersection(c1, c2, r1, r2):
-    x1, y1 = c1
-    x2, y2 = c2
-
-    # Distance between centers
-    d = jnp.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-
-    # Check for no intersection or identical circles
-    no_intersection = (d > r1 + r2) | (d < jnp.abs(r1 - r2)) | (d == 0)
-
-    def no_intersect_case():
-        return jnp.full((2, 2), jnp.inf)  # Return NaN-filled array of shape (2,2)
-
-    def intersect_case():
-        a = (r1**2 - r2**2 + d**2) / (2 * d)
-        h = jnp.sqrt(r1**2 - a**2)
-
-        xm = x1 + a * (x2 - x1) / d
-        ym = y1 + a * (y2 - y1) / d
-
-        x3_1 = xm + h * (y2 - y1) / d
-        y3_1 = ym - h * (x2 - x1) / d
-        x3_2 = xm - h * (y2 - y1) / d
-        y3_2 = ym + h * (x2 - x1) / d
-
-        return jnp.array([[x3_1, y3_1], [x3_2, y3_2]])
-
-    return jax.lax.cond(no_intersection, no_intersect_case, intersect_case)
 
 
 @jax.jit
@@ -336,18 +414,20 @@ find_dubins_path_length_right_left_vec = jax.vmap(
 
 
 @jax.jit
-def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, radius):
+def find_shortest_dubins_path(
+    pursuerPosition, pursuerHeading, goalPosition, radius, captureRadius
+):
     leftRightLength, _ = find_dubins_path_length_left_right(
         pursuerPosition, pursuerHeading, goalPosition, radius
     )
     rightLeftLength, _ = find_dubins_path_length_right_left(
         pursuerPosition, pursuerHeading, goalPosition, radius
     )
-    straitLeftLength, _ = find_dubins_path_length_right_strait(
-        pursuerPosition, pursuerHeading, goalPosition, radius
+    straitRightLength, _ = find_dubins_path_length_right_strait(
+        pursuerPosition, pursuerHeading, goalPosition, radius, captureRadius
     )
-    straitRightLength, _ = find_dubins_path_length_left_strait(
-        pursuerPosition, pursuerHeading, goalPosition, radius
+    straitLeftLength, _ = find_dubins_path_length_left_strait(
+        pursuerPosition, pursuerHeading, goalPosition, radius, captureRadius
     )
 
     lengths = jnp.array(
@@ -360,7 +440,7 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
 # Vectorized version over goalPosition
 vectorized_find_shortest_dubins_path = jax.vmap(
     find_shortest_dubins_path,
-    in_axes=(None, None, 0, None),  # Vectorize over goalPosition (3rd argument)
+    in_axes=(None, None, 0, None, None),  # Vectorize over goalPosition (3rd argument)
 )
 
 
@@ -628,13 +708,21 @@ def in_dubins_engagement_zone_right_strait_geometric_single(
     goalPositionFinal = finalPoint
 
     dubinsPathLengthsCircleIntersection, _ = find_dubins_path_length_right_strait(
-        pursuerPosition, pursuerHeading, goalPositionCicleIntersection, turnRadius
+        pursuerPosition,
+        pursuerHeading,
+        goalPositionCicleIntersection,
+        turnRadius,
+        captureRadius,
     )
     dubinsPathLengthsFinal, _ = find_dubins_path_length_right_strait(
-        pursuerPosition, pursuerHeading, goalPositionFinal, turnRadius
+        pursuerPosition, pursuerHeading, goalPositionFinal, turnRadius, captureRadius
     )
     dubinsPathLengthsLineIntersection, _ = find_dubins_path_length_right_strait(
-        pursuerPosition, pursuerHeading, goalPositionLineIntersection, turnRadius
+        pursuerPosition,
+        pursuerHeading,
+        goalPositionLineIntersection,
+        turnRadius,
+        captureRadius,
     )
 
     ezCircleIntersection = (
@@ -704,13 +792,21 @@ def in_dubins_engagement_zone_left_strait_geometric_single(
     goalPositionFinal = finalPoint
 
     dubinsPathLengthsCircleIntersection, _ = find_dubins_path_length_left_strait(
-        pursuerPosition, pursuerHeading, goalPositionCicleIntersection, turnRadius
+        pursuerPosition,
+        pursuerHeading,
+        goalPositionCicleIntersection,
+        turnRadius,
+        captureRadius,
     )
     dubinsPathLengthsFinal, _ = find_dubins_path_length_left_strait(
-        pursuerPosition, pursuerHeading, goalPositionFinal, turnRadius
+        pursuerPosition, pursuerHeading, goalPositionFinal, turnRadius, captureRadius
     )
     dubinsPathLengthsLineIntersection, _ = find_dubins_path_length_left_strait(
-        pursuerPosition, pursuerHeading, goalPositionLineIntersection, turnRadius
+        pursuerPosition,
+        pursuerHeading,
+        goalPositionLineIntersection,
+        turnRadius,
+        captureRadius,
     )
 
     ezCircleIntersection = (
@@ -818,10 +914,10 @@ def in_dubins_engagement_zone_single(
     )  # Heading unit vector
     goalPositions = evaderPosition + lam * speedRatio * pursuerRange * direction
     dubinsPathLengths = vectorized_find_shortest_dubins_path(
-        startPosition, startHeading, goalPositions, turnRadius
+        startPosition, startHeading, goalPositions, turnRadius, captureRadius
     )
 
-    ez = dubinsPathLengths - lam.flatten() * (captureRadius + pursuerRange)
+    ez = dubinsPathLengths - lam.flatten() * (pursuerRange)
 
     # ezMin = jnp.nanmin(ez)
     inEz = ez < 0
@@ -1042,6 +1138,12 @@ def plot_dubins_path(
 
     xcr = goalPosition[0] + captureRadius * np.cos(theta)
     ycr = goalPosition[1] + captureRadius * np.sin(theta)
+
+    xCapt = goalPosition[0] + captureRadius * np.cos(theta)
+    yCapt = goalPosition[1] + captureRadius * np.sin(theta)
+
+    ax.plot(xCapt, yCapt, "r")
+
     ax.plot(xcr, ycr, "r")
 
     ax.plot(xl, yl, "b")
@@ -1050,6 +1152,7 @@ def plot_dubins_path(
     ax.plot([goalPosition[0], tangentPoint[0]], [goalPosition[1], tangentPoint[1]], "y")
     ax = plt.gca()
     ax.set_aspect("equal", "box")
+    return fig, ax
 
 
 def plot_dubins_reachable_set(pursuerPosition, pursuerHeading, pursuerRange, radius):
@@ -1240,11 +1343,55 @@ def main_EZ():
 
     pursuerRange = 1
     minimumTurnRadius = 0.2
-    captureRadius = 0.0
-    evaderHeading = (3 / 20) * np.pi
+    captureRadius = 0.1
+    evaderHeading = (10 / 20) * np.pi
     evaderSpeed = 1
-    evaderPosition = np.array([-0.24, -0.2])
+    y = np.sqrt(captureRadius**2 + (minimumTurnRadius) ** 2) * 1.1
+    evaderPosition = np.array([0.25, -1.0])
     startTime = time.time()
+    #
+    # inEZ = in_dubins_engagement_zone_single(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
+    # )
+    # print("inEZ", inEZ)
+
+    evaderPosition = np.array([0.25, -0.5])
+    length, tangentPoint = find_dubins_path_length_left_strait(
+        pursuerPosition,
+        pursuerHeading,
+        evaderPosition,
+        minimumTurnRadius,
+        captureRadius,
+    )
+    print("length", length)
+    length = find_shortest_dubins_path(
+        pursuerPosition,
+        pursuerHeading,
+        evaderPosition,
+        minimumTurnRadius,
+        captureRadius,
+    )
+    print("length", length)
+    #
+    fig, ax = plot_dubins_path(
+        pursuerPosition,
+        pursuerHeading,
+        evaderPosition,
+        minimumTurnRadius,
+        captureRadius,
+        tangentPoint,
+    )
+    # ax.scatter(*newGoalPosition, c="g")
+    # fig.colorbar(c, ax=ax)
+
     ax = plot_dubins_EZ(
         pursuerPosition,
         pursuerHeading,
@@ -1264,28 +1411,6 @@ def main_EZ():
         evaderSpeed,
         ax,
     )
-    # testDubins.plot_dubins_engagement_zone(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     minimumTurnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     evaderSpeed,
-    #     evaderHeading,
-    #     ax,
-    # )
-    # plot_test_grad(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     minimumTurnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     evaderPosition,
-    #     evaderHeading,
-    #     evaderSpeed,
-    # )
     plt.show()
 
 
