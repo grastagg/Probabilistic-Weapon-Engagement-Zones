@@ -10,10 +10,9 @@ import jax
 from jax import vmap
 
 jax.config.update("jax_enable_x64", True)
-from jax.lib import xla_bridge
 
-jax.default_device(jax.devices("cpu")[0])
-print(xla_bridge.get_backend().platform)
+jax.config.update("jax_platform_name", "cpu")
+# jax.default_device(jax.devices("cpu")[0])
 
 
 from math import erf, sqrt

@@ -4,17 +4,17 @@ import matplotlib.pyplot as plt
 from fast_pursuer import plotEngagementZone, inEngagementZone, inEngagementZoneJax
 import jax
 import jax.numpy as jnp
-from matplotlib.patches import Circle
-import matplotlib.cm as cm
-from scipy.optimize import brentq, root
 
 
-import dubinsReachable
-import testDubins
+# import dubinsReachable
+# import testDubins
 
 
 jax.config.update("jax_enable_x64", True)
-jax.config.update("jax_platform_name", "cpu")
+jax.config.update("jax_platform_name", "gpu")
+
+print(jax.devices())
+print(jax.default_backend())
 
 
 def plot_turn_radius_circles(startPosition, startHeading, turnRadius, ax):
@@ -442,7 +442,7 @@ def in_dubins_engagement_zone_left_right_single(
     axis=None,
 ):
     speedRatio = evaderSpeed / pursuerSpeed
-    numPoints = 1000
+    numPoints = 100
     lam = jnp.linspace(0, 1, numPoints)[:, None]
 
     # Compute goal positions
@@ -1117,7 +1117,7 @@ def plot_dubins_EZ(
     evaderHeading,
     evaderSpeed,
 ):
-    numPoints = 1000
+    numPoints = 500
     x = jnp.linspace(-2, 2, numPoints)
     y = jnp.linspace(-2, 2, numPoints)
     [X, Y] = jnp.meshgrid(x, y)
