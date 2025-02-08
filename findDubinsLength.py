@@ -243,7 +243,7 @@ def find_dubins_path_length_right_strait(
     theta = clockwise_angle(v4, v3)
 
     # Compute final path length
-    straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
+    straightLineLength = jnp.linalg.norm(newGoalPosition - tangentPoint)
     arcLength = radius * theta
     totalLength = arcLength + straightLineLength
 
@@ -279,7 +279,7 @@ def find_dubins_path_length_left_strait(
     theta = counterclockwise_angle(v4, v3)
 
     # Compute final path length
-    straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
+    straightLineLength = jnp.linalg.norm(newGoalPosition - tangentPoint)
     arcLength = radius * theta
     totalLength = arcLength + straightLineLength
 
@@ -892,7 +892,7 @@ in_dubins_engagement_zone_right_left_geometric = jax.jit(
 )
 
 
-@jax.jit
+# @jax.jit
 def in_dubins_engagement_zone_single(
     startPosition,
     startHeading,
@@ -1036,19 +1036,19 @@ def plot_dubins_EZ(
         evaderHeadings,
         evaderSpeed,
     )
-    startTime = time.time()
-    ZGeometric = in_dubins_engagement_zone_geometric(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        jnp.array([X, Y]).T,
-        evaderHeadings,
-        evaderSpeed,
-    )
-    print("time to run geometric", time.time() - startTime)
+    # startTime = time.time()
+    # ZGeometric = in_dubins_engagement_zone_geometric(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     jnp.array([X, Y]).T,
+    #     evaderHeadings,
+    #     evaderSpeed,
+    # )
+    # print("time to run geometric", time.time() - startTime)
 
     ZTrue = in_dubins_engagement_zone(
         pursuerPosition,
@@ -1061,20 +1061,20 @@ def plot_dubins_EZ(
         evaderHeadings,
         evaderSpeed,
     )
-    startTime = time.time()
-    ZTrue = in_dubins_engagement_zone(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        jnp.array([X, Y]).T,
-        evaderHeadings,
-        evaderSpeed,
-    )
+    # startTime = time.time()
+    # ZTrue = in_dubins_engagement_zone(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     jnp.array([X, Y]).T,
+    #     evaderHeadings,
+    #     evaderSpeed,
+    # )
     ZTrue = ZTrue.reshape(numPoints, numPoints)
-    print("time to run true", time.time() - startTime)
+    # print("time to run true", time.time() - startTime)
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
     ZGeometric = ZGeometric.reshape(numPoints, numPoints)
@@ -1347,7 +1347,7 @@ def main_EZ():
     evaderHeading = (10 / 20) * np.pi
     evaderSpeed = 1
     y = np.sqrt(captureRadius**2 + (minimumTurnRadius) ** 2) * 1.1
-    evaderPosition = np.array([0.25, -1.0])
+    evaderPosition = np.array([0.2, 0.5])
     startTime = time.time()
     #
     # inEZ = in_dubins_engagement_zone_single(
@@ -1363,8 +1363,7 @@ def main_EZ():
     # )
     # print("inEZ", inEZ)
 
-    evaderPosition = np.array([0.25, -0.5])
-    length, tangentPoint = find_dubins_path_length_left_strait(
+    length, tangentPoint = find_dubins_path_length_right_strait(
         pursuerPosition,
         pursuerHeading,
         evaderPosition,
@@ -1372,23 +1371,23 @@ def main_EZ():
         captureRadius,
     )
     print("length", length)
-    length = find_shortest_dubins_path(
-        pursuerPosition,
-        pursuerHeading,
-        evaderPosition,
-        minimumTurnRadius,
-        captureRadius,
-    )
+    # length = find_shortest_dubins_path(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     evaderPosition,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    # )
     print("length", length)
     #
-    fig, ax = plot_dubins_path(
-        pursuerPosition,
-        pursuerHeading,
-        evaderPosition,
-        minimumTurnRadius,
-        captureRadius,
-        tangentPoint,
-    )
+    # fig, ax = plot_dubins_path(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     evaderPosition,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     tangentPoint,
+    # )
     # ax.scatter(*newGoalPosition, c="g")
     # fig.colorbar(c, ax=ax)
 
