@@ -11,7 +11,7 @@ import jax.numpy as jnp
 
 
 jax.config.update("jax_enable_x64", True)
-jax.config.update("jax_platform_name", "gpu")
+jax.config.update("jax_platform_name", "cpu")
 
 print(jax.devices())
 print(jax.default_backend())
