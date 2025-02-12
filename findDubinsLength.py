@@ -337,12 +337,12 @@ find_dubins_path_length_right_left_vec = jax.vmap(
 
 @jax.jit
 def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, radius):
-    leftRightLength, _ = find_dubins_path_length_left_right(
-        pursuerPosition, pursuerHeading, goalPosition, radius
-    )
-    rightLeftLength, _ = find_dubins_path_length_right_left(
-        pursuerPosition, pursuerHeading, goalPosition, radius
-    )
+    # leftRightLength, _ = find_dubins_path_length_left_right(
+    #     pursuerPosition, pursuerHeading, goalPosition, radius
+    # )
+    # rightLeftLength, _ = find_dubins_path_length_right_left(
+    #     pursuerPosition, pursuerHeading, goalPosition, radius
+    # )
     straitLeftLength, _ = find_dubins_path_length_right_strait(
         pursuerPosition, pursuerHeading, goalPosition, radius
     )
@@ -350,9 +350,10 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
         pursuerPosition, pursuerHeading, goalPosition, radius
     )
 
-    lengths = jnp.array(
-        [leftRightLength, rightLeftLength, straitLeftLength, straitRightLength]
-    )
+    # lengths = jnp.array(
+    #     [leftRightLength, rightLeftLength, straitLeftLength, straitRightLength]
+    # )
+    lengths = jnp.array([straitLeftLength, straitRightLength])
 
     return jnp.nanmin(lengths)
 
@@ -1006,17 +1007,21 @@ def in_dubins_engagement_zone_single(
     evaderSpeed,
 ):
     speedRatio = evaderSpeed / pursuerSpeed
-    numPoints = 100
-    lam = jnp.linspace(0, 1, numPoints)[:, None]
+    numPoints = 2
+    # lam = jnp.linspace(0, 1, numPoints)[:, None]
+    lam = jnp.array([1])
 
     # Compute goal positions
     direction = jnp.array(
         [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
     )  # Heading unit vector
     goalPositions = evaderPosition + lam * speedRatio * pursuerRange * direction
-    dubinsPathLengths = vectorized_find_shortest_dubins_path(
+    dubinsPathLengths = find_shortest_dubins_path(
         startPosition, startHeading, goalPositions, turnRadius
     )
+    # dubinsPathLengths = vectorized_find_shortest_dubins_path(
+    #     startPosition, startHeading, goalPositions, turnRadius
+    # )
 
     ez = dubinsPathLengths - lam.flatten() * (captureRadius + pursuerRange)
 
@@ -1117,7 +1122,7 @@ def plot_dubins_EZ(
     evaderHeading,
     evaderSpeed,
 ):
-    numPoints = 500
+    numPoints = 1500
     x = jnp.linspace(-2, 2, numPoints)
     y = jnp.linspace(-2, 2, numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -1162,19 +1167,19 @@ def plot_dubins_EZ(
         evaderHeadings,
         evaderSpeed,
     )
-    startTime = time.time()
-    ZTrue = in_dubins_engagement_zone(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        jnp.array([X, Y]).T,
-        evaderHeadings,
-        evaderSpeed,
-    )
-    ZTrue = ZTrue.reshape(numPoints, numPoints)
+    # startTime = time.time()
+    # ZTrue = in_dubins_engagement_zone(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     jnp.array([X, Y]).T,
+    #     evaderHeadings,
+    #     evaderSpeed,
+    # )
+    # ZTrue = ZTrue.reshape(numPoints, numPoints)
     print("time to run true", time.time() - startTime)
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
@@ -1432,13 +1437,13 @@ def plot_test_grad(
 def main_EZ():
     pursuerPosition = np.array([0, 0])
 
-    pursuerHeading = np.pi / 2
+    pursuerHeading = (1 / 4) * np.pi
     pursuerSpeed = 2
 
     pursuerRange = 1
-    minimumTurnRadius = 0.2
+    minimumTurnRadius = (2 / (3 * np.pi)) * pursuerRange
     captureRadius = 0.0
-    evaderHeading = (3 / 20) * np.pi
+    evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 1
     evaderPosition = np.array([-0.24, -0.2])
     startTime = time.time()
