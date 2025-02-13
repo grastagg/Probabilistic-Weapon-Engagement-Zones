@@ -27,6 +27,7 @@ from bspline.matrix_evaluation import (
     matrix_bspline_derivative_evaluation_for_dataset,
 )
 
+
 numSamplesPerInterval = 15
 
 
