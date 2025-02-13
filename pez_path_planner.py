@@ -15,11 +15,8 @@ matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
 from fast_pursuer import (
-    inEngagementZone,
-    probabalisticEngagementZone,
     plotMahalanobisDistance,
     probabalisticEngagementZoneVectorizedTemp,
-    inEngagementZoneJax,
     inEngagementZoneJaxVectorized,
 )
 from bspline.matrix_evaluation import (
@@ -27,6 +24,7 @@ from bspline.matrix_evaluation import (
     matrix_bspline_derivative_evaluation_for_dataset,
 )
 
+from dubinsEZ import in_dubins_engagement_zone
 
 numSamplesPerInterval = 15
 
@@ -277,6 +275,62 @@ def get_turn_rate_velocity_and_headings(controlPoints, knotPoints):
     return u, v, heading
 
 
+def dubins_EZ_along_spline(
+    controlPoints,
+    tf,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerSpeed,
+    pursuerRange,
+    agentSpeed,
+):
+    numControlPoints = int(len(controlPoints) / 2)
+    knotPoints = create_unclamped_knot_points(0, tf, numControlPoints, 3)
+    agentHeadings = get_spline_heading(controlPoints, tf, 3, numSamplesPerInterval)
+    controlPoints = controlPoints.reshape((numControlPoints, 2))
+    pos = evaluate_spline(controlPoints, knotPoints)
+    ez = in_dubins_engagement_zone(
+        pos,
+        agentHeadings,
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        pursuerRange,
+        agentSpeed,
+    )
+    return ez
+
+
+def compute_spline_constraints_for_dubins_EZ_deterministic(
+    controlPoints,
+    knotPoints,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerSpeed,
+    pursuerRange,
+    turnRadius,
+    agentSpeed,
+):
+    pos = evaluate_spline(controlPoints, knotPoints)
+
+    turn_rate, velocity, agentHeadings = get_turn_rate_velocity_and_headings(
+        controlPoints, knotPoints
+    )
+
+    curvature = turn_rate / velocity
+
+    ez = in_dubins_engagement_zone(
+        pursuerPosition,
+        pursuerHeading,
+        turnRadius,
+        captureRadius,
+        pursuerSpeed,
+        pos,
+        agentHeadings,
+        agentSpeed,
+    )
+
+
 def compute_spline_constraints(
     controlPoints,
     knotPoints,
@@ -335,6 +389,9 @@ dTurnRateTf = jacfwd(get_spline_turn_rate, argnums=1)
 
 dCurvatureDControlPoints = jacfwd(get_spline_curvature)
 dCurvatureDtf = jacfwd(get_spline_curvature, argnums=1)
+
+dDubinsEZDControlPoints = jacfwd(dubins_EZ_along_spline, argnums=0)
+dDubinsEZDtf = jacfwd(dubins_EZ_along_spline, argnums=1)
 
 
 def optimize_spline_path(
