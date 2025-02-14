@@ -810,9 +810,6 @@ def in_dubins_engagement_zone_single(
     ez = dubinsPathLengths - (captureRadius + pursuerRange)
     return ez
 
-    # inEz = ez < 0
-    # return inEz
-
 
 # Vectorized function using vmap
 in_dubins_engagement_zone = jax.jit(
@@ -904,9 +901,10 @@ def plot_dubins_EZ(
     pursuerRange,
     evaderHeading,
     evaderSpeed,
+    ax,
 ):
     numPoints = 1500
-    rangeX = 1.2
+    rangeX = 1.5
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -940,16 +938,19 @@ def plot_dubins_EZ(
     # )
     # print("time to run geometric", time.time() - startTime)
 
-    ZTrue = in_dubins_engagement_zone(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        jnp.array([X, Y]).T,
-        evaderHeadings,
-        evaderSpeed,
+    ZTrue = (
+        in_dubins_engagement_zone(
+            pursuerPosition,
+            pursuerHeading,
+            minimumTurnRadius,
+            captureRadius,
+            pursuerRange,
+            pursuerSpeed,
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+        )
+        < 0
     )
     # startTime = time.time()
     # ZTrue = in_dubins_engagement_zone(
@@ -969,7 +970,6 @@ def plot_dubins_EZ(
     ZTrue = ZTrue.reshape(numPoints, numPoints)
     # ZGeometric = ZGeometric.reshape(numPoints, numPoints)
 
-    fig, ax = plt.subplots()
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
     ax.contour(X, Y, ZTrue, cmap="summer")
@@ -1300,14 +1300,14 @@ def plot_theta_and_vectors_left_turn(
 def main_EZ():
     pursuerPosition = np.array([0, 0])
 
-    pursuerHeading = (1 / 4) * np.pi
+    pursuerHeading = (2 / 4) * np.pi
     pursuerSpeed = 2
 
     pursuerRange = 1
-    minimumTurnRadius = (2 / (3 * np.pi)) * pursuerRange
+    minimumTurnRadius = 0.5
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
-    evaderSpeed = 1
+    evaderSpeed = 0.5
     evaderPosition = np.array([-0.5, 0.98])
     startTime = time.time()
     print("evaderPosition", evaderPosition)
@@ -1325,7 +1325,8 @@ def main_EZ():
     #     tangentPoint,
     # )
     #
-    ax = plot_dubins_EZ(
+    fig, ax = plt.subplots()
+    plot_dubins_EZ(
         pursuerPosition,
         pursuerHeading,
         pursuerSpeed,
@@ -1334,6 +1335,7 @@ def main_EZ():
         pursuerRange,
         evaderHeading,
         evaderSpeed,
+        ax,
     )
     # plotEngagementZone(
     #     evaderHeading,

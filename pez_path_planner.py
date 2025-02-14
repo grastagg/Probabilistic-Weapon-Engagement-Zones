@@ -88,11 +88,11 @@ def plot_spline(
         pursuerCaptureRange,
         pursuerSpeed,
         agentSpeed,
-    )
+    )[:, 0]
     if pez_constraint_limit == 0.5:
         pez = pezDeterministic
         # flip cmap
-        cmap = "viridis_r"
+        cmap = "viridis"
         cbarLabel = "dist-rho"
     else:
         cmap = "viridis"
@@ -394,6 +394,85 @@ dDubinsEZDControlPoints = jacfwd(dubins_EZ_along_spline, argnums=0)
 dDubinsEZDtf = jacfwd(dubins_EZ_along_spline, argnums=1)
 
 
+def assure_velocity_constraint(
+    controlPoints, knotPoints, num_control_points, agentSpeed, velocityBounds
+):
+    splineOrder = 3
+    tf = np.linalg.norm(controlPoints[0] - controlPoints[-1]) / agentSpeed
+    v = get_spline_velocity(controlPoints, tf, splineOrder, numSamplesPerInterval)
+    while np.max(v) > velocityBounds[1]:
+        tf += 0.01
+        # combined_knot_points = self.create_unclamped_knot_points(0, tf, num_control_points,params.splineOrder)
+        v = get_spline_velocity(controlPoints, tf, splineOrder, numSamplesPerInterval)
+        # pd, u, v, pos = self.spline_constraints(radarList, controlPoints, combined_knot_points,params.numConstraintSamples)
+    print("max v", np.max(v))
+    return tf
+
+
+def move_first_control_point_so_spline_passes_through_start(
+    controlPoints, knotPoints, start, startVelocity
+):
+    num_control_points = int(len(controlPoints) / 2)
+    controlPoints = controlPoints.reshape((num_control_points, 2))
+    dt = knotPoints[3] - knotPoints[0]
+    A = np.array(
+        [
+            [1 / 6, 0, 2 / 3, 0],
+            [0, 1 / 6, 0, 2 / 3],
+            [-3 / (2 * dt), 0, 0, 0],
+            [0, -3 / (2 * dt), 0, 0],
+        ]
+    )
+    c3x = controlPoints[2, 0]
+    c3y = controlPoints[2, 1]
+
+    b = np.array(
+        [
+            [start[0] - (1 / 6) * c3x],
+            [start[1] - (1 / 6) * c3y],
+            [startVelocity[0] - 3 / (2 * dt) * c3x],
+            [startVelocity[1] - 3 / (2 * dt) * c3y],
+        ]
+    )
+
+    x = np.linalg.solve(A, b)
+    controlPoints[0:2, 0:2] = x.reshape((2, 2))
+
+    return controlPoints
+
+
+def move_last_control_point_so_spline_passes_through_end(
+    controlPoints, knotPoints, end, endVelocity
+):
+    num_control_points = int(len(controlPoints) / 2)
+    controlPoints = controlPoints.reshape((num_control_points, 2))
+    dt = knotPoints[3] - knotPoints[0]
+    A = np.array(
+        [
+            [2 / 3, 0, 1 / 6, 0],
+            [0, 2 / 3, 0, 1 / 6],
+            [0, 0, 3 / (2 * dt), 0],
+            [0, 0, 0, 3 / (2 * dt)],
+        ]
+    )
+    cn_minus_2_x = controlPoints[-3, 0]
+    cn_minus_2_y = controlPoints[-3, 1]
+
+    b = np.array(
+        [
+            [end[0] - (1 / 6) * cn_minus_2_x],
+            [end[1] - (1 / 6) * cn_minus_2_y],
+            [endVelocity[0] + 3 / (2 * dt) * cn_minus_2_x],
+            [endVelocity[1] + 3 / (2 * dt) * cn_minus_2_y],
+        ]
+    )
+
+    x = np.linalg.solve(A, b)
+    controlPoints[-2:, -2:] = x.reshape((2, 2))
+
+    return controlPoints
+
+
 def optimize_spline_path(
     p0,
     pf,
@@ -538,27 +617,37 @@ def optimize_spline_path(
 
     optProb = Optimization("path optimization", objfunc)
 
-    # x0_x = np.linspace(p0[0], pf[0], num_cont_points)
-    # x0_y = np.linspace(p0[0], pf[0], num_cont_points)
-    # x0 = np.hstack((x0_x,x0_y)).reshape((2*(num_cont_points)))
-    x0 = np.array(
-        [
-            -6.99550637,
-            -8.95872567,
-            -4.47336006,
-            -5.06316688,
-            -5.11105337,
-            -0.78860679,
-            -3.19745253,
-            3.19381798,
-            0.79036742,
-            5.04575115,
-            5.06051916,
-            4.51374057,
-            8.96755593,
-            6.89928658,
-        ]
+    tf_initial = 1.0
+    knotPoints = create_unclamped_knot_points(0, tf_initial, num_cont_points, 3)
+
+    x0 = np.linspace(p0, pf, num_cont_points).flatten()
+    x0 = move_first_control_point_so_spline_passes_through_start(x0, knotPoints, p0, v0)
+    x0 = x0.flatten()
+    x0 = move_last_control_point_so_spline_passes_through_end(x0, knotPoints, pf, v0)
+    x0 = x0.flatten()
+
+    print("velocity constraints", velocity_constraints)
+    tf = assure_velocity_constraint(
+        x0, knotPoints, num_cont_points, agentSpeed, velocity_constraints
     )
+    # x0 = np.array(
+    #     [
+    #         -6.99550637,
+    #         -8.95872567,
+    #         -4.47336006,
+    #         -5.06316688,
+    #         -5.11105337,
+    #         -0.78860679,
+    #         -3.19745253,
+    #         3.19381798,
+    #         0.79036742,
+    #         5.04575115,
+    #         5.06051916,
+    #         4.51374057,
+    #         8.96755593,
+    #         6.89928658,
+    #     ]
+    # )
 
     tempVelocityContstraints = get_spline_velocity(x0, 1, 3, 1)
     num_constraint_samples = len(tempVelocityContstraints)
@@ -566,7 +655,7 @@ def optimize_spline_path(
     optProb.addVarGroup(
         name="control_points", nVars=2 * (num_cont_points), varType="c", value=x0
     )
-    optProb.addVarGroup(name="tf", nVars=1, varType="c", value=10, lower=0, upper=None)
+    optProb.addVarGroup(name="tf", nVars=1, varType="c", value=tf, lower=0, upper=None)
 
     optProb.addConGroup(
         "velocity",
