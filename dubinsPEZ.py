@@ -12,7 +12,7 @@ in_dubins_engagement_zone = jax.jit(
     jax.vmap(
         dubinsEZ.in_dubins_engagement_zone_single,
         in_axes=(
-            None,
+            0,
             0,
             0,
             None,
@@ -30,6 +30,7 @@ in_dubins_engagement_zone = jax.jit(
 def mc_dubins_PEZ_heading_only_single(
     key,
     pursuerPosition,
+    pursuerPositionCov,
     pursuerHeading,
     pursuerHeadingVar,
     pursuerSpeed,
@@ -56,9 +57,13 @@ def mc_dubins_PEZ_heading_only_single(
         subkey, shape=(numSamples,)
     )
 
+    pursuerPositionSamples = jax.random.multivariate_normal(
+        key, pursuerPosition, pursuerPositionCov, shape=(numSamples,)
+    )
+
     # Compute engevaderagement zone for each sampled heading
     ez = in_dubins_engagement_zone(
-        pursuerPosition,
+        pursuerPositionSamples,
         pursuerHeadingSamples,
         minimumTurnRadiusSamples,
         captureRadius,
@@ -86,6 +91,7 @@ mc_dubins_PEZ_heading_only = jax.jit(
             None,
             None,
             None,
+            None,
             0,
             0,
             None,
@@ -97,6 +103,7 @@ mc_dubins_PEZ_heading_only = jax.jit(
 
 def plot_dubins_PEZ(
     pursuerPosition,
+    pursuerPositionCov,
     pursuerHeading,
     pursuerHeadindgVar,
     pursuerSpeed,
@@ -110,7 +117,7 @@ def plot_dubins_PEZ(
     ax,
     fig,
 ):
-    numPoints = 200
+    numPoints = 300
     rangeX = 1.5
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -124,6 +131,7 @@ def plot_dubins_PEZ(
     ZTrue = mc_dubins_PEZ_heading_only(
         key,  # Add a JAX PRNG key as input
         pursuerPosition,
+        pursuerPositionCov,
         pursuerHeading,
         pursuerHeadindgVar,
         pursuerSpeed,
@@ -185,12 +193,13 @@ def plot_EZ_vs_pursuer_range(
 
 def main():
     pursuerPosition = np.array([0, 0])
+    pursuerPositionCov = np.eye(2) * 0.000001
 
-    pursuerHeading = (2 / 4) * np.pi
-    pursuerHeadingVar = 0.2
+    pursuerHeading = (0 / 4) * np.pi
+    pursuerHeadingVar = 0.1
 
     pursuerSpeed = 2
-    pursuerSpeedVar = 0.0
+    pursuerSpeedVar = 0.5
 
     pursuerRange = 1
 
@@ -198,6 +207,7 @@ def main():
     minimumTurnRadiusVar = 0.0
 
     captureRadius = 0.0
+
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 0.5
     evaderPosition = np.array([-3, 0])
@@ -216,6 +226,7 @@ def main():
     fig, ax = plt.subplots()
     plot_dubins_PEZ(
         pursuerPosition,
+        pursuerPositionCov,
         pursuerHeading,
         pursuerHeadingVar,
         pursuerSpeed,
