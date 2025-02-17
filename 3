@@ -16,7 +16,7 @@ in_dubins_engagement_zone = jax.jit(
             0,
             0,
             None,
-            0,
+            None,
             0,
             None,
             None,
@@ -66,12 +66,7 @@ def mc_dubins_pez_single(
         evaderHeading,
         evaderSpeed,
     )
-    return jnp.sum(ez <= 0) / numSamples
-    #     goalPositions,
-    #     ez,
-    #     pursuerHeading,
-    #     pursuerSpeed,
-    # )
+    return jnp.sum(ez <= 0) / numSamples, goalPositions, ez, pursuerHeading
 
 
 mc_dubins_pez = jax.jit(
@@ -103,53 +98,31 @@ def mc_dubins_PEZ(
     pursuerRangeVar,
     captureRadius,
 ):
-    seed = np.random.randint(100000)
-    key = jax.random.PRNGKey(seed)
+    key = jax.random.PRNGKey(121252)
 
     key, subkey = jax.random.split(key)
-    numSamples = 2000
+    numSamples = 200
+
+    normalSamples = jax.random.normal(subkey, shape=(numSamples,))
 
     # Generate heading samples
-    pursuerHeadingSamples = pursuerHeading + jnp.sqrt(
-        pursuerHeadingVar
-    ) * jax.random.normal(subkey, shape=(numSamples,))
-
-    seed = np.random.randint(100000)
-    key = jax.random.PRNGKey(seed)
-
-    key, subkey = jax.random.split(key)
+    pursuerHeadingSamples = (
+        pursuerHeading + jnp.sqrt(pursuerHeadingVar) * normalSamples
+    )  # * jax.random.normal(subkey, shape=(numSamples,))
 
     # generate turn radius samples
-    minimumTurnRadiusSamples = minimumTurnRadius + jnp.sqrt(
-        minimumTurnRadiusVar
-    ) * jax.random.normal(subkey, shape=(numSamples,))
-
-    seed = np.random.randint(100000)
-    key = jax.random.PRNGKey(seed)
-
-    key, subkey = jax.random.split(key)
+    minimumTurnRadiusSamples = (
+        minimumTurnRadius + jnp.sqrt(minimumTurnRadiusVar) * normalSamples
+    )  # * jax.random.normal(subkey, shape=(numSamples,))
 
     # generate speed samples
-    pursuerSpeedSamples = pursuerSpeed + jnp.sqrt(pursuerSpeedVar) * jax.random.normal(
-        subkey, shape=(numSamples,)
-    )
-
-    seed = np.random.randint(100000)
-    key = jax.random.PRNGKey(seed)
-
-    key, subkey = jax.random.split(key)
+    pursuerSpeedSamples = (
+        pursuerSpeed + jnp.sqrt(pursuerSpeedVar) * normalSamples
+    )  # * jax.random.normal(subkey, shape=(numSamples,))
 
     # generate position samples
     pursuerPositionSamples = jax.random.multivariate_normal(
         key, pursuerPosition, pursuerPositionCov, shape=(numSamples,)
-    )
-
-    seed = np.random.randint(100000)
-    key = jax.random.PRNGKey(seed)
-
-    key, subkey = jax.random.split(key)
-    pursuerRangeSamples = pursuerRange + jnp.sqrt(pursuerRangeVar) * jax.random.normal(
-        subkey, shape=(numSamples,)
     )
 
     return mc_dubins_pez(
@@ -160,7 +133,7 @@ def mc_dubins_PEZ(
         pursuerHeadingSamples,
         pursuerSpeedSamples,
         minimumTurnRadiusSamples,
-        pursuerRangeSamples,
+        pursuerRange,
         captureRadius,
         numSamples,
     )
@@ -284,22 +257,23 @@ def main():
     pursuerPositionCov = np.eye(2) * 0.000001
 
     pursuerHeading = (0 / 4) * np.pi
-    pursuerHeadingVar = 0.0
+    pursuerHeadingVar = 0.1
 
     pursuerSpeed = 2
-    pursuerSpeedVar = 0.5
+    pursuerSpeedVar = 0.1
 
     pursuerRange = 1
-    pursuerRangeVar = 0.2
+    pursuerRangeVar = 0
 
-    minimumTurnRadius = 0.5
+    minimumTurnRadius = 0.2
     minimumTurnRadiusVar = 0.0
 
     captureRadius = 0.0
 
     evaderHeading = jnp.array([(0 / 20) * np.pi, (0 / 20) * np.pi])
+    # evaderHeading = (20 / 20) * np.pi
     evaderSpeed = 0.5
-    evaderPosition = np.array([[-0.5, 0.5], [-0.5, -0.5]])
+    evaderPosition = np.array([[-0.5, -0.5], [-0.5, 0.5]])
 
     # plot_EZ_vs_pursuer_range(
     #     pursuerPosition,
@@ -313,7 +287,7 @@ def main():
     #     evaderSpeed,
     # )
 
-    ZTrue = mc_dubins_PEZ(
+    ZTrue, goalPositions, ez, pursuerHeading = mc_dubins_PEZ(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -329,27 +303,55 @@ def main():
         pursuerRangeVar,
         captureRadius,
     )
-    print(ZTrue)
-
-    evaderHeading = (0 / 20) * np.pi
+    print("goalPositions", goalPositions[0])
+    print("goalPositions", goalPositions[1])
+    print(goalPositions[0] == goalPositions[1])
+    print("ez", np.sum(ez[0] < 0))
+    print("ez", np.sum(ez[1] < 0))
     fig, ax = plt.subplots()
-    plot_dubins_PEZ(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-        ax,
-        fig,
-    )
+    plt.hist(pursuerHeading[0])
+    # inEZ = dubinsEZ.in_dubins_engagement_zone_single(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     evaderPosition[0],
+    #     evaderHeading[0],
+    #     evaderSpeed,
+    # )
+    # print(inEZ)
+    # inEZ = dubinsEZ.in_dubins_engagement_zone_single(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     evaderPosition[1],
+    #     evaderHeading[1],
+    #     evaderSpeed,
+    # )
+    # print(inEZ)
+    # fig, ax = plt.subplots()
+    # plot_dubins_PEZ(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     ax,
+    #     fig,
+    # )
     plt.show()
 
 
