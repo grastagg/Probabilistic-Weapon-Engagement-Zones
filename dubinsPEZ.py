@@ -12,15 +12,15 @@ in_dubins_engagement_zone = jax.jit(
     jax.vmap(
         dubinsEZ.in_dubins_engagement_zone_single,
         in_axes=(
-            0,
-            0,
-            0,
-            None,
-            0,
-            0,
-            None,
-            None,
-            None,
+            0,  # pursuerPosition
+            0,  # pursuerHeading
+            0,  # minimumTurnRadius
+            None,  # captureRadius
+            0,  # pursuerRange
+            0,  # pursuerSpeed
+            None,  # evaderPosition
+            None,  # evaderHeading
+            None,  # evaderSpeed
         ),  # Vectorizing over evaderPosition & evaderHeading
     )
 )
@@ -29,15 +29,15 @@ in_dubins_engagement_zone = jax.jit(
 #     jax.vmap(
 #         dubinsEZ.in_dubins_engagement_zone_single,
 #         in_axes=(
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             0,
-#             None,
-#             None,
-#             None,
+#             None,  # pursuerPosition
+#             0,  # pursuerHeading
+#             None,  # minimumTurnRadius
+#             None,  # captureRadius
+#             None,  # pursuerRange
+#             None,  # pursuerSpeed
+#             None,  # evaderPosition
+#             None,  # evaderHeading
+#             None,  # evaderSpeed
 #         ),  # Vectorizing over evaderPosition & evaderHeading
 #     )
 # )
@@ -99,9 +99,9 @@ def mc_dubins_PEZ(
     pursuerRangeVar,
     captureRadius,
 ):
-    key, subkey = generate_random_key()
     numSamples = 2000
 
+    key, subkey = generate_random_key()
     # Generate heading samples
     pursuerHeadingSamples = pursuerHeading + jnp.sqrt(
         pursuerHeadingVar
@@ -245,7 +245,7 @@ def plot_EZ_vs_pursuer_range(
     evaderSpeed,
 ):
     fig, ax = plt.subplots()
-    pursuerSpeed = np.linspace(0.2, 2, 100)
+    pursuerHeading = np.linspace(-np.pi, np.pi, 100)
     ez = in_dubins_engagement_zone(
         pursuerPosition,
         pursuerHeading,
@@ -257,30 +257,32 @@ def plot_EZ_vs_pursuer_range(
         evaderHeading,
         evaderSpeed,
     )
-    ax.scatter(pursuerSpeed, ez)
+    ax.scatter(pursuerHeading, ez)
 
 
 def main():
     pursuerPosition = np.array([0, 0])
     pursuerPositionCov = np.eye(2) * 0.000001
 
-    pursuerHeading = (0 / 4) * np.pi
+    pursuerHeading = (2 / 4) * np.pi
     pursuerHeadingVar = 0.0
 
     pursuerSpeed = 2
-    pursuerSpeedVar = 0.5
+    pursuerSpeedVar = 0.0
 
     pursuerRange = 1
-    pursuerRangeVar = 0.2
+    pursuerRangeVar = 0.1
 
-    minimumTurnRadius = 0.5
+    minimumTurnRadius = 0.2
     minimumTurnRadiusVar = 0.0
 
     captureRadius = 0.0
 
     evaderHeading = jnp.array([(0 / 20) * np.pi, (0 / 20) * np.pi])
+    evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 0.5
-    evaderPosition = np.array([[-0.5, 0.5], [-0.5, -0.5]])
+    # evaderPosition = np.array([[-0.5, 0.5], [-0.5, -0.5]])
+    evaderPosition = np.array([-0.5, 0.5])
 
     # plot_EZ_vs_pursuer_range(
     #     pursuerPosition,
@@ -293,26 +295,7 @@ def main():
     #     evaderHeading,
     #     evaderSpeed,
     # )
-
-    ZTrue = mc_dubins_PEZ(
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        pursuerRange,
-        pursuerRangeVar,
-        captureRadius,
-    )
-    print(ZTrue)
-
-    evaderHeading = (0 / 20) * np.pi
+    # evaderHeading = (0 / 20) * np.pi
     fig, ax = plt.subplots()
     plot_dubins_PEZ(
         pursuerPosition,
