@@ -55,7 +55,7 @@ def mc_dubins_pez_single(
     captureRadius,
     numSamples,
 ):
-    ez, goalPositions = in_dubins_engagement_zone(
+    ez = in_dubins_engagement_zone(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -67,11 +67,6 @@ def mc_dubins_pez_single(
         evaderSpeed,
     )
     return jnp.sum(ez <= 0) / numSamples
-    #     goalPositions,
-    #     ez,
-    #     pursuerHeading,
-    #     pursuerSpeed,
-    # )
 
 
 mc_dubins_pez = jax.jit(
@@ -82,9 +77,10 @@ mc_dubins_pez = jax.jit(
 )
 
 
-@jax.jit
-def map_angle(angle):
-    return (angle + jnp.pi) % (2 * jnp.pi) - jnp.pi
+def generate_random_key():
+    seed = np.random.randint(100000)
+    key = jax.random.PRNGKey(seed)
+    return jax.random.split(key)
 
 
 def mc_dubins_PEZ(
@@ -103,10 +99,7 @@ def mc_dubins_PEZ(
     pursuerRangeVar,
     captureRadius,
 ):
-    seed = np.random.randint(100000)
-    key = jax.random.PRNGKey(seed)
-
-    key, subkey = jax.random.split(key)
+    key, subkey = generate_random_key()
     numSamples = 2000
 
     # Generate heading samples
@@ -114,40 +107,28 @@ def mc_dubins_PEZ(
         pursuerHeadingVar
     ) * jax.random.normal(subkey, shape=(numSamples,))
 
-    seed = np.random.randint(100000)
-    key = jax.random.PRNGKey(seed)
-
-    key, subkey = jax.random.split(key)
+    key, subkey = generate_random_key()
 
     # generate turn radius samples
     minimumTurnRadiusSamples = minimumTurnRadius + jnp.sqrt(
         minimumTurnRadiusVar
     ) * jax.random.normal(subkey, shape=(numSamples,))
 
-    seed = np.random.randint(100000)
-    key = jax.random.PRNGKey(seed)
-
-    key, subkey = jax.random.split(key)
-
+    key, subkey = generate_random_key()
     # generate speed samples
     pursuerSpeedSamples = pursuerSpeed + jnp.sqrt(pursuerSpeedVar) * jax.random.normal(
         subkey, shape=(numSamples,)
     )
 
-    seed = np.random.randint(100000)
-    key = jax.random.PRNGKey(seed)
-
-    key, subkey = jax.random.split(key)
+    key, subkey = generate_random_key()
 
     # generate position samples
     pursuerPositionSamples = jax.random.multivariate_normal(
         key, pursuerPosition, pursuerPositionCov, shape=(numSamples,)
     )
 
-    seed = np.random.randint(100000)
-    key = jax.random.PRNGKey(seed)
+    key, subkey = generate_random_key()
 
-    key, subkey = jax.random.split(key)
     pursuerRangeSamples = pursuerRange + jnp.sqrt(pursuerRangeVar) * jax.random.normal(
         subkey, shape=(numSamples,)
     )

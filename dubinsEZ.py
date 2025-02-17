@@ -808,7 +808,7 @@ def in_dubins_engagement_zone_single(
     )
 
     ez = dubinsPathLengths - (captureRadius + pursuerRange)
-    return ez, goalPositions
+    return ez
 
 
 # Vectorized function using vmap
