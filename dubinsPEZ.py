@@ -66,7 +66,7 @@ def mc_dubins_pez_single(
         evaderHeading,
         evaderSpeed,
     )
-    return jnp.sum(ez <= 0) / numSamples
+    return jnp.sum(ez <= 0) / numSamples, ez
 
 
 mc_dubins_pez = jax.jit(
@@ -264,25 +264,25 @@ def main():
     pursuerPosition = np.array([0, 0])
     pursuerPositionCov = np.eye(2) * 0.000001
 
-    pursuerHeading = (2 / 4) * np.pi
-    pursuerHeadingVar = 0.0
+    pursuerHeading = (0 / 4) * np.pi
+    pursuerHeadingVar = np.pi
 
     pursuerSpeed = 2
     pursuerSpeedVar = 0.0
 
     pursuerRange = 1
-    pursuerRangeVar = 0.1
+    pursuerRangeVar = 0.0
 
-    minimumTurnRadius = 0.2
+    minimumTurnRadius = 0.5
     minimumTurnRadiusVar = 0.0
 
     captureRadius = 0.0
 
     evaderHeading = jnp.array([(0 / 20) * np.pi, (0 / 20) * np.pi])
-    evaderHeading = (0 / 20) * np.pi
+    # evaderHeading = jnp.array([(0 / 20) * np.pi])
     evaderSpeed = 0.5
-    # evaderPosition = np.array([[-0.5, 0.5], [-0.5, -0.5]])
-    evaderPosition = np.array([-0.5, 0.5])
+    evaderPosition = np.array([[-0.5, 0.5], [-0.5, -0.5]])
+    # evaderPosition = np.array([-0.5, 0.5])
 
     # plot_EZ_vs_pursuer_range(
     #     pursuerPosition,
@@ -295,9 +295,10 @@ def main():
     #     evaderHeading,
     #     evaderSpeed,
     # )
-    # evaderHeading = (0 / 20) * np.pi
-    fig, ax = plt.subplots()
-    plot_dubins_PEZ(
+    inEZ, ez = mc_dubins_PEZ(
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
@@ -306,14 +307,31 @@ def main():
         pursuerSpeedVar,
         minimumTurnRadius,
         minimumTurnRadiusVar,
-        captureRadius,
         pursuerRange,
         pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-        ax,
-        fig,
+        captureRadius,
     )
+    fig, ax = plt.subplots()
+    plt.hist(ez[0].flatten())
+
+    # fig, ax = plt.subplots()
+    # plot_dubins_PEZ(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     ax,
+    #     fig,
+    # )
     plt.show()
 
 
