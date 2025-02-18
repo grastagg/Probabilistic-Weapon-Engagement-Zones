@@ -1304,7 +1304,7 @@ def main_EZ():
     pursuerSpeed = 2
 
     pursuerRange = 1
-    minimumTurnRadius = 0.5
+    minimumTurnRadius = 0.2
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 0.5
@@ -1326,6 +1326,8 @@ def main_EZ():
     # )
     #
     fig, ax = plt.subplots()
+    ranges = np.linspace(0.5, 1.5, 10)
+    pursuerRange = 1.0
     plot_dubins_EZ(
         pursuerPosition,
         pursuerHeading,
@@ -1346,20 +1348,20 @@ def main_EZ():
     #     evaderSpeed,
     #     ax,
     # )
-    plot_theta_and_vectors_left_turn(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        pursuerRange,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-        ax,
-    )
-    plot_dubins_reachable_set(
-        pursuerPosition, pursuerHeading, pursuerRange, minimumTurnRadius, ax
-    )
+    # plot_theta_and_vectors_left_turn(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     pursuerSpeed,
+    #     minimumTurnRadius,
+    #     pursuerRange,
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     ax,
+    # )
+    # plot_dubins_reachable_set(
+    #     pursuerPosition, pursuerHeading, pursuerRange, minimumTurnRadius, ax
+    # )
     plt.show()
 
 
