@@ -808,6 +808,7 @@ def in_dubins_engagement_zone_single(
     )
 
     ez = dubinsPathLengths - (captureRadius + pursuerRange)
+    # ez = -pursuerRange
     return ez
 
 

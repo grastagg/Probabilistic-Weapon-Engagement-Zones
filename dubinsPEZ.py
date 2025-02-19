@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import jax
 import matplotlib.pyplot as plt
 from functools import partial
+import time
 
 
 import dubinsEZ
@@ -31,9 +32,9 @@ in_dubins_engagement_zone = jax.jit(
 #         in_axes=(
 #             None,  # pursuerPosition
 #             None,  # pursuerHeading
-#             0,  # minimumTurnRadius
+#             None,  # minimumTurnRadius
 #             None,  # captureRadius
-#             None,  # pursuerRange
+#             0,  # pursuerRange
 #             None,  # pursuerSpeed
 #             None,  # evaderPosition
 #             None,  # evaderHeading
@@ -68,7 +69,7 @@ def mc_dubins_pez_single(
     )
     # var = jnp.var(ez)
     # mean = jnp.mean(ez)
-    return jnp.sum(ez <= 0) / numSamples, ez
+    return jnp.sum(ez <= 0) / numSamples, ez, minimumTurnRadius
 
 
 mc_dubins_pez = jax.jit(
@@ -101,7 +102,7 @@ def mc_dubins_PEZ(
     pursuerRangeVar,
     captureRadius,
 ):
-    numSamples = 2000
+    numSamples = 200
 
     key, subkey = generate_random_key()
     # Generate heading samples
@@ -454,6 +455,24 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
+        start = time.time()
+        ZTrue, _, _ = linear_dubins_pez(
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        print("linear time", time.time() - start)
         ax.set_title("Linear Dubins PEZ")
     elif useUnscented:
         ZTrue, _, _ = uncented_dubins_pez(
@@ -472,9 +491,8 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
-        ax.set_title("Unscented Dubins PEZ")
-    else:
-        ZTrue, _ = mc_dubins_PEZ(
+        start = time.time()
+        ZTrue, _, _ = uncented_dubins_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
             evaderSpeed,
@@ -490,6 +508,43 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
+        print("unscented time", time.time() - start)
+        ax.set_title("Unscented Dubins PEZ")
+    else:
+        ZTrue, _, _ = mc_dubins_PEZ(
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        start = time.time()
+        ZTrue, _, _ = mc_dubins_PEZ(
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        print("mc time", time.time() - start)
         ax.set_title("Monte Carlo Dubins PEZ")
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
@@ -529,7 +584,8 @@ def plot_EZ_vs_pursuer_range(
     fig, ax = plt.subplots()
     # pursuerHeading = np.linspace(-np.pi, np.pi, 100)
     # turn radius derivat
-    dDubinsEZ_dMinimumTurnRadiusVal = dDubinsEZ_dMinimumTurnRadius(
+    #
+    dDubinsEZ_dRange = dDubinsEZ_dPursuerRange(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -540,35 +596,36 @@ def plot_EZ_vs_pursuer_range(
         evaderHeading,
         evaderSpeed,
     )
-    print("dDubinsEZ_dMinimumTurnRadius", dDubinsEZ_dMinimumTurnRadiusVal)
+    print("dDubinsEZ_dPursuerRange", dDubinsEZ_dRange)
     ezMean = in_dubins_engagement_zone(
         pursuerPosition,
         pursuerHeading,
-        jnp.array([minimumTurnRadius]),
+        minimumTurnRadius,
         captureRadius,
-        pursuerRange,
+        jnp.array([pursuerRange]),
         pursuerSpeed,
         evaderPosition,
         evaderHeading,
         evaderSpeed,
     )
-    turnRadius = np.linspace(0.1, 1.0, 100)
+
+    pursuerRangeVec = np.linspace(0.1, 4.0, 100)
     ez = in_dubins_engagement_zone(
         pursuerPosition,
         pursuerHeading,
-        turnRadius,
+        minimumTurnRadius,
         captureRadius,
-        pursuerRange,
+        pursuerRangeVec,
         pursuerSpeed,
         evaderPosition,
         evaderHeading,
         evaderSpeed,
     )
-    ax.scatter(turnRadius, ez)
+    ax.scatter(pursuerRangeVec, ez)
     # plot tangent point
     ax.plot(
-        turnRadius,
-        dDubinsEZ_dMinimumTurnRadiusVal * (turnRadius - minimumTurnRadius) + ezMean,
+        pursuerRangeVec,
+        dDubinsEZ_dRange * (pursuerRangeVec - pursuerRange) + ezMean,
     )
 
 
@@ -594,7 +651,7 @@ def compare_distribution(
     pursuerRangeVar,
     captureRadius,
 ):
-    inEZ, ez = mc_dubins_PEZ(
+    inEZ, ez, pursuerRangeSamples = mc_dubins_PEZ(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -647,12 +704,28 @@ def compare_distribution(
     print(inEZ)
     fig, ax = plt.subplots()
 
+    sortedEZindices = jnp.argsort(ez).flatten()
+    ezSorted = ez.flatten()[sortedEZindices]
+    cdf = jnp.linspace(0, len(ezSorted), len(ezSorted)) / len(ezSorted)
+
     plt.hist(ez, bins=1000, density=True)
+    print("min pursuer range", np.min(pursuerRangeSamples))
     plot_normal(linMean, linVar, ax, "Linear")
     plot_normal(uMean, uVar, ax, "Unscented")
     # plot vertical line at 0
     ax.axvline(0, color="k", linestyle="dashed", linewidth=1)
+    ax.plot(ezSorted, cdf, label="Monte Carlo")
+    # plot linear and unscented cdfs
+    x = np.linspace(jnp.min(ez), np.max(ez), 100)
+    y = jax.scipy.stats.norm.cdf(x, linMean, np.sqrt(linVar))
+    ax.plot(x, y, label="Linear")
+    y = jax.scipy.stats.norm.cdf(x, uMean, np.sqrt(uVar))
+    ax.plot(x, y, label="Unscented")
+
     plt.legend()
+
+    fig1, ax1 = plt.subplots()
+    ax1.scatter(pursuerRangeSamples, ez, label="Monte Carlo")
 
 
 def comparge_PEZ(
@@ -686,7 +759,7 @@ def comparge_PEZ(
         pursuerRangeVar,
         evaderHeading,
         evaderSpeed,
-        axes[1],
+        axes[0],
         useLinear=True,
         useUnscented=False,
     )
@@ -705,7 +778,7 @@ def comparge_PEZ(
         pursuerRangeVar,
         evaderHeading,
         evaderSpeed,
-        axes[0],
+        axes[1],
         useLinear=False,
         useUnscented=False,
     )
@@ -736,30 +809,28 @@ def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerPositionCov = np.eye(2) * 0.0000001
 
-    pursuerHeading = (2.0 / 4.0) * np.pi
+    pursuerHeading = (4.0 / 4.0) * np.pi
     pursuerHeadingVar = 0.0
 
     pursuerSpeed = 2.0
     pursuerSpeedVar = 0.0
 
     pursuerRange = 1.0
-    pursuerRangeVar = 0.2
+    pursuerRangeVar = 0.0
 
     minimumTurnRadius = 0.2
-    minimumTurnRadiusVar = 0.0
+    minimumTurnRadiusVar = 0.05
 
     captureRadius = 0.0
 
     evaderHeading = jnp.array([(0 / 20) * np.pi, (0 / 20) * np.pi])
     evaderHeading = jnp.array([(0.0 / 20.0) * np.pi])
     # evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
+
     evaderSpeed = 0.5
     evaderPosition = np.array([[-0.30, -0.5], [-0.20, -0.5]])
-    evaderPosition = np.array([[-1.2, 0.0]])
-    # evaderPosition = np.array([[-1.00, -1.0]])
-    # evaderPosition = np.array([-1.0, -1.0])
-
-    # evaderPosition = np.array([-0.5, 0.5])
+    evaderPosition = np.array([[-1.0, -0.54]])
+    # evaderPosition = np.array([-0.28, -0.42])
 
     # plot_EZ_vs_pursuer_range(
     #     pursuerPosition,
@@ -780,7 +851,7 @@ def main():
     #     pursuerPositionCov,
     #     pursuerHeading,
     #     pursuerHeadingVar,
-    #     pursuerSpeed,
+    #    ku pursuerSpeed,
     #     pursuerSpeedVar,
     #     minimumTurnRadius,
     #     minimumTurnRadiusVar,
