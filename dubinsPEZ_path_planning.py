@@ -1,4 +1,5 @@
 import numpy as np
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyoptsparse import Optimization, OPT, IPOPT
 from scipy.interpolate import BSpline
 import time
@@ -100,18 +101,21 @@ def plot_spline(
     print("max linear pez", np.max(linpez))
 
     c = ax.scatter(x, y, c=pez, s=4, cmap="inferno")
-    cbar = plt.colorbar(c, shrink=0.8)
-    cbar.ax.tick_params(labelsize=26)
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+
+    cbar = plt.colorbar(c, cax=cax)
+    cbar.ax.tick_params(labelsize=16)
 
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
-    plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r")
+    ax.scatter(pursuerPosition[0], pursuerPosition[1], c="r")
     # ax.add_artist(c)
-    plt.xlabel("X")
-    plt.ylabel("Y")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
     # print max mc and linear pez in title
     # limit to 3 decimal places
-    plt.title(
+    ax.set_title(
         f"Max MC PEZ: {np.max(pez):.3f}" + f" Max Linear PEZ: {np.max(linpez):.3f}"
     )
 
@@ -659,11 +663,86 @@ def optimize_spline_path(
     return create_spline(knotPoints, controlPoints, spline_order)
 
 
+def compare_pez_limits(
+    p0,
+    pf,
+    v0,
+    num_cont_points,
+    spline_order,
+    velocity_constraints,
+    turn_rate_constraints,
+    curvature_constraints,
+    num_constraint_samples,
+    pez_limits,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadindgVar,
+    pursuerRange,
+    pursuerRangeVar,
+    pursuerCaptureRadius,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    pursuerTurnRadius,
+    pursuerTurnRadiusVar,
+    agentSpeed,
+    x0,
+    tf,
+):
+    numFigures = len(pez_limits)
+    # two rows
+    fig, axs = plt.subplots(2, numFigures // 2, layout="tight")
+    for i, pez_limit in enumerate(pez_limits):
+        splineDubins = optimize_spline_path(
+            p0,
+            pf,
+            v0,
+            num_cont_points,
+            spline_order,
+            velocity_constraints,
+            turn_rate_constraints,
+            curvature_constraints,
+            num_constraint_samples,
+            pez_limit,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerRange,
+            pursuerRangeVar,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            pursuerTurnRadius,
+            pursuerTurnRadiusVar,
+            agentSpeed,
+            x0,
+            tf,
+        )
+        ax = axs[i // 3, i % 3]
+        plot_spline(
+            splineDubins,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerRange,
+            pursuerRangeVar,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            pursuerTurnRadius,
+            pursuerTurnRadiusVar,
+            agentSpeed,
+            ax,
+        )
+
+
 def main():
     pursuerPosition = np.array([0.0, 0.0])
-    pursuerPositionCov = np.eye(2) * 0.0000001
+    pursuerPositionCov = np.eye(2) * 0.1
     pursuerHeading = np.pi / 2
-    pursuerHeadingVar = 0.0
+    pursuerHeadingVar = 0.4
 
     startingLocation = np.array([-4.0, 1.0])
     endingLocation = np.array([4.0, -1.0])
@@ -677,10 +756,10 @@ def main():
     num_constraint_samples = 50
 
     pursuerRange = 1.0
-    pursuerRangeVar = 0.0
+    pursuerRangeVar = 0.2
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
-    pursuerSpeedVar = 0.0
+    pursuerSpeedVar = 0.2
     pursuerTurnRadius = 0.2
     pursuerTurnRadiusVar = 0.05
     agentSpeed = 1
@@ -728,66 +807,19 @@ def main():
         agentSpeed,
     )
     print("time to plan deterministic spline", time.time() - start)
-    pez_limit = 0.2
-    splineDubins = optimize_spline_path(
-        startingLocation,
-        endingLocation,
-        initialVelocity,
-        numControlPoints,
-        splineOrder,
-        velocity_constraints,
-        turn_rate_constraints,
-        curvature_constraints,
-        num_constraint_samples,
-        pez_limit,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerRange,
-        pursuerRangeVar,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        pursuerTurnRadius,
-        pursuerTurnRadiusVar,
-        agentSpeed,
-        detSpline.c.flatten(),
-        detSpline.t[-detSpline.k - 1],
-    )
-    pez_limit = 0.1
-    start = time.time()
-    splineDubins = optimize_spline_path(
-        startingLocation,
-        endingLocation,
-        initialVelocity,
-        numControlPoints,
-        splineOrder,
-        velocity_constraints,
-        turn_rate_constraints,
-        curvature_constraints,
-        num_constraint_samples,
-        pez_limit,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerRange,
-        pursuerRangeVar,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        pursuerTurnRadius,
-        pursuerTurnRadiusVar,
-        agentSpeed,
-        detSpline.c.flatten(),
-        detSpline.t[-detSpline.k - 1],
-    )
-    print("time to plan probabilistic spline", time.time() - start)
 
-    fig, ax = plt.subplots()
-    plot_spline(
-        splineDubins,
+    pez_limits = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
+    compare_pez_limits(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        pez_limits,
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
@@ -800,46 +832,66 @@ def main():
         pursuerTurnRadius,
         pursuerTurnRadiusVar,
         agentSpeed,
-        ax,
+        detSpline.c.flatten(),
+        detSpline.t[-detSpline.k - 1],
     )
-    # fast_pursuer.plotEngagementZone(
-    #     0.0,
-    #     pursuerPosition,
-    #     pursuerRange,
-    #     pursuerCaptureRadius,
-    #     pursuerSpeed,
-    #     agentSpeed,
-    #     ax,
-    # )
-    # dubinsPEZ.plot_dubins_PEZ(
+
+    # pez_limit = 0.2
+    # splineDubins = optimize_spline_path(
+    #     startingLocation,
+    #     endingLocation,
+    #     initialVelocity,
+    #     numControlPoints,
+    #     splineOrder,
+    #     velocity_constraints,
+    #     turn_rate_constraints,
+    #     curvature_constraints,
+    #     num_constraint_samples,
+    #     pez_limit,
     #     pursuerPosition,
     #     pursuerPositionCov,
     #     pursuerHeading,
     #     pursuerHeadingVar,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     pursuerCaptureRadius,
     #     pursuerSpeed,
     #     pursuerSpeedVar,
     #     pursuerTurnRadius,
     #     pursuerTurnRadiusVar,
-    #     pursuerCaptureRadius,
+    #     agentSpeed,
+    #     detSpline.c.flatten(),
+    #     detSpline.t[-detSpline.k - 1],
+    # )
+    # pez_limit = 0.1
+    # start = time.time()
+    # splineDubins = optimize_spline_path(
+    #     startingLocation,
+    #     endingLocation,
+    #     initialVelocity,
+    #     numControlPoints,
+    #     splineOrder,
+    #     velocity_constraints,
+    #     turn_rate_constraints,
+    #     curvature_constraints,
+    #     num_constraint_samples,
+    #     pez_limit,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
     #     pursuerRange,
     #     pursuerRangeVar,
-    #     0.0,
+    #     pursuerCaptureRadius,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     pursuerTurnRadius,
+    #     pursuerTurnRadiusVar,
     #     agentSpeed,
-    #     ax,
-    #     useLinear=False,
-    #     useUnscented=False,
+    #     detSpline.c.flatten(),
+    #     detSpline.t[-detSpline.k - 1],
     # )
-    dubins_EZ_path_planning.plot_spline(
-        detSplineT,
-        pursuerPosition,
-        pursuerHeading,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-        pursuerTurnRadius,
-        agentSpeed,
-        ax,
-    )
+    # print("time to plan probabilistic spline", time.time() - start)
 
     plt.show()
 
