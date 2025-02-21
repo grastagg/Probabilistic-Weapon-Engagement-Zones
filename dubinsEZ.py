@@ -322,6 +322,28 @@ find_dubins_path_length_right_left_vec = jax.vmap(
 )
 
 
+# def differentiable_min(a, b):
+#     epsilon = 10
+#     return -(1.0 / epsilon) * jnp.log(jnp.exp(-(epsilon * a)) + jnp.exp(-(epsilon * b)))
+
+
+def differentiable_min(a, b):
+    epsilon = 10
+
+    # Replace NaNs with a large value to avoid discontinuities
+    safe_a = jnp.where(jnp.isnan(a), jnp.inf, a)
+    safe_b = jnp.where(jnp.isnan(b), jnp.inf, b)
+
+    # Numerically stable log-sum-exp trick
+    smooth_min = -(1.0 / epsilon) * jnp.log(
+        jnp.exp(-(epsilon * safe_a)) + jnp.exp(-(epsilon * safe_b))
+    )
+
+    # Preserve NaN if both inputs were NaN
+    both_nan = jnp.isnan(a) & jnp.isnan(b)
+    return jnp.where(both_nan, jnp.nan, smooth_min)
+
+
 @jax.jit
 def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, radius):
     # leftRightLength, _ = find_dubins_path_length_left_right(
@@ -341,8 +363,10 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
     #     [leftRightLength, rightLeftLength, straitLeftLength, straitRightLength]
     # )
     lengths = jnp.array([straitLeftLength, straitRightLength])
+    # lengths = jnp.array([straitLeftLength])  # , straitRightLength])
 
     return jnp.nanmin(lengths)
+    # return differentiable_min(*lengths)
 
 
 # Vectorized version over goalPosition
@@ -1047,9 +1071,9 @@ def plot_dubins_reachable_set(
 
 
 def main():
-    pursuerVelocity = 1
+    pursuerVelocity = 2
     minimumTurnRadius = 1
-    pursuerRange = 1.5 * np.pi
+    pursuerRange = 1.0 * np.pi
     pursuerPosition = np.array([0, 0])
     pursuerHeading = np.pi / 2
 
@@ -1305,11 +1329,11 @@ def main_EZ():
     pursuerSpeed = 2
 
     pursuerRange = 1
-    minimumTurnRadius = 0.2
+    minimumTurnRadius = 0.5
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 0.5
-    evaderPosition = np.array([-0.5, 0.98])
+    evaderPosition = np.array([-0.4, 0.0])
     startTime = time.time()
     print("evaderPosition", evaderPosition)
 
@@ -1327,7 +1351,6 @@ def main_EZ():
     # )
     #
     fig, ax = plt.subplots()
-    ranges = np.linspace(0.5, 1.5, 10)
     pursuerRange = 1.0
     plot_dubins_EZ(
         pursuerPosition,

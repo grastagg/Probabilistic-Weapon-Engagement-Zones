@@ -31,10 +31,10 @@ in_dubins_engagement_zone = jax.jit(
 #         dubinsEZ.in_dubins_engagement_zone_single,
 #         in_axes=(
 #             None,  # pursuerPosition
-#             None,  # pursuerHeading
+#             0,  # pursuerHeading
 #             None,  # minimumTurnRadius
 #             None,  # captureRadius
-#             0,  # pursuerRange
+#             None,  # pursuerRange
 #             None,  # pursuerSpeed
 #             None,  # evaderPosition
 #             None,  # evaderHeading
@@ -69,7 +69,7 @@ def mc_dubins_pez_single(
     )
     # var = jnp.var(ez)
     # mean = jnp.mean(ez)
-    return jnp.sum(ez <= 0) / numSamples, ez, minimumTurnRadius
+    return jnp.sum(ez <= 0) / numSamples, ez, pursuerHeading
 
 
 mc_dubins_pez = jax.jit(
@@ -102,7 +102,7 @@ def mc_dubins_PEZ(
     pursuerRangeVar,
     captureRadius,
 ):
-    numSamples = 200
+    numSamples = 2000000
 
     key, subkey = generate_random_key()
     # Generate heading samples
@@ -585,7 +585,7 @@ def plot_EZ_vs_pursuer_range(
     # pursuerHeading = np.linspace(-np.pi, np.pi, 100)
     # turn radius derivat
     #
-    dDubinsEZ_dRange = dDubinsEZ_dPursuerRange(
+    dDubinsEZ_dRange = dDubinsEZ_dPursuerHeading(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -599,33 +599,33 @@ def plot_EZ_vs_pursuer_range(
     print("dDubinsEZ_dPursuerRange", dDubinsEZ_dRange)
     ezMean = in_dubins_engagement_zone(
         pursuerPosition,
-        pursuerHeading,
+        jnp.array([pursuerHeading]),
         minimumTurnRadius,
         captureRadius,
-        jnp.array([pursuerRange]),
+        pursuerRange,
         pursuerSpeed,
         evaderPosition,
         evaderHeading,
         evaderSpeed,
     )
 
-    pursuerRangeVec = np.linspace(0.1, 4.0, 100)
+    pursuerHeadingVec = np.linspace(-np.pi, np.pi, 1000)
     ez = in_dubins_engagement_zone(
         pursuerPosition,
-        pursuerHeading,
+        pursuerHeadingVec,
         minimumTurnRadius,
         captureRadius,
-        pursuerRangeVec,
+        pursuerRange,
         pursuerSpeed,
         evaderPosition,
         evaderHeading,
         evaderSpeed,
     )
-    ax.scatter(pursuerRangeVec, ez)
+    ax.scatter(pursuerHeadingVec, ez)
     # plot tangent point
     ax.plot(
-        pursuerRangeVec,
-        dDubinsEZ_dRange * (pursuerRangeVec - pursuerRange) + ezMean,
+        pursuerHeadingVec,
+        dDubinsEZ_dRange * (pursuerHeadingVec - pursuerHeading) + ezMean,
     )
 
 
@@ -809,8 +809,8 @@ def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerPositionCov = np.eye(2) * 0.0000001
 
-    pursuerHeading = (4.0 / 4.0) * np.pi
-    pursuerHeadingVar = 0.0
+    pursuerHeading = (2.0 / 4.0) * np.pi
+    pursuerHeadingVar = 0.6
 
     pursuerSpeed = 2.0
     pursuerSpeedVar = 0.0
@@ -818,8 +818,8 @@ def main():
     pursuerRange = 1.0
     pursuerRangeVar = 0.0
 
-    minimumTurnRadius = 0.2
-    minimumTurnRadiusVar = 0.05
+    minimumTurnRadius = 0.5
+    minimumTurnRadiusVar = 0.0
 
     captureRadius = 0.0
 
@@ -828,8 +828,8 @@ def main():
     # evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
 
     evaderSpeed = 0.5
-    evaderPosition = np.array([[-0.30, -0.5], [-0.20, -0.5]])
-    evaderPosition = np.array([[-1.0, -0.54]])
+    evaderPosition = np.array([[-0.4, -0.0]])
+    # evaderPosition = np.array([-0.4, 0.0])
     # evaderPosition = np.array([-0.28, -0.42])
 
     # plot_EZ_vs_pursuer_range(
@@ -843,23 +843,10 @@ def main():
     #     evaderHeading,
     #     evaderSpeed,
     # )
-    # compare_distribution(
-    #     evaderPosition,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #    ku pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     captureRadius,
-    # )
-    comparge_PEZ(
+    compare_distribution(
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
@@ -868,12 +855,25 @@ def main():
         pursuerSpeedVar,
         minimumTurnRadius,
         minimumTurnRadiusVar,
-        captureRadius,
         pursuerRange,
         pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
+        captureRadius,
     )
+    # comparge_PEZ(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    # )
 
     plt.show()
 
