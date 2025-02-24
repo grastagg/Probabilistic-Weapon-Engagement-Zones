@@ -572,19 +572,18 @@ def optimize_spline_path(
 
     optProb = Optimization("path optimization", objfunc)
 
-    # tf_initial = 1.0
-    # knotPoints = create_unclamped_knot_points(0, tf_initial, num_cont_points, 3)
+    tf_initial = 1.0
+    knotPoints = create_unclamped_knot_points(0, tf_initial, num_cont_points, 3)
     #
-    # x0 = np.linspace(p0, pf, num_cont_points).flatten()
-    # x0 = move_first_control_point_so_spline_passes_through_start(x0, knotPoints, p0, v0)
-    # x0 = x0.flatten()
-    # x0 = move_last_control_point_so_spline_passes_through_end(x0, knotPoints, pf, v0)
-    # x0 = x0.flatten()
-    #
-    # print("velocity constraints", velocity_constraints)
-    # tf = assure_velocity_constraint(
-    #     x0, knotPoints, num_cont_points, agentSpeed, velocity_constraints
-    # )
+    x0 = np.linspace(p0, pf, num_cont_points).flatten()
+    x0 = move_first_control_point_so_spline_passes_through_start(x0, knotPoints, p0, v0)
+    x0 = x0.flatten()
+    x0 = move_last_control_point_so_spline_passes_through_end(x0, knotPoints, pf, v0)
+    x0 = x0.flatten()
+
+    tf = assure_velocity_constraint(
+        x0, knotPoints, num_cont_points, agentSpeed, velocity_constraints
+    )
 
     # x0 = np.array(
     #     [
@@ -648,7 +647,7 @@ def optimize_spline_path(
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
-    opt.options["derivative_test"] = "first-order"
+    # opt.options["derivative_test"] = "first-order"
 
     sol = opt(optProb, sens=sens)
     # sol = opt(optProb, sens="FD")

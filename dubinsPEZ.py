@@ -102,7 +102,7 @@ def mc_dubins_PEZ(
     pursuerRangeVar,
     captureRadius,
 ):
-    numSamples = 2000000
+    numSamples = 2000
 
     key, subkey = generate_random_key()
     # Generate heading samples

@@ -365,8 +365,7 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
     lengths = jnp.array([straitLeftLength, straitRightLength])
     # lengths = jnp.array([straitLeftLength])  # , straitRightLength])
 
-    return jnp.nanmin(lengths)
-    # return differentiable_min(*lengths)
+    return differentiable_min(*lengths)
 
 
 # Vectorized version over goalPosition
@@ -929,7 +928,7 @@ def plot_dubins_EZ(
     ax,
 ):
     numPoints = 1500
-    rangeX = 1.5
+    rangeX = 10.5
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -997,7 +996,7 @@ def plot_dubins_EZ(
 
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
-    ax.contour(X, Y, ZTrue, cmap="summer")
+    ax.contour(X, Y, ZTrue, cmap="summer", zorder=10000)
     # ax.contour(X, Y, ZGeometric, cmap="summer")
     ax.scatter(*pursuerPosition, c="r")
     ax.set_aspect("equal", "box")
@@ -1335,7 +1334,6 @@ def main_EZ():
     evaderSpeed = 0.5
     evaderPosition = np.array([-0.4, 0.0])
     startTime = time.time()
-    print("evaderPosition", evaderPosition)
 
     # length, tangentPoint = find_dubins_path_length_right_strait(
     #     pursuerPosition, pursuerHeading, evaderPosition, minimumTurnRadius
