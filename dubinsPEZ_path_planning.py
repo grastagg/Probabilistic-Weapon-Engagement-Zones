@@ -473,6 +473,7 @@ def optimize_spline_path(
                 agentSpeed,
             )
         )
+        print("velocity", velocity)
 
         # funcs['start'] = self.get_start_constraint_jax(controlPoints)
         # funcs['start'] = pos[0]
@@ -640,14 +641,14 @@ def optimize_spline_path(
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 0
-    opt.options["max_iter"] = 500
+    opt.options["print_level"] = 5
+    opt.options["max_iter"] = 0
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
-    # opt.options["derivative_test"] = "first-order"
+    opt.options["derivative_test"] = "first-order"
 
     sol = opt(optProb, sens=sens)
     # sol = opt(optProb, sens="FD")

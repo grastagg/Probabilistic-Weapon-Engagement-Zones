@@ -65,15 +65,16 @@ def discratized_dubins_voronoi_diagram(
     y = np.linspace(0, 10, numPoints)
     [X, Y] = np.meshgrid(x, y)
     positions = np.array([X.flatten(), Y.flatten()]).T
-    # distances = shortestest_dubins_path_multiple_pursuers(
-    #     pursuerPositionList, pursuerHeadingList, positions, pursuerTurnRadiusList
-    # )
-    distances = np.linalg.norm(
-        positions[:, np.newaxis, :] - pursuerPositionList[np.newaxis, :, :], axis=-1
+    distances = shortestest_dubins_path_multiple_pursuers(
+        pursuerPositionList, pursuerHeadingList, positions, pursuerTurnRadiusList
     )
+    # distances = np.linalg.norm(
+    #     positions[:, np.newaxis, :] - pursuerPositionList[np.newaxis, :, :], axis=-1
+    # )
 
     print(pursuerSpeedList)
-    times = distances / pursuerSpeedList[np.newaxis, :]
+    times = distances
+    # times = distances / pursuerSpeedList[np.newaxis, :]
 
     # maxEZ = max_ez_multiple_pursuers(
     #     positions,
@@ -86,7 +87,7 @@ def discratized_dubins_voronoi_diagram(
     # )
     # print(maxEZ)
     # cellAssignment = np.argmin(maxEZ, axis=0)
-    cellAssignment = np.argmin(times, axis=1)
+    cellAssignment = np.argmin(times, axis=0)
     # print(cellAssignment.shape)
     fig, ax = plt.subplots()
     ax.pcolormesh(
@@ -121,11 +122,11 @@ def discratized_dubins_voronoi_diagram(
     #         0.5,
     #         ax,
     #     )
-    arcs, boundarySegments = pursuer_weighted_voronoi(
-        pursuerPositionList, pursuerSpeedList
-    )
+    # arcs, boundarySegments = pursuer_weighted_voronoi(
+    #     pursuerPositionList, pursuerSpeedList
+    # )
 
-    weighted_voronoi.plot_weighted_voronoi_arcs(arcs, boundarySegments, ax)
+    # weighted_voronoi.plot_weighted_voronoi_arcs(arcs, boundarySegments, ax)
 
     plt.show()
 
@@ -153,7 +154,7 @@ def pursuer_weighted_voronoi(purusuerPositions, pursuerSpeeds):
 
 
 def main():
-    numPursuers = 5
+    numPursuers = 35
     # pursuerPositions = np.array([[0, 0], [-4, 1], [6, 2], [-6, -7]])
     bounds = [10, 10]
     pursuerPositions = np.random.uniform(0, 10, (numPursuers, 2))
