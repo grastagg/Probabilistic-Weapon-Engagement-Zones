@@ -928,7 +928,7 @@ def plot_dubins_EZ(
     ax,
 ):
     numPoints = 1500
-    rangeX = 10.5
+    rangeX = 2.0
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -996,10 +996,10 @@ def plot_dubins_EZ(
 
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
-    ax.contour(X, Y, ZTrue, cmap="summer", zorder=10000)
+    colors = ["red"]
+    ax.contour(X, Y, ZTrue, levels=[0], colors=colors, zorder=10000)
     # ax.contour(X, Y, ZGeometric, cmap="summer")
     ax.scatter(*pursuerPosition, c="r")
-    ax.set_aspect("equal", "box")
     ax.set_aspect("equal", "box")
     return ax
 

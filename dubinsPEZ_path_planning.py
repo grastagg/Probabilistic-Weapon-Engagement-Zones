@@ -47,6 +47,8 @@ def plot_spline(
     pursuerTurnRadiusVar,
     agentSpeed,
     ax,
+    plotPEZ=True,
+    pez_limit=0.2,
 ):
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
@@ -65,47 +67,50 @@ def plot_spline(
     agentHeadings = np.arctan2(yDot, xDot)
 
     pos = spline(t)
-    pez, _, _ = dubinsPEZ.mc_dubins_PEZ(
-        pos,
-        agentHeadings,
-        agentSpeed,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadindgVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        pursuerTurnRadius,
-        pursuerTurnRadiusVar,
-        pursuerRange,
-        pusuerRangeVar,
-        pursuerCaptureRadius,
-    )
-    print("max monte carlo pez", np.max(pez))
-    linpez, _, _ = dubinsPEZ.linear_dubins_pez(
-        pos,
-        agentHeadings,
-        agentSpeed,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadindgVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        pursuerTurnRadius,
-        pursuerTurnRadiusVar,
-        pursuerRange,
-        pusuerRangeVar,
-        pursuerCaptureRadius,
-    )
-    print("max linear pez", np.max(linpez))
+    if plotPEZ:
+        pez, _, _ = dubinsPEZ.mc_dubins_PEZ(
+            pos,
+            agentHeadings,
+            agentSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            pursuerTurnRadius,
+            pursuerTurnRadiusVar,
+            pursuerRange,
+            pusuerRangeVar,
+            pursuerCaptureRadius,
+        )
+        print("max monte carlo pez", np.max(pez))
+        linpez, _, _ = dubinsPEZ.linear_dubins_pez(
+            pos,
+            agentHeadings,
+            agentSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            pursuerTurnRadius,
+            pursuerTurnRadiusVar,
+            pursuerRange,
+            pusuerRangeVar,
+            pursuerCaptureRadius,
+        )
+        print("max linear pez", np.max(linpez))
 
-    c = ax.scatter(x, y, c=pez, s=4, cmap="inferno")
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
+        c = ax.scatter(x, y, c=pez, s=4, cmap="inferno")
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.05)
 
-    cbar = plt.colorbar(c, cax=cax)
-    cbar.ax.tick_params(labelsize=16)
+        cbar = plt.colorbar(c, cax=cax)
+        cbar.ax.tick_params(labelsize=16)
+    else:
+        ax.plot(x, y, label=f"PEZ Limit: {pez_limit}", linewidth=3)
 
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
@@ -115,9 +120,6 @@ def plot_spline(
     ax.set_ylabel("Y")
     # print max mc and linear pez in title
     # limit to 3 decimal places
-    ax.set_title(
-        f"Max MC PEZ: {np.max(pez):.3f}" + f" Max Linear PEZ: {np.max(linpez):.3f}"
-    )
 
 
 def evaluate_spline(controlPoints, knotPoints):
@@ -473,7 +475,6 @@ def optimize_spline_path(
                 agentSpeed,
             )
         )
-        print("velocity", velocity)
 
         # funcs['start'] = self.get_start_constraint_jax(controlPoints)
         # funcs['start'] = pos[0]
@@ -641,8 +642,8 @@ def optimize_spline_path(
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 5
-    opt.options["max_iter"] = 0
+    opt.options["print_level"] = 0
+    opt.options["max_iter"] = 500
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
@@ -689,9 +690,11 @@ def compare_pez_limits(
     x0,
     tf,
 ):
-    numFigures = len(pez_limits)
-    # two rows
-    fig, axs = plt.subplots(2, numFigures // 2, layout="tight")
+    # numFigures = len(pez_limits)
+    # # two rows
+    # fig, axs = plt.subplots(2, numFigures // 2, layout="tight")
+
+    fig, ax = plt.subplots()
     for i, pez_limit in enumerate(pez_limits):
         splineDubins = optimize_spline_path(
             p0,
@@ -719,7 +722,6 @@ def compare_pez_limits(
             x0,
             tf,
         )
-        ax = axs[i // 3, i % 3]
         plot_spline(
             splineDubins,
             pursuerPosition,
@@ -735,17 +737,24 @@ def compare_pez_limits(
             pursuerTurnRadiusVar,
             agentSpeed,
             ax,
+            plotPEZ=False,
+            pez_limit=pez_limit,
         )
+    ax.legend(fontsize=20)
+    ax.set_title("Linear Dubins PEZ", fontsize=30)
+    fast_pursuer.plotMahalanobisDistance(
+        pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True
+    )
 
 
 def main():
     pursuerPosition = np.array([0.0, 0.0])
-    pursuerPositionCov = np.eye(2) * 0.1
+    pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
     pursuerHeading = np.pi / 2
-    pursuerHeadingVar = 0.4
+    pursuerHeadingVar = 0.1
 
-    startingLocation = np.array([-4.0, 1.0])
-    endingLocation = np.array([4.0, -1.0])
+    startingLocation = np.array([-4.0, -4.0])
+    endingLocation = np.array([4.0, 4.0])
     initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
     initialVelocity = endingLocation - startingLocation
 
@@ -756,12 +765,12 @@ def main():
     num_constraint_samples = 50
 
     pursuerRange = 1.0
-    pursuerRangeVar = 0.2
+    pursuerRangeVar = 0.1
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
-    pursuerSpeedVar = 0.2
+    pursuerSpeedVar = 0.1
     pursuerTurnRadius = 0.2
-    pursuerTurnRadiusVar = 0.05
+    pursuerTurnRadiusVar = 0.01
     agentSpeed = 1
 
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
@@ -808,7 +817,7 @@ def main():
     )
     print("time to plan deterministic spline", time.time() - start)
 
-    pez_limits = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
+    pez_limits = [0.01, 0.05, 0.25, 0.5]
     compare_pez_limits(
         startingLocation,
         endingLocation,

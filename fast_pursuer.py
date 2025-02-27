@@ -79,7 +79,9 @@ def inEngagementZone(
     # return rho
 
 
-def plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
+def plotMahalanobisDistance(
+    pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True
+):
     # Define the grid
     x = np.linspace(-2, 2, 100)
     y = np.linspace(-2, 2, 100)
@@ -110,13 +112,16 @@ def plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax):
         pursuerPosition[0],
         pursuerPosition[1],
         color="darkred",
-        label="Pursuer Position",
     )
 
     # Add a color bar and increase font size
-    cbar = plt.colorbar(c, ax=ax, ticks=[0, 1, 2, 3], shrink=0.8)
-    cbar.set_label("Pursuer Std Dev", fontsize=26)
-    cbar.ax.tick_params(labelsize=26)
+    if plotColorbar:
+        l, b, w, h = ax.get_position().bounds
+        cax = fig.add_axes([l + w + 0.02, b, 0.02, h])
+        cbar = fig.colorbar(c, ax=cax, cax=cax, ticks=[0, 1, 2, 3], shrink=0.5)
+        # cbar = plt.colorbar(c, ax=cax, ticks=[0, 1, 2, 3])
+        cbar.set_label("Pursuer Std Dev", fontsize=26)
+        cbar.ax.tick_params(labelsize=26)
 
 
 def plotEngagementZone(
@@ -131,7 +136,7 @@ def plotEngagementZone(
     x = np.linspace(-2, 2, 50)
     y = np.linspace(-2, 2, 50)
     [X, Y] = np.meshgrid(x, y)
-    agentPositions = jnp.vstack([X.ravel(), Y.ravel()]).T
+    agentPositions = jnp.vstack([X.flatten(), Y.flatten()]).T
     agentHeadings = jnp.ones(agentPositions.shape[0]) * agentHeading
     engagementZonePlot = inEngagementZoneJaxVectorized(
         agentPositions,
@@ -142,6 +147,7 @@ def plotEngagementZone(
         pursuerSpeed,
         agentSpeed,
     )
+    print(engagementZonePlot)
 
     # engagementZonePlot = np.zeros(X.shape)
 
@@ -390,13 +396,15 @@ def probabalisticEngagementZoneVectorizedTemp(
 ):
     # Define vectorized operations with vmap
     def single_agent_prob(agentPosition, agentHeading):
-        agentPosition = agentPosition.reshape(-1, 1)
+        agentPosition = agentPosition.reshape(
+            -1,
+        )
 
         # Calculate the mean for the engagement zone
         mean = inEngagementZoneJax(
             agentPosition,
             agentHeading,
-            pursuerPosition,
+            pursuerPosition.squeeze(),
             pursuerRange,
             pursuerCaptureRange,
             pursuerSpeed,
@@ -555,7 +563,8 @@ def plotProbablisticEngagementZone(
     y = jnp.linspace(-2, 2, 50)
     X, Y = jnp.meshgrid(x, y)
     agentPositions = jnp.vstack([X.ravel(), Y.ravel()]).T
-    agentHeadings = jnp.ones(agentPositions.shape[0]) * agentHeading
+    print(agentPositions.shape)
+    agentHeadings = jnp.ones(50 * 50) * agentHeading
 
     # Compute Jacobian of engagement zone function
     # dPezDPursuerPosition = jacfwd(inEngagementZoneJax, argnums=2)
@@ -581,6 +590,7 @@ def plotProbablisticEngagementZone(
         pursuerSpeedVar,
         agentSpeed,
     )
+    print(engagementZonePlot.shape)
     print("total time: ", time.time() - start)
 
     # Convert result to NumPy array for plotting
@@ -591,9 +601,9 @@ def plotProbablisticEngagementZone(
 
     # Plotting
     c = ax.contour(X, Y, engagementZonePlot_reshaped, levels=np.linspace(0.1, 1, 10))
-    ax.clabel(c, inline=True, fontsize=12)
-    ax.tick_params(axis="x", labelsize=16)
-    ax.tick_params(axis="y", labelsize=16)
+    ax.clabel(c, inline=True, fontsize=22)
+    ax.tick_params(axis="x", labelsize=26)
+    ax.tick_params(axis="y", labelsize=26)
 
     # Add circle representing pursuer's range
     # for i in range(3):
@@ -677,9 +687,9 @@ def plotMCProbablisticEngagementZone(
     # c = plt.Circle(pursuerPosition, pursuerRange+pursuerCaptureRange, fill=False)
     # ax.add_artist(c)
     c = ax.contour(X, Y, engagementZonePlot, levels=np.linspace(0.1, 1, 10))
-    ax.clabel(c, inline=True, fontsize=12)
-    ax.tick_params(axis="x", labelsize=16)
-    ax.tick_params(axis="y", labelsize=16)
+    ax.clabel(c, inline=True, fontsize=22)
+    ax.tick_params(axis="x", labelsize=26)
+    ax.tick_params(axis="y", labelsize=26)
     c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
     ax.add_artist(c)
 
@@ -735,21 +745,24 @@ def monte_carlo_probalistic_engagment_zone(
 
 def main():
     pursuerRange = 1.0
-    pursuerRangeVar = 0.0
+    pursuerRangeVar = 0.1
     pursuerCaptureRange = 0.1
-    pursuerCaptureRangeVar = 0.1
-    pursuerSpeed = 1.0
+    pursuerCaptureRangeVar = 0.02
+    pursuerSpeed = 2.0
     pursuerSpeedVar = 0.0
     agentSpeed = 0.5
 
     agentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
-    pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
-    pursuerInitialPosition = np.array([[0.0], [0.0]])
+    pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
+    pursuerInitialPosition = np.array([0.0, 0.0])
 
     agentInitialHeading = 0.0
     agentHeadingVar = 0.0
 
-    mcFig, mcAx = plt.subplots(1, 1)
+    fig, ax = plt.subplots(1, 2)
+    mcAx = ax[1]
+    if np.any(pursuerPositionCov):
+        plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx, fig)
     mcEz = plotMCProbablisticEngagementZone(
         agentPositionCov,
         agentInitialHeading,
@@ -767,20 +780,23 @@ def main():
     )
     plotEngagementZone(
         agentInitialHeading,
-        pursuerInitialPosition,
+        pursuerInitialPosition.squeeze(),
         pursuerRange,
         pursuerCaptureRange,
         pursuerSpeed,
         agentSpeed,
         mcAx,
     )
-    mcAx.set_xlabel("X", fontsize=16)
-    mcAx.set_ylabel("Y", fontsize=16)
+    mcAx.set_xlabel("X", fontsize=26)
+    mcAx.set_ylabel("Y", fontsize=26)
     mcAx.set_aspect("equal")
-    mcAx.set_title("Monte Carlo PEZ")
-    linFig, linAx = plt.subplots(1, 1)
+    mcAx.set_title("Monte Carlo PEZ", fontsize=36)
+    # linFig, linAx = plt.subplots(1, 1)
+    linAx = ax[0]
     if np.any(pursuerPositionCov):
-        plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, linAx)
+        plotMahalanobisDistance(
+            pursuerInitialPosition, pursuerPositionCov, linAx, fig, plotColorbar=False
+        )
 
     linAx.set_aspect("equal")
     linPez = plotProbablisticEngagementZone(
@@ -807,9 +823,11 @@ def main():
         agentSpeed,
         linAx,
     )
-    linAx.set_xlabel("X", fontsize=16)
-    linAx.set_ylabel("Y", fontsize=16)
-    linAx.set_title("Linearized PEZ")
+    linAx.set_xlabel("X", fontsize=26)
+    linAx.set_ylabel("Y", fontsize=26)
+    linAx.set_title("Linearized PEZ", fontsize=36)
+    fig.set_size_inches(20, 20)
+    plt.savefig("/home/ggs24/Desktop/PEZ.png", dpi=500, bbox_inches="tight")
     plt.show()
     #
     # fig,axes = plt.subplots(2,4,layout='constrained')

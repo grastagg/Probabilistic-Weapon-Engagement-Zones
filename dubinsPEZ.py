@@ -6,6 +6,8 @@ from functools import partial
 import time
 
 
+import fast_pursuer
+
 import dubinsEZ
 
 # Vectorized function using vmap
@@ -102,7 +104,7 @@ def mc_dubins_PEZ(
     pursuerRangeVar,
     captureRadius,
 ):
-    numSamples = 2000
+    numSamples = 5000
 
     key, subkey = generate_random_key()
     # Generate heading samples
@@ -428,17 +430,16 @@ def plot_dubins_PEZ(
     useLinear=False,
     useUnscented=True,
 ):
-    numPoints = 300
-    rangeX = 1.5
-    x = jnp.linspace(-rangeX, rangeX, numPoints)
-    y = jnp.linspace(-rangeX, rangeX, numPoints)
-    [X, Y] = jnp.meshgrid(x, y)
-    Z = jnp.zeros_like(X)
-    X = X.flatten()
-    Y = Y.flatten()
-    evaderHeadings = np.ones_like(X) * evaderHeading
-
     if useLinear:
+        numPoints = 300
+        rangeX = 2
+        x = jnp.linspace(-rangeX, rangeX, numPoints)
+        y = jnp.linspace(-rangeX, rangeX, numPoints)
+        [X, Y] = jnp.meshgrid(x, y)
+        Z = jnp.zeros_like(X)
+        X = X.flatten()
+        Y = Y.flatten()
+        evaderHeadings = np.ones_like(X) * evaderHeading
         ZTrue, _, _ = linear_dubins_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -455,25 +456,7 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
-        start = time.time()
-        ZTrue, _, _ = linear_dubins_pez(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        print("linear time", time.time() - start)
-        ax.set_title("Linear Dubins PEZ")
+        ax.set_title("Linear Dubins PEZ", fontsize=30)
     elif useUnscented:
         ZTrue, _, _ = uncented_dubins_pez(
             jnp.array([X, Y]).T,
@@ -491,26 +474,17 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
-        start = time.time()
-        ZTrue, _, _ = uncented_dubins_pez(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        print("unscented time", time.time() - start)
         ax.set_title("Unscented Dubins PEZ")
     else:
+        numPoints = 100
+        rangeX = 2.0
+        x = jnp.linspace(-rangeX, rangeX, numPoints)
+        y = jnp.linspace(-rangeX, rangeX, numPoints)
+        [X, Y] = jnp.meshgrid(x, y)
+        Z = jnp.zeros_like(X)
+        X = X.flatten()
+        Y = Y.flatten()
+        evaderHeadings = np.ones_like(X) * evaderHeading
         ZTrue, _, _ = mc_dubins_PEZ(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -527,25 +501,7 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
-        start = time.time()
-        ZTrue, _, _ = mc_dubins_PEZ(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        print("mc time", time.time() - start)
-        ax.set_title("Monte Carlo Dubins PEZ")
+        ax.set_title("Monte Carlo Dubins PEZ", fontsize=30)
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
 
@@ -559,9 +515,11 @@ def plot_dubins_PEZ(
     )
     # c = ax.pcolormesh(X, Y, ZTrue)
     # if useUnscented:
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    plt.clabel(c, inline=True, fontsize=8)
+    ax.set_xlabel("X", fontsize=26)
+    ax.set_ylabel("Y", fontsize=26)
+    # set tick size
+    ax.tick_params(axis="both", which="major", labelsize=20)
+    plt.clabel(c, inline=True, fontsize=20)
 
     # ax.contour(X, Y, ZGeometric, cmap="summer")
     ax.scatter(*pursuerPosition, c="r")
@@ -744,7 +702,7 @@ def comparge_PEZ(
     evaderSpeed,
 ):
     evaderHeading = jnp.array([(0 / 20) * np.pi])
-    fig, axes = plt.subplots(1, 3)
+    fig, axes = plt.subplots(1, 2)
     plot_dubins_PEZ(
         pursuerPosition,
         pursuerPositionCov,
@@ -763,7 +721,6 @@ def comparge_PEZ(
         useLinear=True,
         useUnscented=False,
     )
-    fig2, ax2 = plt.subplots()
     plot_dubins_PEZ(
         pursuerPosition,
         pursuerPositionCov,
@@ -782,44 +739,72 @@ def comparge_PEZ(
         useLinear=False,
         useUnscented=False,
     )
-    fig3, ax3 = plt.subplots()
-    c = plot_dubins_PEZ(
+    fast_pursuer.plotMahalanobisDistance(
+        pursuerPosition, pursuerPositionCov, axes[0], fig, plotColorbar=False
+    )
+    fast_pursuer.plotMahalanobisDistance(
+        pursuerPosition, pursuerPositionCov, axes[1], fig, plotColorbar=True
+    )
+    dubinsEZ.plot_dubins_EZ(
         pursuerPosition,
-        pursuerPositionCov,
         pursuerHeading,
-        pursuerHeadingVar,
         pursuerSpeed,
-        pursuerSpeedVar,
         minimumTurnRadius,
-        minimumTurnRadiusVar,
         captureRadius,
         pursuerRange,
-        pursuerRangeVar,
         evaderHeading,
         evaderSpeed,
-        axes[2],
-        useLinear=False,
-        useUnscented=True,
+        axes[0],
     )
+    dubinsEZ.plot_dubins_EZ(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        evaderHeading,
+        evaderSpeed,
+        axes[1],
+    )
+    # fig3, ax3 = plt.subplots()
+    # c = plot_dubins_PEZ(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     axes[2],
+    #     useLinear=False,
+    #     useUnscented=True,
+    # )
     # fig = plt.gcf()
     # fig.colorbar(c)
 
 
 def main():
     pursuerPosition = np.array([0.0, 0.0])
-    pursuerPositionCov = np.eye(2) * 0.0000001
+    pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
 
     pursuerHeading = (2.0 / 4.0) * np.pi
-    pursuerHeadingVar = 0.6
+    pursuerHeadingVar = 0.1
 
     pursuerSpeed = 2.0
-    pursuerSpeedVar = 0.0
+    pursuerSpeedVar = 0.1
 
     pursuerRange = 1.0
-    pursuerRangeVar = 0.0
+    pursuerRangeVar = 0.1
 
-    minimumTurnRadius = 0.5
-    minimumTurnRadiusVar = 0.0
+    minimumTurnRadius = 0.2
+    minimumTurnRadiusVar = 0.01
 
     captureRadius = 0.0
 
@@ -843,23 +828,10 @@ def main():
     #     evaderHeading,
     #     evaderSpeed,
     # )
-    compare_distribution(
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        pursuerRange,
-        pursuerRangeVar,
-        captureRadius,
-    )
-    # comparge_PEZ(
+    # compare_distribution(
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
     #     pursuerPosition,
     #     pursuerPositionCov,
     #     pursuerHeading,
@@ -868,12 +840,25 @@ def main():
     #     pursuerSpeedVar,
     #     minimumTurnRadius,
     #     minimumTurnRadiusVar,
-    #     captureRadius,
     #     pursuerRange,
     #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
+    #     captureRadius,
     # )
+    comparge_PEZ(
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        captureRadius,
+        pursuerRange,
+        pursuerRangeVar,
+        evaderHeading,
+        evaderSpeed,
+    )
 
     plt.show()
 

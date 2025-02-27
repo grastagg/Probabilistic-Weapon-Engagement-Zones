@@ -49,10 +49,10 @@ def plot_spline(
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
-    if pez_constraint_limit == 0.5:
-        ax.set_title(f"Deterministic", fontsize=20)
-    else:
-        ax.set_title(f"PEZ Limit: {pez_constraint_limit}", fontsize=30)
+    # if pez_constraint_limit == 0.5:
+    #     ax.set_title(f"Deterministic", fontsize=20)
+    # else:
+    #     ax.set_title(f"PEZ Limit: {pez_constraint_limit}", fontsize=30)
     ax.set_xlabel("X", fontsize=26)
     ax.set_ylabel("Y", fontsize=26)
     ax.tick_params(axis="x", labelsize=26)
@@ -88,33 +88,42 @@ def plot_spline(
         pursuerCaptureRange,
         pursuerSpeed,
         agentSpeed,
-    )[:, 0]
-    if pez_constraint_limit == 0.5:
-        pez = pezDeterministic
-        # flip cmap
-        cmap = "viridis"
-        cbarLabel = "dist-rho"
+    )
+    plotPEZAlongSpline = False
+    if plotPEZAlongSpline:
+        if pez_constraint_limit == 0.5:
+            pez = pezDeterministic
+            # flip cmap
+            cmap = "viridis"
+            cbarLabel = "dist-rho"
+        else:
+            cmap = "viridis"
+            cbarLabel = "Engagement Zone Probability"
+            plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax, fig)
+
+        c = ax.scatter(x, y, c=pez, cmap=cmap, s=4)
+        cbar = plt.colorbar(c, shrink=0.8)
+        cbar.ax.tick_params(labelsize=26)
+
+        if pez_constraint_limit == 0.5:
+            cbar.set_label("", fontsize=16)
+        cbar.set_label(cbarLabel, fontsize=26)
     else:
-        cmap = "viridis"
-        cbarLabel = "Engagement Zone Probability"
-        plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax)
+        if pez_constraint_limit == 0.5:
+            ax.plot(x, y, label=f"Deterministic", linewidth=3)
+        else:
+            ax.plot(x, y, label=f"PEZ limit: {pez_constraint_limit}", linewidth=3)
 
-    c = ax.scatter(x, y, c=pez, cmap=cmap, s=4)
-    cbar = plt.colorbar(c, shrink=0.8)
-    cbar.ax.tick_params(labelsize=26)
-
-    if pez_constraint_limit == 0.5:
-        cbar.set_label("", fontsize=16)
-    cbar.set_label(cbarLabel, fontsize=26)
     # else:
     #     cbar.set_label("dist - rho")
     # control_points = spline.c
     # ax.plot(control_points[:, 0], control_points[:, 1], marker='o',linestyle = 'dashed',c = 'tab:gray')
 
     ax.set_aspect(1)
-    c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
+    # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
+    #
     plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r")
-    ax.add_artist(c)
+    # ax.add_artist(c)
     plt.xlabel("X")
     plt.ylabel("Y")
 
@@ -630,24 +639,24 @@ def optimize_spline_path(
     tf = assure_velocity_constraint(
         x0, knotPoints, num_cont_points, agentSpeed, velocity_constraints
     )
-    # x0 = np.array(
-    #     [
-    #         -6.99550637,
-    #         -8.95872567,
-    #         -4.47336006,
-    #         -5.06316688,
-    #         -5.11105337,
-    #         -0.78860679,
-    #         -3.19745253,
-    #         3.19381798,
-    #         0.79036742,
-    #         5.04575115,
-    #         5.06051916,
-    #         4.51374057,
-    #         8.96755593,
-    #         6.89928658,
-    #     ]
-    # )
+    x0 = np.array(
+        [
+            -6.99550637,
+            -8.95872567,
+            -4.47336006,
+            -5.06316688,
+            -5.11105337,
+            -0.78860679,
+            -3.19745253,
+            3.19381798,
+            0.79036742,
+            5.04575115,
+            5.06051916,
+            4.51374057,
+            8.96755593,
+            6.89928658,
+        ]
+    )
 
     tempVelocityContstraints = get_spline_velocity(x0, 1, 3, 1)
     num_constraint_samples = len(tempVelocityContstraints)
@@ -762,7 +771,7 @@ def mc_spline_evaluation(
 def main():
     agentPositionCov = np.array([[0.0, 0], [0, 0.0]])
     agentHeadingVar = 0.0
-    pursuerPosition = np.array([[0.0], [0.0]])
+    pursuerPosition = np.array([0.0, 0.0])
 
     startingLocation = np.array([-4.0, -4.0])
     endingLocation = np.array([4.0, 4.0])
@@ -775,13 +784,13 @@ def main():
     num_constraint_samples = 50
     # pez_constraint_limit_list = [.1,.2,.3,.4]
     # pez_constraint_limit_list = [.01,0.05,.1,.2,.3,.4,.5]
-    pez_constraint_limit_list = [0.01, 0.1, 0.2, 0.3, 0.4, 0.5]
+    pez_constraint_limit_list = [0.01, 0.05, 0.25, 0.5]
     # pez_constraint_limit_list = [.01]
 
-    pursuerPositionCov = np.array([[0.2, 0], [0, 0.2]])
+    pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
     # pursuerPositionCov = np.array([[0.0,0],[0,0.0]])
     pursuerRange = 1.0
-    pursuerRangeVar = 0.2
+    pursuerRangeVar = 0.1
     # pursuerRangeVar = 0.0
     pursuerCaptureRange = 0.1
     pursuerCaptureRangeVar = 0.02
@@ -799,72 +808,54 @@ def main():
 
     fig, ax = plt.subplots()
     pez_constraint_limit = pez_constraint_limit_list[0]
-    spline = optimize_spline_path(
-        startingLocation,
-        endingLocation,
-        initialVelocity,
-        numControlPoints,
-        splineOrder,
-        velocity_constraints,
-        turn_rate_constraints,
-        curvature_constraints,
-        num_constraint_samples,
-        pez_constraint_limit,
-        agentPositionCov,
-        agentHeadingVar,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerRange,
-        pursuerRangeVar,
-        pursuerCaptureRange,
-        pursuerCaptureRangeVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        agentSpeed,
-        useProbabalistic,
-    )
-    spline = optimize_spline_path(
-        startingLocation,
-        endingLocation,
-        initialVelocity,
-        numControlPoints,
-        splineOrder,
-        velocity_constraints,
-        turn_rate_constraints,
-        curvature_constraints,
-        num_constraint_samples,
-        pez_constraint_limit,
-        agentPositionCov,
-        agentHeadingVar,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerRange,
-        pursuerRangeVar,
-        pursuerCaptureRange,
-        pursuerCaptureRangeVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        agentSpeed,
-        useProbabalistic,
-    )
+    for pez_constraint_limit in pez_constraint_limit_list:
+        spline = optimize_spline_path(
+            startingLocation,
+            endingLocation,
+            initialVelocity,
+            numControlPoints,
+            splineOrder,
+            velocity_constraints,
+            turn_rate_constraints,
+            curvature_constraints,
+            num_constraint_samples,
+            pez_constraint_limit,
+            agentPositionCov,
+            agentHeadingVar,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerRange,
+            pursuerRangeVar,
+            pursuerCaptureRange,
+            pursuerCaptureRangeVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            agentSpeed,
+            useProbabalistic,
+        )
 
-    # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit, useProbabalistic)
-    plot_spline(
-        spline,
-        agentPositionCov,
-        agentHeadingVar,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerRange,
-        pursuerRangeVar,
-        pursuerCaptureRange,
-        pursuerCaptureRangeVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        agentSpeed,
-        pez_constraint_limit,
-        ax,
+        # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit, useProbabalistic)
+        plot_spline(
+            spline,
+            agentPositionCov,
+            agentHeadingVar,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerRange,
+            pursuerRangeVar,
+            pursuerCaptureRange,
+            pursuerCaptureRangeVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            agentSpeed,
+            pez_constraint_limit,
+            ax,
+        )
+    plotMahalanobisDistance(
+        pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True
     )
+    ax.legend(fontsize=20)
+    ax.set_title("Linear PEZ", fontsize=30)
 
     # fig,axes = plt.subplots(2,3,layout='constrained')
     #
