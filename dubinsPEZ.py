@@ -794,7 +794,7 @@ def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
 
-    pursuerHeading = (2.0 / 4.0) * np.pi
+    pursuerHeading = (4.0 / 4.0) * np.pi
     pursuerHeadingVar = 0.1
 
     pursuerSpeed = 2.0

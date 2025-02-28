@@ -750,7 +750,7 @@ def compare_pez_limits(
 def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
-    pursuerHeading = np.pi / 2
+    pursuerHeading = 0 * np.pi / 2
     pursuerHeadingVar = 0.1
 
     startingLocation = np.array([-4.0, -4.0])
