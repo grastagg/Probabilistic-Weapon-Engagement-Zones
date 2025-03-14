@@ -28,6 +28,7 @@ import dubinsPEZ
 import pez_path_planner
 import dubins_EZ_path_planning
 
+
 numSamplesPerInterval = 25
 
 
@@ -586,25 +587,6 @@ def optimize_spline_path(
     tf = assure_velocity_constraint(
         x0, knotPoints, num_cont_points, agentSpeed, velocity_constraints
     )
-
-    # x0 = np.array(
-    #     [
-    #         -6.99550637,
-    #         -8.95872567,
-    #         -4.47336006,
-    #         -5.06316688,
-    #         -5.11105337,
-    #         -0.78860679,
-    #         -3.19745253,
-    #         3.19381798,
-    #         0.79036742,
-    #         5.04575115,
-    #         5.06051916,
-    #         4.51374057,
-    #         8.96755593,
-    #         6.89928658,
-    #     ]
-    # )
 
     tempVelocityContstraints = get_spline_velocity(x0, 1, 3, 1)
     num_constraint_samples = len(tempVelocityContstraints)
