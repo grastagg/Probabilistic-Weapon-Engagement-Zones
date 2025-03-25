@@ -71,7 +71,15 @@ def mc_dubins_pez_single(
     )
     # var = jnp.var(ez)
     # mean = jnp.mean(ez)
-    return jnp.sum(ez <= 0) / numSamples, ez, pursuerHeading
+    return (
+        jnp.sum(ez <= 0) / numSamples,
+        ez,
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
+    )
 
 
 mc_dubins_pez = jax.jit(
@@ -485,7 +493,7 @@ def plot_dubins_PEZ(
         X = X.flatten()
         Y = Y.flatten()
         evaderHeadings = np.ones_like(X) * evaderHeading
-        ZTrue, _, _ = mc_dubins_PEZ(
+        ZTrue, _, _, _, _, _, _ = mc_dubins_PEZ(
             jnp.array([X, Y]).T,
             evaderHeadings,
             evaderSpeed,
@@ -609,7 +617,15 @@ def compare_distribution(
     pursuerRangeVar,
     captureRadius,
 ):
-    inEZ, ez, pursuerRangeSamples = mc_dubins_PEZ(
+    (
+        inEZ,
+        ez,
+        pursuerPositionSamples,
+        pursuerHeadingSamples,
+        pursuerSpeedSamples,
+        turnRadiusSamples,
+        rangeSamples,
+    ) = mc_dubins_PEZ(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -625,7 +641,7 @@ def compare_distribution(
         pursuerRangeVar,
         captureRadius,
     )
-    print(inEZ)
+    print("mc", inEZ)
     inEZ, linMean, linVar = linear_dubins_pez(
         evaderPosition,
         evaderHeading,
@@ -642,7 +658,7 @@ def compare_distribution(
         pursuerRangeVar,
         captureRadius,
     )
-    print(inEZ)
+    print("lin ", inEZ)
     inEZ, uMean, uVar = uncented_dubins_pez(
         evaderPosition,
         evaderHeading,
@@ -659,7 +675,7 @@ def compare_distribution(
         pursuerRangeVar,
         captureRadius,
     )
-    print(inEZ)
+    print("u ", inEZ)
     fig, ax = plt.subplots()
 
     sortedEZindices = jnp.argsort(ez).flatten()
@@ -667,7 +683,7 @@ def compare_distribution(
     cdf = jnp.linspace(0, len(ezSorted), len(ezSorted)) / len(ezSorted)
 
     plt.hist(ez, bins=1000, density=True)
-    print("min pursuer range", np.min(pursuerRangeSamples))
+    print("min turn radius", np.min(turnRadiusSamples))
     plot_normal(linMean, linVar, ax, "Linear")
     plot_normal(uMean, uVar, ax, "Unscented")
     # plot vertical line at 0
@@ -682,8 +698,8 @@ def compare_distribution(
 
     plt.legend()
 
-    fig1, ax1 = plt.subplots()
-    ax1.scatter(pursuerRangeSamples, ez, label="Monte Carlo")
+    # fig1, ax1 = plt.subplots()
+    # ax1.scatter(pursuerRangeSamples, ez, label="Monte Carlo")
 
 
 def comparge_PEZ(
@@ -793,18 +809,19 @@ def comparge_PEZ(
 def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
+    pursuerPositionCov = np.array([[0.00001, 0.0], [0.0, 0.0001]])
 
     pursuerHeading = (4.0 / 4.0) * np.pi
-    pursuerHeadingVar = 0.1
+    pursuerHeadingVar = 0.0
 
     pursuerSpeed = 2.0
-    pursuerSpeedVar = 0.1
+    pursuerSpeedVar = 0.0
 
     pursuerRange = 1.0
-    pursuerRangeVar = 0.1
+    pursuerRangeVar = 0.0
 
     minimumTurnRadius = 0.2
-    minimumTurnRadiusVar = 0.01
+    minimumTurnRadiusVar = 0.20
 
     captureRadius = 0.0
 
@@ -813,7 +830,7 @@ def main():
     # evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
 
     evaderSpeed = 0.5
-    evaderPosition = np.array([[-0.4, -0.0]])
+    evaderPosition = np.array([[-0.4, -0.5]])
     # evaderPosition = np.array([-0.4, 0.0])
     # evaderPosition = np.array([-0.28, -0.42])
 
@@ -828,22 +845,22 @@ def main():
     #     evaderHeading,
     #     evaderSpeed,
     # )
-    # compare_distribution(
-    #     evaderPosition,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     captureRadius,
-    # )
+    compare_distribution(
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        captureRadius,
+    )
     comparge_PEZ(
         pursuerPosition,
         pursuerPositionCov,
