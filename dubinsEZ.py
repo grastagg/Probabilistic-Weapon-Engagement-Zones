@@ -365,6 +365,8 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
     lengths = jnp.array([straitLeftLength, straitRightLength])
     # lengths = jnp.array([straitLeftLength])  # , straitRightLength])
 
+    # return straitLeftLength
+    # return jnp.nanmin(lengths)
     return differentiable_min(*lengths)
 
 
@@ -831,7 +833,7 @@ def in_dubins_engagement_zone_single(
     )
 
     ez = dubinsPathLengths - (captureRadius + pursuerRange)
-    # ez = -pursuerRange
+    # return dubinsPathLengths
     return ez
 
 
