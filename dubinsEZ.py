@@ -365,447 +365,14 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
     lengths = jnp.array([straitLeftLength, straitRightLength])
     # lengths = jnp.array([straitLeftLength])  # , straitRightLength])
 
-    # return straitLeftLength
-    # return jnp.nanmin(lengths)
-    return differentiable_min(*lengths)
+    return jnp.nanmin(lengths)
+    # return differentiable_min(*lengths)
 
 
 # Vectorized version over goalPosition
 vectorized_find_shortest_dubins_path = jax.vmap(
     find_shortest_dubins_path,
     in_axes=(None, None, 0, None),  # Vectorize over goalPosition (3rd argument)
-)
-
-
-@jax.jit
-def in_dubins_engagement_zone_left_right_geometric_single(
-    startPosition,
-    startHeading,
-    turnRadius,
-    captureRadius,
-    pursuerRange,
-    pursuerSpeed,
-    evaderPosition,
-    evaderHeading,
-    evaderSpeed,
-):
-    speedRatio = evaderSpeed / pursuerSpeed
-    direction = jnp.array([jnp.cos(evaderHeading), jnp.sin(evaderHeading)])
-    lam = 1.0
-
-    goalPosition = evaderPosition + lam * speedRatio * pursuerRange * direction
-    dubinsPathLength, _ = find_dubins_path_length_left_right(
-        startPosition, startHeading, goalPosition, turnRadius
-    )
-    ez = dubinsPathLength - lam * (captureRadius + pursuerRange)
-    inEz = ez < 0
-    return inEz
-
-
-@jax.jit
-def in_dubins_engagement_zone_right_left_geometric_single(
-    startPosition,
-    startHeading,
-    turnRadius,
-    captureRadius,
-    pursuerRange,
-    pursuerSpeed,
-    evaderPosition,
-    evaderHeading,
-    evaderSpeed,
-):
-    speedRatio = evaderSpeed / pursuerSpeed
-    direction = jnp.array([jnp.cos(evaderHeading), jnp.sin(evaderHeading)])
-    lam = 1.0
-
-    goalPosition = evaderPosition + lam * speedRatio * pursuerRange * direction
-    dubinsPathLength, _ = find_dubins_path_length_right_left(
-        startPosition, startHeading, goalPosition, turnRadius
-    )
-    ez = dubinsPathLength - lam * (captureRadius + pursuerRange)
-    inEz = ez < 0
-    return inEz
-
-
-@jax.jit
-def circle_segment_intersection(circle_center, radius, A, B, startPoint):
-    """
-    Computes the single intersection point of a line segment AB with a circle using JAX.
-
-    Args:
-        circle_center (tuple): (h, k) center of the circle.
-        radius (float): Radius of the circle.
-        A (tuple): (x1, y1) first point of the segment.
-        B (tuple): (x2, y2) second point of the segment.
-
-    Returns:
-        jnp.ndarray: Intersection point (x, y) or empty array if no intersection.
-    """
-    h, k = jnp.array(circle_center, dtype=jnp.float32)
-    r = radius
-    A = jnp.array(A, dtype=jnp.float64)
-    B = jnp.array(B, dtype=jnp.float64)
-
-    # Direction vector of the line segment
-    d = B - A
-
-    # Quadratic coefficients
-    A_coeff = jnp.dot(d, d)
-    B_coeff = 2 * jnp.dot(d, A - jnp.array([h, k]))
-    C_coeff = jnp.dot(A - jnp.array([h, k]), A - jnp.array([h, k])) - r**2
-
-    # Compute discriminant
-    discriminant = B_coeff**2 - 4 * A_coeff * C_coeff
-
-    sqrt_disc = jnp.sqrt(discriminant)
-    t1 = (-B_coeff + sqrt_disc) / (
-        2 * A_coeff
-    )  # Only considering one root (single intersection)
-    t2 = (-B_coeff - sqrt_disc) / (2 * A_coeff)
-
-    t1Valid = jnp.logical_and(0 <= t1, t1 <= 1)
-    t2Valid = jnp.logical_and(0 <= t2, t2 <= 1)
-
-    # Compute the intersection point
-    intersection_point1 = A + t1 * d
-    intersection_point2 = A + t2 * d
-
-    dist1ToStart = jnp.linalg.norm(intersection_point1 - startPoint)
-    dist2ToStart = jnp.linalg.norm(intersection_point2 - startPoint)
-
-    noIntersections = jnp.array([jnp.inf, jnp.inf])
-    chooseT1 = jnp.logical_and(dist1ToStart < dist2ToStart, t1Valid)
-    chooseT2 = jnp.logical_and(dist2ToStart < dist1ToStart, t2Valid)
-    chooseNeither = jnp.logical_not(jnp.logical_or(chooseT1, chooseT2))
-
-    def find_intersection_point():
-        return jax.lax.cond(
-            chooseT1, lambda: intersection_point1, lambda: intersection_point2
-        )
-
-    def compute_intersection_point():
-        return jax.lax.cond(
-            chooseNeither,
-            lambda: noIntersections,
-            find_intersection_point,
-        )
-
-    intersection_point = jax.lax.cond(
-        discriminant >= 0, compute_intersection_point, lambda: noIntersections
-    )
-
-    # Check if t is within the segment range [0, 1]
-
-    intersection_point = intersection_point
-
-    return intersection_point
-
-
-@jax.jit
-def line_segment_intersection(A1, A2, B1, B2):
-    # Vector from A1 to A2
-    d1 = A2 - A1
-    # Vector from B1 to B2
-    d2 = B2 - B1
-    # Vector from A1 to B1
-    r = B1 - A1
-
-    # Cross product of d1 and d2
-    denom = jnp.cross(d1, d2)
-
-    # # If denom is zero, the lines are parallel or collinear
-    # if jnp.isclose(denom, 0):
-    #     return None  # No intersection or infinite intersections (collinear)
-
-    # Calculate t and u, the parameters for intersection point
-    t = jnp.cross(r, d2) / denom
-    u = jnp.cross(r, d1) / denom
-    tValid = jnp.logical_and(0 <= t, t <= 1)
-    uValid = jnp.logical_and(0 <= u, u <= 1)
-
-    # Check if t and u are within [0, 1], which means the intersection point is within both segments
-    noIntersections = jnp.array([jnp.inf, jnp.inf])
-    intersection = jax.lax.cond(
-        tValid & uValid, lambda: A1 + t * d1, lambda: noIntersections
-    )
-    # intersection = A1 + t * d1  # or B1 + u * d2, both should be the same
-    return intersection
-
-
-@jax.jit
-def nanmin_jax(ez1, ez2, ez3):
-    values = jnp.array([ez1, ez2, ez3])
-    valid_values = jnp.where(
-        jnp.isnan(values), jnp.inf, values
-    )  # Replace NaNs with +inf
-    return jnp.min(valid_values)  # Compute min ignoring NaNs
-
-
-@jax.jit
-def find_goal_point_and_lam_circle_intersection(
-    pursuerPosition,
-    pursuerHeading,
-    turnRadius,
-    evaderPosition,
-    evaderFinalPosition,
-    pursuerRange,
-    speedRatio,
-    circleCenter,
-):
-    intersectionPoints = circle_segment_intersection(
-        circleCenter, turnRadius, evaderPosition, evaderFinalPosition, evaderPosition
-    )
-    goalPosition = intersectionPoints
-    # ensure goal position is slightly outside circle
-    directionVector = goalPosition - circleCenter
-    directionVector = directionVector / jnp.linalg.norm(directionVector)
-    goalPosition = circleCenter + (turnRadius * 1.001) * directionVector
-
-    lam = jnp.linalg.norm(goalPosition - evaderPosition) / (speedRatio * pursuerRange)
-    lam = jnp.where(lam > 1, jnp.nan, lam)
-    lam = jnp.where(lam < 0, jnp.nan, lam)
-    return lam, goalPosition
-
-
-@jax.jit
-def find_goal_point_and_lam_line_intersection(
-    pursuerPosition,
-    pursuerHeading,
-    evaderPosition,
-    evaderFinalPosition,
-    pursuerRange,
-    speedRatio,
-):
-    pursuerDirection = jnp.array([jnp.cos(pursuerHeading), jnp.sin(pursuerHeading)])
-    goalPosition = line_segment_intersection(
-        pursuerPosition,
-        pursuerPosition + pursuerDirection * pursuerRange,
-        evaderPosition,
-        evaderFinalPosition,
-    )
-    lam = jnp.linalg.norm(goalPosition - evaderPosition) / (speedRatio * pursuerRange)
-    lam = jnp.where(lam > 1, jnp.nan, lam)
-    lam = jnp.where(lam < 0, jnp.nan, lam)
-    return lam, goalPosition
-
-
-@jax.jit
-def in_dubins_engagement_zone_right_strait_geometric_single(
-    pursuerPosition,
-    pursuerHeading,
-    turnRadius,
-    captureRadius,
-    pursuerRange,
-    pursuerSpeed,
-    evaderPosition,
-    evaderHeading,
-    evaderSpeed,
-):
-    speedRatio = evaderSpeed / pursuerSpeed
-
-    finalPoint = evaderPosition + speedRatio * pursuerRange * jnp.array(
-        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
-    )
-    rightCenter = jnp.array(
-        [
-            pursuerPosition[0] + turnRadius * jnp.sin(pursuerHeading),
-            pursuerPosition[1] - turnRadius * jnp.cos(pursuerHeading),
-        ]
-    )
-
-    lamCircleIntersection, goalPositionCicleIntersection = (
-        find_goal_point_and_lam_circle_intersection(
-            pursuerPosition,
-            pursuerHeading,
-            turnRadius,
-            evaderPosition,
-            finalPoint,
-            pursuerRange,
-            speedRatio,
-            rightCenter,
-        )
-    )
-
-    lamLineIntersection, goalPositionLineIntersection = (
-        find_goal_point_and_lam_line_intersection(
-            pursuerPosition,
-            pursuerHeading,
-            evaderPosition,
-            finalPoint,
-            pursuerRange,
-            speedRatio,
-        )
-    )
-
-    lamFinal = 1.0
-    goalPositionFinal = finalPoint
-
-    dubinsPathLengthsCircleIntersection, _ = find_dubins_path_length_right_strait(
-        pursuerPosition, pursuerHeading, goalPositionCicleIntersection, turnRadius
-    )
-    dubinsPathLengthsFinal, _ = find_dubins_path_length_right_strait(
-        pursuerPosition, pursuerHeading, goalPositionFinal, turnRadius
-    )
-    dubinsPathLengthsLineIntersection, _ = find_dubins_path_length_right_strait(
-        pursuerPosition, pursuerHeading, goalPositionLineIntersection, turnRadius
-    )
-
-    ezCircleIntersection = (
-        dubinsPathLengthsCircleIntersection
-        - lamCircleIntersection * (captureRadius + pursuerRange)
-    )
-    ezFinal = dubinsPathLengthsFinal - lamFinal * (captureRadius + pursuerRange)
-    ezLineIntersection = dubinsPathLengthsLineIntersection - lamLineIntersection * (
-        captureRadius + pursuerRange
-    )
-    ez = nanmin_jax(ezCircleIntersection, ezFinal, ezLineIntersection)
-
-    inEz = ez < 0
-    return inEz
-
-
-@jax.jit
-def in_dubins_engagement_zone_left_strait_geometric_single(
-    pursuerPosition,
-    pursuerHeading,
-    turnRadius,
-    captureRadius,
-    pursuerRange,
-    pursuerSpeed,
-    evaderPosition,
-    evaderHeading,
-    evaderSpeed,
-):
-    speedRatio = evaderSpeed / pursuerSpeed
-
-    finalPoint = evaderPosition + speedRatio * pursuerRange * jnp.array(
-        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
-    )
-
-    leftCenter = jnp.array(
-        [
-            pursuerPosition[0] - turnRadius * jnp.sin(pursuerHeading),
-            pursuerPosition[1] + turnRadius * jnp.cos(pursuerHeading),
-        ]
-    )
-
-    lamCircleIntersection, goalPositionCicleIntersection = (
-        find_goal_point_and_lam_circle_intersection(
-            pursuerPosition,
-            pursuerHeading,
-            turnRadius,
-            evaderPosition,
-            finalPoint,
-            pursuerRange,
-            speedRatio,
-            leftCenter,
-        )
-    )
-
-    lamLineIntersection, goalPositionLineIntersection = (
-        find_goal_point_and_lam_line_intersection(
-            pursuerPosition,
-            pursuerHeading,
-            evaderPosition,
-            finalPoint,
-            pursuerRange,
-            speedRatio,
-        )
-    )
-
-    lamFinal = 1.0
-    goalPositionFinal = finalPoint
-
-    dubinsPathLengthsCircleIntersection, _ = find_dubins_path_length_left_strait(
-        pursuerPosition, pursuerHeading, goalPositionCicleIntersection, turnRadius
-    )
-    dubinsPathLengthsFinal, _ = find_dubins_path_length_left_strait(
-        pursuerPosition, pursuerHeading, goalPositionFinal, turnRadius
-    )
-    dubinsPathLengthsLineIntersection, _ = find_dubins_path_length_left_strait(
-        pursuerPosition, pursuerHeading, goalPositionLineIntersection, turnRadius
-    )
-
-    ezCircleIntersection = (
-        dubinsPathLengthsCircleIntersection
-        - lamCircleIntersection * (captureRadius + pursuerRange)
-    )
-    ezFinal = dubinsPathLengthsFinal - lamFinal * (captureRadius + pursuerRange)
-    ezLineIntersection = dubinsPathLengthsLineIntersection - lamLineIntersection * (
-        captureRadius + pursuerRange
-    )
-    ez = nanmin_jax(ezCircleIntersection, ezFinal, ezLineIntersection)
-
-    inEz = ez < 0
-    return inEz
-
-
-in_dubins_engagement_zone_right_strait_geometric = jax.jit(
-    jax.vmap(
-        in_dubins_engagement_zone_right_strait_geometric_single,
-        in_axes=(
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            0,
-            0,
-            None,
-        ),  # Vectorizing over evaderPosition & evaderHeading
-    )
-)
-
-in_dubins_engagement_zone_left_strait_geometric = jax.jit(
-    jax.vmap(
-        in_dubins_engagement_zone_left_strait_geometric_single,
-        in_axes=(
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            0,
-            0,
-            None,
-        ),  # Vectorizing over evaderPosition & evaderHeading
-    )
-)
-
-in_dubins_engagement_zone_left_right_geometric = jax.jit(
-    jax.vmap(
-        in_dubins_engagement_zone_left_right_geometric_single,
-        in_axes=(
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            0,
-            0,
-            None,
-        ),  # Vectorizing over evaderPosition & evaderHeading
-    )
-)
-
-in_dubins_engagement_zone_right_left_geometric = jax.jit(
-    jax.vmap(
-        in_dubins_engagement_zone_right_left_geometric_single,
-        in_axes=(
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            0,
-            0,
-            None,
-        ),  # Vectorizing over evaderPosition & evaderHeading
-    )
 )
 
 
@@ -856,10 +423,11 @@ in_dubins_engagement_zone = jax.jit(
 )
 
 
-def in_dubins_engagement_zone_geometric(
-    pursuerPosition,
-    pursuerHeading,
-    minimumTurnRadius,
+@jax.jit
+def in_dubins_engagement_zone_right_single(
+    startPosition,
+    startHeading,
+    turnRadius,
     captureRadius,
     pursuerRange,
     pursuerSpeed,
@@ -867,55 +435,54 @@ def in_dubins_engagement_zone_geometric(
     evaderHeading,
     evaderSpeed,
 ):
-    ezRightStrait = in_dubins_engagement_zone_right_strait_geometric(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
+    speedRatio = evaderSpeed / pursuerSpeed
+
+    # Compute goal positions
+    direction = jnp.array(
+        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
+    )  # Heading unit vector
+    goalPosition = evaderPosition + speedRatio * pursuerRange * direction
+    straitRightLength, _ = find_dubins_path_length_right_strait(
+        startPosition, startHeading, goalPosition, turnRadius
     )
-    ezLeftStrait = in_dubins_engagement_zone_left_strait_geometric(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
+    straitRightLength = jnp.where(
+        jnp.isnan(straitRightLength), jnp.inf, straitRightLength
     )
-    ezLeftRight = in_dubins_engagement_zone_left_right_geometric(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
+
+    ez = straitRightLength - (captureRadius + pursuerRange)
+    # return dubinsPathLengths
+    return ez
+
+
+@jax.jit
+def in_dubins_engagement_zone_left_single(
+    startPosition,
+    startHeading,
+    turnRadius,
+    captureRadius,
+    pursuerRange,
+    pursuerSpeed,
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+):
+    speedRatio = evaderSpeed / pursuerSpeed
+
+    # Compute goal positions
+    direction = jnp.array(
+        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
+    )  # Heading unit vector
+    goalPosition = evaderPosition + speedRatio * pursuerRange * direction
+    straitRightLength, _ = find_dubins_path_length_left_strait(
+        startPosition, startHeading, goalPosition, turnRadius
     )
-    ezRightLeft = in_dubins_engagement_zone_right_left_geometric(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
+    straitRightLength = jnp.where(
+        jnp.isnan(straitRightLength), jnp.inf, straitRightLength
     )
-    # return jnp.logical_or(ezRightStrait, ezLeftStrait)
-    return jnp.logical_or(
-        jnp.logical_or(ezRightStrait, ezLeftStrait),
-        jnp.logical_or(ezRightLeft, ezLeftRight),
-    )
+
+    ez = straitRightLength - (captureRadius + pursuerRange)
+    # return dubinsPathLengths
+    return ez
 
 
 def plot_dubins_EZ(

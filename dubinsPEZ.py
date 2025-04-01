@@ -183,6 +183,52 @@ def dubins_EZ_single_combined_input(pursuerParams, evaderParams):
     )
 
 
+def dubins_EZ_single_right_combined_input(pursuerParams, evaderParams):
+    pursuerPosition = pursuerParams[:2]
+    pursuerHeading = pursuerParams[2]
+    pursuerSpeed = pursuerParams[3]
+    minimumTurnRadius = pursuerParams[4]
+    pursuerRange = pursuerParams[5]
+    captureRadius = pursuerParams[6]
+    evaderPosition = evaderParams[:2]
+    evaderHeading = evaderParams[2]
+    evaderSpeed = evaderParams[3]
+    return dubinsEZ.in_dubins_engagement_zone_right_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+    )
+
+
+def dubins_EZ_single_left_combined_input(pursuerParams, evaderParams):
+    pursuerPosition = pursuerParams[:2]
+    pursuerHeading = pursuerParams[2]
+    pursuerSpeed = pursuerParams[3]
+    minimumTurnRadius = pursuerParams[4]
+    pursuerRange = pursuerParams[5]
+    captureRadius = pursuerParams[6]
+    evaderPosition = evaderParams[:2]
+    evaderHeading = evaderParams[2]
+    evaderSpeed = evaderParams[3]
+    return dubinsEZ.in_dubins_engagement_zone_left_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+    )
+
+
 # find gradients/jacobians of dubins BEZ function
 dDubinsEZ_dPursuerPosition = jax.jacfwd(dubinsEZ.in_dubins_engagement_zone_single, 0)
 dDubinsEZ_dPursuerHeading = jax.jacfwd(dubinsEZ.in_dubins_engagement_zone_single, 1)
@@ -208,8 +254,13 @@ d6DubinsEZ_dPursuerHeading = jax.jacfwd(d5DubinsEZ_dPursuerHeading, 1)
 
 # first order combined derivatives
 dDubinsEZ_dPursuerParams = jax.jacfwd(dubins_EZ_single_combined_input, 0)
+dDubinsEZRight_dPursuerParams = jax.jacfwd(dubins_EZ_single_right_combined_input, 0)
+dDubinsEZLeft_dPursuerParams = jax.jacfwd(dubins_EZ_single_left_combined_input, 0)
+
 # sevond order combined derivatives
 d2DubinsEZ_dPursuerParams = jax.jacfwd(dDubinsEZ_dPursuerParams, 0)
+d2DubinsEZRight_dPursuerParams = jax.jacfwd(dDubinsEZRight_dPursuerParams, 0)
+d2DubinsEZLeft_dPursuerParams = jax.jacfwd(dDubinsEZLeft_dPursuerParams, 0)
 # third order combined derivatives
 d3DubinsEZ_dPursuerParams = jax.jacfwd(d2DubinsEZ_dPursuerParams, 0)
 
@@ -336,176 +387,493 @@ linear_dubins_pez = jax.jit(
 )
 
 
-# def quadratic_dubins_PEZ_single(
-#     evaderPositions,
-#     evaderHeadings,
-#     evaderSpeed,
-#     pursuerPosition,
-#     pursuerPositionCov,
-#     pursuerHeading,
-#     pursuerHeadingVar,
-#     pursuerSpeed,
-#     pursuerSpeedVar,
-#     minimumTurnRadius,
-#     minimumTurnRadiusVar,
-#     pursuerRange,
-#     pursuerRangeVar,
-#     captureRadius,
-# ):
-#     dDubinsEZ_dPursuerPositionValue = dDubinsEZ_dPursuerPosition(
-#         pursuerPosition,
-#         pursuerHeading,
-#         minimumTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#     d2DubinsEZ_dPursuerPositionValue = d2DubinsEZ_dPursuerPosition(
-#         pursuerPosition,
-#         pursuerHeading,
-#         minimumTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#     dDubinsEZ_dPursuerHeadingValue = dDubinsEZ_dPursuerHeading(
-#         pursuerPosition,
-#         pursuerHeading,
-#         minimumTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#     d2DubinsEZ_dPursuerHeadingValue = d2DubinsEZ_dPursuerHeading(
-#         pursuerPosition,
-#         pursuerHeading,
-#         minimumTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#     dDubinsEZ_dMinimumTurnRadiusValue = dDubinsEZ_dMinimumTurnRadius(
-#         pursuerPosition,
-#         pursuerHeading,
-#         minimumTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#     d2DubinsEZ_dMinimumTurnRadiusValue = d2DubinsEZ_dMinimumTurnRadius(
-#         pursuerPosition,
-#         pursuerHeading,
-#         minimumTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#
-#     # jax.debug.print(
-#     #     "dDubinsEZ_dMinimumTurnRadiusValue {x}", x=dDubinsEZ_dMinimumTurnRadiusValue
-#     # )
-#     dDubinsEZ_dPursuerRangeValue = dDubinsEZ_dPursuerRange(
-#         pursuerPosition,
-#         pursuerHeading,
-#         minimumTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#     d2DubinsEZ_dPursuerRangeValue = d2DubinsEZ_dPursuerRange(
-#         pursuerPosition,
-#         pursuerHeading,
-#         minimumTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#     # jax.debug.print("dDubinsEZ_dPursuerRangeValue {x}", x=dDubinsEZ_dPursuerRangeValue)
-#     dDubinsEZ_dPursuerSpeedValue = dDubinsEZ_dPursuerSpeed(
-#         pursuerPosition,
-#         pursuerHeading,
-#         minimumTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#     d2DubinsEZ_dPursuerSpeedValue = d2DubinsEZ_dPursuerSpeed(
-#         pursuerPosition,
-#         pursuerHeading,
-#         minimumTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#     # jax.debug.print("dDubinsEZ_dPursuerSpeedValue {x}", x=dDubinsEZ_dPursuerSpeedValue)
-#     var = (
-#         dDubinsEZ_dPursuerPositionValue
-#         @ pursuerPositionCov
-#         @ dDubinsEZ_dPursuerPositionValue.T
-#         + dDubinsEZ_dPursuerHeadingValue**2 * pursuerHeadingVar
-#         + dDubinsEZ_dMinimumTurnRadiusValue**2 * minimumTurnRadiusVar
-#         + dDubinsEZ_dPursuerRangeValue**2 * pursuerRangeVar
-#         + dDubinsEZ_dPursuerSpeedValue**2 * pursuerSpeedVar
-#         + 0.5 * d2DubinsEZ_dPursuerHeadingValue**2 * pursuerHeadingVar**2
-#         + 0.5 * d2DubinsEZ_dMinimumTurnRadiusValue**2 * minimumTurnRadiusVar**2
-#         + 0.5 * d2DubinsEZ_dPursuerRangeValue**2 * pursuerRangeVar**2
-#         + 0.5 * d2DubinsEZ_dPursuerSpeedValue**2 * pursuerSpeedVar**2
-#     )
-#     # jax.debug.print("var {x}", x=var)
-#     mean = (
-#         dubinsEZ.in_dubins_engagement_zone_single(
-#             pursuerPosition,
-#             pursuerHeading,
-#             minimumTurnRadius,
-#             captureRadius,
-#             pursuerRange,
-#             pursuerSpeed,
-#             evaderPositions,
-#             evaderHeadings,
-#             evaderSpeed,
-#         )
-#         + 0.5 * d2DubinsEZ_dPursuerHeadingValue * pursuerHeadingVar
-#         + 0.5 * d2DubinsEZ_dMinimumTurnRadiusValue * minimumTurnRadiusVar
-#         + 0.5 * d2DubinsEZ_dPursuerRangeValue * pursuerRangeVar
-#         + 0.5 * d2DubinsEZ_dPursuerSpeedValue * pursuerSpeedVar
-#     )
-#
-#     return (
-#         jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(var)),
-#         mean,
-#         var,
-#         d2DubinsEZ_dPursuerHeadingValue,
-#     )
+def stacked_cov(
+    pursuerPositionCov,
+    pursuerHeadingVar,
+    pursuerSpeedVar,
+    minimumTurnRadiusVar,
+    pursuerRangeVar,
+):
+    heading_block = jnp.array([[pursuerHeadingVar]])
+    speed_block = jnp.array([[pursuerSpeedVar]])
+    radius_block = jnp.array([[minimumTurnRadiusVar]])
+    range_block = jnp.array([[pursuerRangeVar]])
+
+    # Assemble full covariance using jnp.block (block matrix layout)
+    full_cov = jnp.block(
+        [
+            [
+                pursuerPositionCov,
+                jnp.zeros((2, 1)),
+                jnp.zeros((2, 1)),
+                jnp.zeros((2, 1)),
+                jnp.zeros((2, 1)),
+            ],
+            [
+                jnp.zeros((1, 2)),
+                heading_block,
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
+            ],
+            [
+                jnp.zeros((1, 2)),
+                jnp.zeros((1, 1)),
+                speed_block,
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
+            ],
+            [
+                jnp.zeros((1, 2)),
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
+                radius_block,
+                jnp.zeros((1, 1)),
+            ],
+            [
+                jnp.zeros((1, 2)),
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
+                range_block,
+            ],
+        ]
+    )
+    return full_cov
+
+
+def linear_dubins_PEZ_single_right(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    pursuerParams = jnp.concatenate(
+        [
+            pursuerPosition,  # (2,)
+            jnp.array([pursuerHeading]),  # (1,)
+            jnp.array([pursuerSpeed]),  # (1,)
+            jnp.array([minimumTurnRadius]),  # (1,)
+            jnp.array([pursuerRange]),  # (1,)
+        ]
+    )
+    evaderParams = jnp.concatenate(
+        [evaderPositions, jnp.array([evaderHeadings]), jnp.array([evaderSpeed])]
+    )
+    val = dubinsEZ.in_dubins_engagement_zone_right_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    dDubinsEZ_dPursuerParamsValue = dDubinsEZRight_dPursuerParams(
+        pursuerParams, evaderParams
+    )
+    full_cov = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        pursuerSpeedVar,
+        minimumTurnRadiusVar,
+        pursuerRangeVar,
+    )
+    mean = val
+    var = dDubinsEZ_dPursuerParamsValue @ full_cov @ dDubinsEZ_dPursuerParamsValue.T
+    return jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(var))
+
+
+linear_dubins_pez_right = jax.jit(
+    jax.vmap(
+        linear_dubins_PEZ_single_right,
+        in_axes=(
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+)
+
+
+def linear_dubins_PEZ_single_left(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    pursuerParams = jnp.concatenate(
+        [
+            pursuerPosition,  # (2,)
+            jnp.array([pursuerHeading]),  # (1,)
+            jnp.array([pursuerSpeed]),  # (1,)
+            jnp.array([minimumTurnRadius]),  # (1,)
+            jnp.array([pursuerRange]),  # (1,)
+        ]
+    )
+    evaderParams = jnp.concatenate(
+        [evaderPositions, jnp.array([evaderHeadings]), jnp.array([evaderSpeed])]
+    )
+    val = dubinsEZ.in_dubins_engagement_zone_left_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    dDubinsEZ_dPursuerParamsValue = dDubinsEZLeft_dPursuerParams(
+        pursuerParams, evaderParams
+    )
+    full_cov = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        pursuerSpeedVar,
+        minimumTurnRadiusVar,
+        pursuerRangeVar,
+    )
+    mean = val
+    var = dDubinsEZ_dPursuerParamsValue @ full_cov @ dDubinsEZ_dPursuerParamsValue.T
+    return jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(var))
+
+
+linear_dubins_pez_left = jax.jit(
+    jax.vmap(
+        linear_dubins_PEZ_single_left,
+        in_axes=(
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+)
+
+
+def combined_left_right_dubins_PEZ(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    right = linear_dubins_pez_right(
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        captureRadius,
+    )
+    left = linear_dubins_pez_left(
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        captureRadius,
+    )
+    return 1 - (1 - right) * (1 - left)
+
+
+def qaudratic_dubins_PEZ_single_right(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    pursuerParams = jnp.concatenate(
+        [
+            pursuerPosition,  # (2,)
+            jnp.array([pursuerHeading]),  # (1,)
+            jnp.array([pursuerSpeed]),  # (1,)
+            jnp.array([minimumTurnRadius]),  # (1,)
+            jnp.array([pursuerRange]),  # (1,)
+        ]
+    )
+    evaderParams = jnp.concatenate(
+        [evaderPositions, jnp.array([evaderHeadings]), jnp.array([evaderSpeed])]
+    )
+    val = dubinsEZ.in_dubins_engagement_zone_right_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    dDubinsEZ_dPursuerParamsValue = dDubinsEZRight_dPursuerParams(
+        pursuerParams, evaderParams
+    )
+    d2DubinsEZ_dPursuerParamsValue = d2DubinsEZRight_dPursuerParams(
+        pursuerParams, evaderParams
+    )
+    full_cov = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        pursuerSpeedVar,
+        minimumTurnRadiusVar,
+        pursuerRangeVar,
+    )
+    mean = val + 0.5 * jnp.trace(d2DubinsEZ_dPursuerParamsValue @ full_cov)
+    var = (
+        dDubinsEZ_dPursuerParamsValue @ full_cov @ dDubinsEZ_dPursuerParamsValue.T
+        + 0.5
+        * jnp.trace(
+            d2DubinsEZ_dPursuerParamsValue
+            @ full_cov
+            @ d2DubinsEZ_dPursuerParamsValue
+            @ full_cov
+        )
+    )
+    return jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(var))
+
+
+quadratic_dubins_pez_right = jax.jit(
+    jax.vmap(
+        qaudratic_dubins_PEZ_single_right,
+        in_axes=(
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+)
+
+
+def qaudratic_dubins_PEZ_single_left(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    pursuerParams = jnp.concatenate(
+        [
+            pursuerPosition,  # (2,)
+            jnp.array([pursuerHeading]),  # (1,)
+            jnp.array([pursuerSpeed]),  # (1,)
+            jnp.array([minimumTurnRadius]),  # (1,)
+            jnp.array([pursuerRange]),  # (1,)
+        ]
+    )
+    evaderParams = jnp.concatenate(
+        [evaderPositions, jnp.array([evaderHeadings]), jnp.array([evaderSpeed])]
+    )
+    val = dubinsEZ.in_dubins_engagement_zone_left_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    dDubinsEZ_dPursuerParamsValue = dDubinsEZLeft_dPursuerParams(
+        pursuerParams, evaderParams
+    )
+    d2DubinsEZ_dPursuerParamsValue = d2DubinsEZLeft_dPursuerParams(
+        pursuerParams, evaderParams
+    )
+    full_cov = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        pursuerSpeedVar,
+        minimumTurnRadiusVar,
+        pursuerRangeVar,
+    )
+    mean = val + 0.5 * jnp.trace(d2DubinsEZ_dPursuerParamsValue @ full_cov)
+    var = (
+        dDubinsEZ_dPursuerParamsValue @ full_cov @ dDubinsEZ_dPursuerParamsValue.T
+        + 0.5
+        * jnp.trace(
+            d2DubinsEZ_dPursuerParamsValue
+            @ full_cov
+            @ d2DubinsEZ_dPursuerParamsValue
+            @ full_cov
+        )
+    )
+    return jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(var))
+
+
+quadratic_dubins_pez_left = jax.jit(
+    jax.vmap(
+        qaudratic_dubins_PEZ_single_left,
+        in_axes=(
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+)
+
+
+def combined_left_right_quadratic_dubins_PEZ(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    right = quadratic_dubins_pez_right(
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        captureRadius,
+    )
+    left = quadratic_dubins_pez_left(
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        captureRadius,
+    )
+    return 1 - (1 - right) * (1 - left)
 
 
 def quadratic_dubins_PEZ_single(
@@ -553,50 +921,12 @@ def quadratic_dubins_PEZ_single(
     d2DubinsEZ_dPursuerParamsValue = d2DubinsEZ_dPursuerParams(
         pursuerParams, evaderParams
     )
-    heading_block = jnp.array([[pursuerHeadingVar]])
-    speed_block = jnp.array([[pursuerSpeedVar]])
-    radius_block = jnp.array([[minimumTurnRadiusVar]])
-    range_block = jnp.array([[pursuerRangeVar]])
-
-    # Assemble full covariance using jnp.block (block matrix layout)
-    full_cov = jnp.block(
-        [
-            [
-                pursuerPositionCov,
-                jnp.zeros((2, 1)),
-                jnp.zeros((2, 1)),
-                jnp.zeros((2, 1)),
-                jnp.zeros((2, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                heading_block,
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                jnp.zeros((1, 1)),
-                speed_block,
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                radius_block,
-                jnp.zeros((1, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                range_block,
-            ],
-        ]
+    full_cov = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        pursuerSpeedVar,
+        minimumTurnRadiusVar,
+        pursuerRangeVar,
     )
 
     mean = val + 0.5 * jnp.trace(d2DubinsEZ_dPursuerParamsValue @ full_cov)
@@ -727,52 +1057,13 @@ def second_order_taylor_expansion_edgeworth_dubins_PEZ_single(
     d2DubinsEZ_dPursuerParamsValue = d2DubinsEZ_dPursuerParams(
         pursuerParams, evaderParams
     )
-    heading_block = jnp.array([[pursuerHeadingVar]])
-    speed_block = jnp.array([[pursuerSpeedVar]])
-    radius_block = jnp.array([[minimumTurnRadiusVar]])
-    range_block = jnp.array([[pursuerRangeVar]])
-
-    # Assemble full covariance using jnp.block (block matrix layout)
-    full_cov = jnp.block(
-        [
-            [
-                pursuerPositionCov,
-                jnp.zeros((2, 1)),
-                jnp.zeros((2, 1)),
-                jnp.zeros((2, 1)),
-                jnp.zeros((2, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                heading_block,
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                jnp.zeros((1, 1)),
-                speed_block,
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                radius_block,
-                jnp.zeros((1, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                range_block,
-            ],
-        ]
+    full_cov = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        pursuerSpeedVar,
+        minimumTurnRadiusVar,
+        pursuerRangeVar,
     )
-
     mean = val + 0.5 * jnp.trace(d2DubinsEZ_dPursuerParamsValue @ full_cov)
     var = (
         dDubinsEZ_dPursuerParamsValue @ full_cov @ dDubinsEZ_dPursuerParamsValue.T
@@ -911,50 +1202,12 @@ def cubic_dubins_PEZ_single(
     d3DubinsEZ_dPursuerParamsValue = d3DubinsEZ_dPursuerParams(
         pursuerParams, evaderParams
     )
-    heading_block = jnp.array([[pursuerHeadingVar]])
-    speed_block = jnp.array([[pursuerSpeedVar]])
-    radius_block = jnp.array([[minimumTurnRadiusVar]])
-    range_block = jnp.array([[pursuerRangeVar]])
-
-    # Assemble full covariance using jnp.block (block matrix layout)
-    full_cov = jnp.block(
-        [
-            [
-                pursuerPositionCov,
-                jnp.zeros((2, 1)),
-                jnp.zeros((2, 1)),
-                jnp.zeros((2, 1)),
-                jnp.zeros((2, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                heading_block,
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                jnp.zeros((1, 1)),
-                speed_block,
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                radius_block,
-                jnp.zeros((1, 1)),
-            ],
-            [
-                jnp.zeros((1, 2)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                jnp.zeros((1, 1)),
-                range_block,
-            ],
-        ]
+    full_cov = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        pursuerSpeedVar,
+        minimumTurnRadiusVar,
+        pursuerRangeVar,
     )
 
     mean, var = taylor3_mean_var_scalar_output(
@@ -1131,6 +1384,8 @@ def plot_dubins_PEZ(
     useMC=False,
     useEdgeworth=False,
     useCubic=False,
+    useCombinedLinear=False,
+    useCombinedQuadratic=False,
 ):
     numPoints = 200
     if useLinear:
@@ -1282,6 +1537,56 @@ def plot_dubins_PEZ(
             captureRadius,
         )
         ax.set_title("Cubic Dubins PEZ", fontsize=20)
+    elif useCombinedLinear:
+        rangeX = 2
+        x = jnp.linspace(-rangeX, rangeX, numPoints)
+        y = jnp.linspace(-rangeX, rangeX, numPoints)
+        [X, Y] = jnp.meshgrid(x, y)
+        X = X.flatten()
+        Y = Y.flatten()
+        evaderHeadings = np.ones_like(X) * evaderHeading
+        ZTrue = combined_left_right_dubins_PEZ(
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        ax.set_title("Combined Linear Dubins PEZ", fontsize=20)
+    elif useCombinedQuadratic:
+        rangeX = 2
+        x = jnp.linspace(-rangeX, rangeX, numPoints)
+        y = jnp.linspace(-rangeX, rangeX, numPoints)
+        [X, Y] = jnp.meshgrid(x, y)
+        X = X.flatten()
+        Y = Y.flatten()
+        evaderHeadings = np.ones_like(X) * evaderHeading
+        ZTrue = combined_left_right_quadratic_dubins_PEZ(
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
 
@@ -1293,13 +1598,13 @@ def plot_dubins_PEZ(
         ZTrue,
         levels=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
     )
+    plt.clabel(c, inline=True, fontsize=20)
     # c = ax.pcolormesh(X, Y, ZTrue)
     # if useUnscented:
     ax.set_xlabel("X", fontsize=26)
     ax.set_ylabel("Y", fontsize=26)
     # set tick size
     ax.tick_params(axis="both", which="major", labelsize=20)
-    plt.clabel(c, inline=True, fontsize=20)
 
     # ax.contour(X, Y, ZGeometric, cmap="summer")
     ax.scatter(*pursuerPosition, c="r")
@@ -1557,7 +1862,7 @@ def compare_distribution(
     ax1.legend()
 
 
-def comparge_PEZ(
+def compare_PEZ(
     pursuerPosition,
     pursuerPositionCov,
     pursuerHeading,
@@ -1573,7 +1878,7 @@ def comparge_PEZ(
     evaderSpeed,
 ):
     evaderHeading = jnp.array([(0 / 20) * np.pi])
-    fig, axes = plt.subplots(2, 2, constrained_layout=True)
+    fig, axes = plt.subplots(2, 3, constrained_layout=True)
     linEZ = plot_dubins_PEZ(
         pursuerPosition,
         pursuerPositionCov,
@@ -1590,9 +1895,6 @@ def comparge_PEZ(
         evaderSpeed,
         axes[0][1],
         useLinear=True,
-        useUnscented=False,
-        useQuadratic=False,
-        useMC=False,
     )
     mcEZ = plot_dubins_PEZ(
         pursuerPosition,
@@ -1609,9 +1911,6 @@ def comparge_PEZ(
         evaderHeading,
         evaderSpeed,
         axes[0][0],
-        useLinear=False,
-        useUnscented=False,
-        useQuadratic=False,
         useMC=True,
     )
     # usEZ = plot_dubins_PEZ(
@@ -1648,13 +1947,27 @@ def comparge_PEZ(
         pursuerRangeVar,
         evaderHeading,
         evaderSpeed,
-        axes[1][0],
-        useLinear=False,
-        useUnscented=False,
+        axes[0][2],
         useQuadratic=True,
-        useMC=False,
     )
-    cubic_pez = plot_dubins_PEZ(
+    combined_linear = plot_dubins_PEZ(
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        captureRadius,
+        pursuerRange,
+        pursuerRangeVar,
+        evaderHeading,
+        evaderSpeed,
+        axes[1][0],
+        useCombinedLinear=True,
+    )
+    combined_quadratic = plot_dubins_PEZ(
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
@@ -1669,15 +1982,13 @@ def comparge_PEZ(
         evaderHeading,
         evaderSpeed,
         axes[1][1],
-        useLinear=False,
-        useUnscented=False,
-        useQuadratic=False,
-        useMC=False,
-        useEdgeworth=False,
-        useCubic=True,
+        useCombinedQuadratic=True,
     )
 
-    # print("lin rmse", np.sqrt(np.mean((linEZ - mcEZ) ** 2)))
+    print("lin rmse", np.sqrt(np.mean((linEZ - mcEZ) ** 2)))
+    print("quadratic rmse", np.sqrt(np.mean((quadEZ - mcEZ) ** 2)))
+    print("combined linear rmse", np.sqrt(np.mean((combined_linear - mcEZ) ** 2)))
+    print("combined quadratic rmse", np.sqrt(np.mean((combined_quadratic - mcEZ) ** 2)))
     #
     # print("unscented rmse", np.sqrt(np.mean((usEZ - mcEZ) ** 2)))
     # print("quadratic rmse", np.sqrt(np.mean((quadEZ - mcEZ) ** 2)))
@@ -1688,7 +1999,7 @@ def comparge_PEZ(
 def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
-    pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
+    # pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
 
     pursuerHeading = (4.0 / 4.0) * np.pi
     pursuerHeadingVar = 0.2
@@ -1725,23 +2036,23 @@ def main():
     #     evaderHeading,
     #     evaderSpeed,
     # )
-    compare_distribution(
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        pursuerRange,
-        pursuerRangeVar,
-        captureRadius,
-    )
-    comparge_PEZ(
+    # compare_distribution(
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     captureRadius,
+    # )
+    compare_PEZ(
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
