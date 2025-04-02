@@ -446,7 +446,7 @@ def closest_point_on_circle(point, center, radius):
     return center + 1.01 * radius * (point - center) / jnp.linalg.norm(point - center)
 
 
-def find_closest_linearization_point(
+def find_closest_linearization_point_right(
     evaderPositions,
     evaderHeadings,
     evaderSpeed,
@@ -463,14 +463,11 @@ def find_closest_linearization_point(
             pursuerPosition[1] - minimumTurnRadius * jnp.cos(pursuerHeading),
         ]
     )
-    jax.debug.print("pursuerheading {x}", x=pursuerHeading)
-    jax.debug.print("centerPoint {x}", x=centerPoint)
-    direction = jnp.array(jnp.cos(evaderHeadings), jnp.sin(evaderHeadings))
+    direction = jnp.array([jnp.cos(evaderHeadings), jnp.sin(evaderHeadings)])
     speedRatio = evaderSpeed / pursuerSpeed
     shiftedCenterPoint = centerPoint - speedRatio * pursuerRange * direction
-    jax.debug.print("shiftedCenterPoint {x}", x=shiftedCenterPoint)
     return closest_point_on_circle(
-        shiftedCenterPoint, evaderPositions, minimumTurnRadius
+        evaderPositions, shiftedCenterPoint, minimumTurnRadius
     )
 
 
@@ -501,29 +498,37 @@ def linear_dubins_PEZ_single_right(
         evaderHeadings,
         evaderSpeed,
     )
-    evaderPositions = find_closest_linearization_point(
-        evaderPositions,
-        evaderHeadings,
-        evaderSpeed,
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        pursuerRange,
-        captureRadius,
-    )
-    jax.debug.print("evaderPositions {x}", x=evaderPositions)
-    val = dubinsEZ.in_dubins_engagement_zone_right_single(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPositions,
-        evaderHeadings,
-        evaderSpeed,
-    )
+
+    def _use_original():
+        return evaderPositions, val
+
+    def _find_closest():
+        closest = find_closest_linearization_point_right(
+            evaderPositions,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerHeading,
+            pursuerSpeed,
+            minimumTurnRadius,
+            pursuerRange,
+            captureRadius,
+        )
+        val = dubinsEZ.in_dubins_engagement_zone_right_single(
+            pursuerPosition,
+            pursuerHeading,
+            minimumTurnRadius,
+            captureRadius,
+            pursuerRange,
+            pursuerSpeed,
+            closest,
+            evaderHeadings,
+            evaderSpeed,
+        )
+        return closest, val
+
+    evaderPositions, val = jax.lax.cond(jnp.isnan(val), _find_closest, _use_original)
+
     pursuerParams = jnp.concatenate(
         [
             pursuerPosition,  # (2,)
@@ -574,6 +579,31 @@ linear_dubins_pez_right = jax.jit(
 )
 
 
+def find_closest_linearization_point_left(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
+    captureRadius,
+):
+    centerPoint = jnp.array(
+        [
+            pursuerPosition[0] - minimumTurnRadius * jnp.sin(pursuerHeading),
+            pursuerPosition[1] + minimumTurnRadius * jnp.cos(pursuerHeading),
+        ]
+    )
+    direction = jnp.array([jnp.cos(evaderHeadings), jnp.sin(evaderHeadings)])
+    speedRatio = evaderSpeed / pursuerSpeed
+    shiftedCenterPoint = centerPoint - speedRatio * pursuerRange * direction
+    return closest_point_on_circle(
+        evaderPositions, shiftedCenterPoint, minimumTurnRadius
+    )
+
+
 def linear_dubins_PEZ_single_left(
     evaderPositions,
     evaderHeadings,
@@ -613,6 +643,37 @@ def linear_dubins_PEZ_single_left(
         evaderHeadings,
         evaderSpeed,
     )
+
+    def _use_original():
+        return evaderPositions, val
+
+    def _find_closest():
+        closest = find_closest_linearization_point_left(
+            evaderPositions,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerHeading,
+            pursuerSpeed,
+            minimumTurnRadius,
+            pursuerRange,
+            captureRadius,
+        )
+        val = dubinsEZ.in_dubins_engagement_zone_left_single(
+            pursuerPosition,
+            pursuerHeading,
+            minimumTurnRadius,
+            captureRadius,
+            pursuerRange,
+            pursuerSpeed,
+            closest,
+            evaderHeadings,
+            evaderSpeed,
+        )
+        return closest, val
+
+    ecaderPositions, val = jax.lax.cond(jnp.isnan(val), _find_closest, _use_original)
+
     dDubinsEZ_dPursuerParamsValue = dDubinsEZLeft_dPursuerParams(
         pursuerParams, evaderParams
     )
@@ -2545,10 +2606,23 @@ def main():
     #     evaderHeading,
     #     evaderSpeed,
     # )
-    compare_distribution(
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
+    # compare_distribution(
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     captureRadius,
+    # )
+    plot_all_error(
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
@@ -2557,40 +2631,27 @@ def main():
         pursuerSpeedVar,
         minimumTurnRadius,
         minimumTurnRadiusVar,
+        captureRadius,
         pursuerRange,
         pursuerRangeVar,
-        captureRadius,
+        evaderHeading,
+        evaderSpeed,
     )
-    # plot_all_error(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    # )
-    # compare_PEZ(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    # )
+    compare_PEZ(
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        captureRadius,
+        pursuerRange,
+        pursuerRangeVar,
+        evaderHeading,
+        evaderSpeed,
+    )
 
     plt.show()
 
