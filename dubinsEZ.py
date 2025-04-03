@@ -445,9 +445,9 @@ def in_dubins_engagement_zone_right_single(
     straitRightLength, _ = find_dubins_path_length_right_strait(
         startPosition, startHeading, goalPosition, turnRadius
     )
-    # straitRightLength = jnp.where(
-    #     jnp.isnan(straitRightLength), jnp.inf, straitRightLength
-    # )
+    straitRightLength = jnp.where(
+        jnp.isnan(straitRightLength), jnp.inf, straitRightLength
+    )
 
     ez = straitRightLength - (captureRadius + pursuerRange)
     # return dubinsPathLengths
@@ -476,9 +476,9 @@ def in_dubins_engagement_zone_left_single(
     straitRightLength, _ = find_dubins_path_length_left_strait(
         startPosition, startHeading, goalPosition, turnRadius
     )
-    # straitRightLength = jnp.where(
-    #     jnp.isnan(straitRightLength), jnp.inf, straitRightLength
-    # )
+    straitRightLength = jnp.where(
+        jnp.isnan(straitRightLength), jnp.inf, straitRightLength
+    )
 
     ez = straitRightLength - (captureRadius + pursuerRange)
     # return dubinsPathLengths
