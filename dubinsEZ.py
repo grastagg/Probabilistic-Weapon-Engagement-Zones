@@ -568,7 +568,7 @@ def plot_dubins_EZ(
     colors = ["red"]
     ax.contour(X, Y, ZTrue, levels=[0], colors=colors, zorder=10000)
     # ax.contour(X, Y, ZGeometric, cmap="summer")
-    ax.scatter(*pursuerPosition, c="r")
+    # ax.scatter(*pursuerPosition, c="r")
     ax.set_aspect("equal", "box")
     return ax
 

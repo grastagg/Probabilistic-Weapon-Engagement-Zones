@@ -19,7 +19,7 @@ in_dubins_engagement_zone = jax.jit(
             0,  # pursuerPosition
             0,  # pursuerHeading
             0,  # minimumTurnRadius
-            None,  # captureRadius
+            None,  # catureRadius
             0,  # pursuerRange
             0,  # pursuerSpeed
             None,  # evaderPosition
@@ -1571,6 +1571,253 @@ uncented_dubins_pez = jax.jit(
 )
 
 
+@jax.jit
+def circle_intersection(c1, c2, r1, r2):
+    x1, y1 = c1
+    x2, y2 = c2
+
+    # Distance between centers
+    d = jnp.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+    # Check for no intersection or identical circles
+    no_intersection = (d > r1 + r2) | (d < jnp.abs(r1 - r2)) | (d == 0)
+
+    def no_intersect_case():
+        return jnp.full((2, 2), jnp.inf)  # Return NaN-filled array of shape (2,2)
+
+    def intersect_case():
+        a = (r1**2 - r2**2 + d**2) / (2 * d)
+        h = jnp.sqrt(r1**2 - a**2)
+
+        xm = x1 + a * (x2 - x1) / d
+        ym = y1 + a * (y2 - y1) / d
+
+        x3_1 = xm + h * (y2 - y1) / d
+        y3_1 = ym - h * (x2 - x1) / d
+        x3_2 = xm - h * (y2 - y1) / d
+        y3_2 = ym + h * (x2 - x1) / d
+
+        return jnp.array([[x3_1, y3_1], [x3_2, y3_2]])
+
+    return jax.lax.cond(no_intersection, no_intersect_case, intersect_case)
+
+
+def find_heading_discontinuity(
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
+    captureRadius,
+):
+    rightCenter = jnp.array(
+        [
+            pursuerPosition[0] + minimumTurnRadius * jnp.sin(pursuerHeading),
+            pursuerPosition[1] - minimumTurnRadius * jnp.cos(pursuerHeading),
+        ]
+    )
+    leftCenter = jnp.array(
+        [
+            pursuerPosition[0] - minimumTurnRadius * jnp.sin(pursuerHeading),
+            pursuerPosition[1] + minimumTurnRadius * jnp.cos(pursuerHeading),
+        ]
+    )
+    direction = jnp.array([jnp.cos(evaderHeading), jnp.sin(evaderHeading)])
+    speedRatio = evaderSpeed / pursuerSpeed
+    goalPosition = evaderPosition + speedRatio * pursuerRange * direction
+    evaderRadius = jnp.linalg.norm(goalPosition - pursuerPosition)
+    rightIntersection = circle_intersection(
+        pursuerPosition, rightCenter, evaderRadius, minimumTurnRadius
+    )
+    leftIntersection = circle_intersection(
+        pursuerPosition, leftCenter, evaderRadius, minimumTurnRadius
+    )
+    angleToGoal = jnp.arctan2(
+        goalPosition[1] - pursuerPosition[1], goalPosition[0] - pursuerPosition[0]
+    )
+    rightAngles = angleToGoal - jnp.arctan2(
+        rightIntersection[:, 1] - pursuerPosition[1],
+        rightIntersection[:, 0] - pursuerPosition[0],
+    )
+    leftAngles = angleToGoal - jnp.arctan2(
+        leftIntersection[:, 1] - pursuerPosition[1],
+        leftIntersection[:, 0] - pursuerPosition[0],
+    )
+    rightAngles = pursuerHeading + rightAngles
+    leftAngles = pursuerHeading + leftAngles
+    allAnglesDisc = jnp.concatenate([rightAngles, leftAngles])
+    return allAnglesDisc
+
+
+def filter_angles(allAnglesDisc, minAngle, maxAngle):
+    # filter out angles outside the range
+    # Normalize everything to [-π, π]
+
+    def range_crosses_zero():
+        return jnp.logical_or(
+            jnp.logical_and(allAnglesDisc >= minAngle, allAnglesDisc <= jnp.pi),
+            jnp.logical_and(allAnglesDisc >= -jnp.pi, allAnglesDisc <= maxAngle),
+        )
+
+    def range_does_not_cross_zero():
+        return jnp.logical_and(allAnglesDisc >= minAngle, allAnglesDisc <= maxAngle)
+
+    mask = jax.lax.cond(
+        maxAngle < minAngle, range_crosses_zero, range_does_not_cross_zero
+    )
+
+    print("allAnglesDisc", allAnglesDisc)
+    print("minAngle", minAngle)
+    print("maxAngle", maxAngle)
+
+    print("mask", mask)
+    print("allAnglesDisc[mask]", allAnglesDisc[mask])
+    return allAnglesDisc[mask]
+
+
+def normalize_angle(theta):
+    """Normalize angle to [-π, π]."""
+    return theta
+    return jnp.arctan2(jnp.sin(theta), jnp.cos(theta))
+
+
+def find_switch_angle(
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
+    captureRadius,
+):
+    direction = jnp.array([jnp.cos(evaderHeading), jnp.sin(evaderHeading)])
+    goalPosition = evaderPosition + pursuerRange * direction
+    goalAngle = jnp.arctan2(
+        goalPosition[1] - pursuerPosition[1], goalPosition[0] - pursuerPosition[0]
+    )
+    print("goalAngle", goalAngle)
+    return jnp.array([goalAngle - jnp.pi, goalAngle + jnp.pi])
+
+
+def piecewise_linear_dubins_PEZ_single(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    allAnglesDisc = find_heading_discontinuity(
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
+        captureRadius,
+    )
+    switchAngle = find_switch_angle(
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
+        captureRadius,
+    )
+    print("switchAngle", switchAngle)
+    # comnbine all angles
+    allAngles = jnp.concatenate([allAnglesDisc, switchAngle])
+    minAngle = normalize_angle(pursuerHeading - 3.0 * jnp.sqrt(pursuerHeadingVar))
+    maxAngle = normalize_angle(pursuerHeading + 3.0 * jnp.sqrt(pursuerHeadingVar))
+    filteredAngles = filter_angles(allAngles, minAngle, maxAngle)
+    return filteredAngles
+
+
+def test_piecewise_linear_plot(
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    evaderPosition = evaderPosition.flatten()
+    evaderHeading = evaderHeading[0]
+    allAngles = piecewise_linear_dubins_PEZ_single(
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        captureRadius,
+    )
+    minHeading = pursuerHeading - 3 * jnp.sqrt(pursuerHeadingVar)
+    maxHeading = pursuerHeading + 3 * jnp.sqrt(pursuerHeadingVar)
+    numSamples = 100
+    headingSamples = jnp.linspace(minHeading, maxHeading, numSamples).reshape(
+        (numSamples,)
+    )
+    pursuerPositionSamples = jnp.tile(pursuerPosition, (numSamples, 1))
+    pursuerSpeedSamples = pursuerSpeed * jnp.ones((numSamples)).reshape((numSamples,))
+    turnRadiusSamples = minimumTurnRadius * jnp.ones((numSamples)).reshape(
+        (numSamples,)
+    )
+    pursuerRangeSamples = pursuerRange * jnp.ones((numSamples)).reshape((numSamples,))
+    ez = in_dubins_engagement_zone(
+        pursuerPositionSamples,
+        headingSamples,
+        turnRadiusSamples,
+        captureRadius,
+        pursuerRangeSamples,
+        pursuerSpeedSamples,
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+    )
+    fig2, ax2 = plt.subplots()
+
+    ax2.scatter(headingSamples, ez, c="blue", label="EZ")
+    ax2.scatter(allAngles, jnp.zeros_like(allAngles), c="red", label="Discontinuity")
+
+
 def plot_dubins_PEZ(
     pursuerPosition,
     pursuerPositionCov,
@@ -2010,6 +2257,34 @@ def plot_dubins_PEZ_diff(
     print("Average Abs Diff", average_abs_diff)
     max_abs_diff = jnp.max(jnp.abs(ZTrue - ZMC))
     print("Max Abs Diff", max_abs_diff)
+    # write rmse on image
+    ax.text(
+        0.0,
+        0.9,
+        f"RMSE: {rmse:.4f}",
+        fontsize=12,
+        ha="center",
+        va="center",
+        color="white",
+    )
+    ax.text(
+        0.0,
+        0.7,
+        f"Avg Abs Diff: {average_abs_diff:.4f}",
+        fontsize=12,
+        ha="center",
+        va="center",
+        color="white",
+    )
+    ax.text(
+        0.0,
+        0.5,
+        f"Max Abs Diff: {max_abs_diff:.4f}",
+        fontsize=12,
+        ha="center",
+        va="center",
+        color="white",
+    )
 
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
@@ -2303,8 +2578,8 @@ def compare_distribution(
     print("min turn radius", np.min(turnRadiusSamples))
     plot_normal(linMean, linVar, ax, "Linear")
     plot_normal(qMean, qVar, ax, "Quadratic")
-    plot_normal(meanrightlin, varrightlin, ax, "Right Linear")
-    plot_normal(meanleftlin, varleftlin, ax, "Left Linear")
+    # plot_normal(meanrightlin, varrightlin, ax, "Right Linear")
+    # plot_normal(meanleftlin, varleftlin, ax, "Left Linear")
     # plot vertical line at 0
     ax.axvline(0, color="k", linestyle="dashed", linewidth=1)
     # plot linear and unscented cdfs
@@ -2414,10 +2689,10 @@ def compare_distribution(
         label="Tangent",
     )
     ax1.plot(pursuerHeadingSamples.flatten(), quadApprox.flatten(), label="Quadratic")
-    ax1.scatter(pursuerHeadingSamples.flatten(), rightEZ, label="Right")
-    ax1.scatter(pursuerHeadingSamples.flatten(), leftEZ, label="Left")
-    ax1.plot(pursuerHeadingSamples.flatten(), leftLinApprox, label="Left Linear")
-    ax1.plot(pursuerHeadingSamples.flatten(), rightLinApprox, label="Right Linear")
+    # ax1.scatter(pursuerHeadingSamples.flatten(), rightEZ, label="Right")
+    # ax1.scatter(pursuerHeadingSamples.flatten(), leftEZ, label="Left")
+    # ax1.plot(pursuerHeadingSamples.flatten(), leftLinApprox, label="Left Linear")
+    # ax1.plot(pursuerHeadingSamples.flatten(), rightLinApprox, label="Right Linear")
 
     ax1.legend()
 
@@ -2683,7 +2958,7 @@ def main():
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
     pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
 
-    pursuerHeading = (4.0 / 4.0) * np.pi
+    pursuerHeading = -(3.0 / 4.0) * np.pi
     pursuerHeadingVar = 0.2
 
     pursuerSpeed = 2.0
@@ -2697,27 +2972,16 @@ def main():
 
     captureRadius = 0.0
 
-    evaderHeading = jnp.array([(0 / 20) * np.pi, (0 / 20) * np.pi])
+    evaderHeading = jnp.array([(1 / 20) * np.pi, (0 / 20) * np.pi])
     evaderHeading = jnp.array([(0.0 / 20.0) * np.pi])
     # evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
 
     evaderSpeed = 0.5
     evaderPosition = np.array([[-0.25, 0.35]])
-    evaderPosition = np.array([[-0.3, 0.2]])
+    # evaderPosition = np.array([[-0.2, 0.0]])
     # evaderPosition = np.array([[-0.6, 0.4]])
     print("evader position", evaderPosition)
 
-    # plot_EZ_vs_pursuer_range(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     pursuerSpeed,
-    #     pursuerRange,
-    #     minimumTurnRadius,
-    #     captureRadius,
-    #     evaderPosition,
-    #     evaderHeading,
-    #     evaderSpeed,
-    # )
     # compare_distribution(
     #     evaderPosition,
     #     evaderHeading,
@@ -2734,7 +2998,41 @@ def main():
     #     pursuerRangeVar,
     #     captureRadius,
     # )
-    plot_all_error(
+    # plot_all_error(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    # )
+    # compare_PEZ(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    # )
+
+    test_piecewise_linear_plot(
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
@@ -2743,26 +3041,9 @@ def main():
         pursuerSpeedVar,
         minimumTurnRadius,
         minimumTurnRadiusVar,
-        captureRadius,
         pursuerRange,
         pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-    )
-    compare_PEZ(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
         captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
     )
 
     plt.show()
