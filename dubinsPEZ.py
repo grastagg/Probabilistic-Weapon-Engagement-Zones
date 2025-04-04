@@ -1698,10 +1698,13 @@ def find_switch_angle(
     captureRadius,
 ):
     direction = jnp.array([jnp.cos(evaderHeading), jnp.sin(evaderHeading)])
-    goalPosition = evaderPosition + pursuerRange * direction
+    speedRatio = evaderSpeed / pursuerSpeed
+    goalPosition = evaderPosition + speedRatio * pursuerRange * direction
     goalAngle = jnp.arctan2(
         goalPosition[1] - pursuerPosition[1], goalPosition[0] - pursuerPosition[0]
     )
+    print("goalPosition", goalPosition)
+    print("pursuerPosition", pursuerPosition)
     print("goalAngle", goalAngle)
     return jnp.array([goalAngle - jnp.pi, goalAngle + jnp.pi])
 
@@ -2972,14 +2975,14 @@ def main():
 
     captureRadius = 0.0
 
-    evaderHeading = jnp.array([(1 / 20) * np.pi, (0 / 20) * np.pi])
+    evaderHeading = jnp.array([(0 / 20) * np.pi, (0 / 20) * np.pi])
     evaderHeading = jnp.array([(0.0 / 20.0) * np.pi])
     # evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
 
     evaderSpeed = 0.5
     evaderPosition = np.array([[-0.25, 0.35]])
     # evaderPosition = np.array([[-0.2, 0.0]])
-    # evaderPosition = np.array([[-0.6, 0.4]])
+    evaderPosition = np.array([[0.0, 0.25]])
     print("evader position", evaderPosition)
 
     # compare_distribution(
