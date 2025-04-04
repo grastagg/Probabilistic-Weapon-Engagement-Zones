@@ -1653,10 +1653,28 @@ def find_heading_discontinuity(
     return allAnglesDisc
 
 
+# def filter_angles(allAnglesDisc, minAngle, maxAngle):
+#     mask = jnp.logical_and(allAnglesDisc >= minAngle, allAnglesDisc <= maxAngle)
+#
+#     return allAnglesDisc[mask]
 def filter_angles(allAnglesDisc, minAngle, maxAngle):
-    mask = jnp.logical_and(allAnglesDisc >= minAngle, allAnglesDisc <= maxAngle)
+    # Step 1: Augment angles with minAngle and maxAngle
+    augmented = jnp.concatenate([allAnglesDisc, jnp.array([minAngle, maxAngle])])
 
-    return allAnglesDisc[mask]
+    # Step 2: Create mask
+    mask = jnp.logical_and(augmented >= minAngle, augmented <= maxAngle)
+
+    # Step 3: Replace invalid with +inf and sort
+    cleaned = jnp.where(mask, augmented, jnp.inf)
+    sorted_cleaned = jnp.sort(cleaned)
+
+    # Step 4: Replace infs with NaN
+    filtered = jnp.where(sorted_cleaned < jnp.inf, sorted_cleaned, jnp.nan)
+
+    # Step 5: Count how many are valid
+    count_valid = jnp.sum(mask)
+
+    return filtered, count_valid
 
 
 def find_switch_angle(
@@ -1728,16 +1746,179 @@ def find_piecwise_bounds(
     allAngles = jnp.concatenate([allAnglesDisc, switchAngle])
     minAngle = pursuerHeading - 3.0 * jnp.sqrt(pursuerHeadingVar)
     maxAngle = pursuerHeading + 3.0 * jnp.sqrt(pursuerHeadingVar)
-    filteredAngles = filter_angles(allAngles, minAngle, maxAngle)
+    sortedAngles, numValid = filter_angles(allAngles, minAngle, maxAngle)
 
-    sortedAngles = jnp.sort(filteredAngles)
-    print("sortedAngles", sortedAngles)
+    return sortedAngles, numValid
 
-    allAngles = jnp.concatenate(
-        [jnp.array([minAngle]), sortedAngles, jnp.array([maxAngle])]
+
+def create_linear_model(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
+    captureRadius,
+):
+    dDubinsEZ_dPursuerHeadingValue = dDubinsEZ_dPursuerHeading(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
     )
+    val = dubinsEZ.in_dubins_engagement_zone_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    b = val - dDubinsEZ_dPursuerHeadingValue * pursuerHeading
+    a = dDubinsEZ_dPursuerHeadingValue
+    return a, b
 
-    return allAngles
+
+# def piecewise_linear_cdf_single_y(y, mu, sigma, breakpoints, slopes, intercepts):
+#     """
+#     Compute the CDF of Y = f(X) at a single value y,
+#     where X ~ N(mu, sigma^2) and f is piecewise linear.
+#
+#     Parameters:
+#         y : float
+#             The value at which to compute F_Y(y)
+#         mu : float
+#             Mean of the normal distribution
+#         sigma : float
+#             Standard deviation of the normal distribution
+#         breakpoints : list of floats
+#             Breakpoints [c1, c2, ..., cn]
+#         slopes : list of floats
+#             Slopes [a1, a2, ..., an+1]
+#         intercepts : list of floats
+#             Intercepts [b1, b2, ..., bn+1]
+#
+#     Returns:
+#         float: CDF value F_Y(y)
+#     """
+#     cdf = 0.0
+#     c = np.concatenate(([-np.inf], breakpoints, [np.inf]))
+#
+#     for i in range(len(slopes)):
+#         a = slopes[i]
+#         b = intercepts[i]
+#         x_star = (y - b) / a if a != 0 else np.inf
+#
+#         left = c[i]
+#         right = c[i + 1]
+#
+#         if a > 0:
+#             interval_left = max(left, -np.inf)
+#             interval_right = min(right, x_star)
+#         else:
+#             interval_left = max(left, x_star)
+#             interval_right = min(right, np.inf)
+#
+#         if interval_left < interval_right:
+#             Phi_right = jax.scipy.stats.norm.cdf((interval_right - mu) / sigma)
+#             Phi_left = jax.scipy.stats.norm.cdf((interval_left - mu) / sigma)
+#             cdf += Phi_right - Phi_left
+#
+#     return cdf
+# def piecewise_linear_cdf_single_y(y, mu, sigma, breakpoints, slopes, intercepts):
+#     """
+#     JAX-compatible version to compute the CDF of Y = f(X) at a single value y,
+#     where X ~ N(mu, sigma^2) and f is piecewise linear.
+#     """
+#     # Prepare breakpoints: [-inf, c1, c2, ..., cn, inf]
+#     c = jnp.concatenate([jnp.array([-jnp.inf]), breakpoints, jnp.array([jnp.inf])])
+#
+#     def compute_interval(i, cdf):
+#         a = slopes[i]
+#         b = intercepts[i]
+#
+#         # Avoid divide by zero by setting x_star = inf when a == 0
+#         x_star = jax.lax.cond(
+#             a != 0, lambda _: (y - b) / a, lambda _: jnp.inf, operand=None
+#         )
+#
+#         left = c[i]
+#         right = c[i + 1]
+#
+#         # Handle increasing and decreasing cases
+#         def for_positive(_):
+#             return jnp.maximum(left, -jnp.inf), jnp.minimum(right, x_star)
+#
+#         def for_negative(_):
+#             return jnp.maximum(left, x_star), jnp.minimum(right, jnp.inf)
+#
+#         interval_left, interval_right = jax.lax.cond(
+#             a > 0, for_positive, for_negative, operand=None
+#         )
+#
+#         def compute_contrib(_):
+#             Phi_right = jax.scipy.stats.norm.cdf((interval_right - mu) / sigma)
+#             Phi_left = jax.scipy.stats.norm.cdf((interval_left - mu) / sigma)
+#             return cdf + (Phi_right - Phi_left)
+#
+#         cdf = jax.lax.cond(
+#             interval_left < interval_right, compute_contrib, lambda _: cdf, operand=None
+#         )
+#         return cdf
+#
+#     # Iterate over all segments
+#     def body_fun(i, cdf):
+#         return compute_interval(i, cdf)
+#
+#     cdf = jax.lax.fori_loop(0, len(slopes), body_fun, 0.0)
+#     return cdf
+def piecewise_linear_cdf_single_y(y, mu, sigma, breakpoints, slopes, intercepts):
+    c = jnp.concatenate([jnp.array([-jnp.inf]), breakpoints, jnp.array([jnp.inf])])
+    n_segments = slopes.shape[0]
+
+    def body(i, total):
+        a = slopes[i]
+        b = intercepts[i]
+        left = c[i]
+        right = c[i + 1]
+
+        def when_nonzero_slope(_):
+            x_star = (y - b) / a
+            interval_left = jnp.where(a > 0, left, x_star)
+            interval_right = jnp.where(a > 0, x_star, right)
+            interval_left = jnp.clip(interval_left, left, right)
+            interval_right = jnp.clip(interval_right, left, right)
+            contribution = jnp.maximum(
+                0.0,
+                jax.scipy.stats.norm.cdf((interval_right - mu) / sigma)
+                - jax.scipy.stats.norm.cdf((interval_left - mu) / sigma),
+            )
+            return contribution
+
+        def when_zero_slope(_):
+            return jnp.where(
+                y >= b,
+                jax.scipy.stats.norm.cdf((right - mu) / sigma)
+                - jax.scipy.stats.norm.cdf((left - mu) / sigma),
+                0.0,
+            )
+
+        contribution = jax.lax.cond(
+            a == 0.0, when_zero_slope, when_nonzero_slope, operand=None
+        )
+        return total + contribution
+
+    return jax.lax.fori_loop(0, n_segments, body, 0.0)
 
 
 def piecewise_linear_dubins_PEZ_single(
@@ -1756,7 +1937,7 @@ def piecewise_linear_dubins_PEZ_single(
     pursuerRangeVar,
     captureRadius,
 ):
-    boundingAngles = find_piecwise_bounds(
+    boundingAngles, numValid = find_piecwise_bounds(
         evaderPositions,
         evaderHeadings,
         evaderSpeed,
@@ -1773,7 +1954,87 @@ def piecewise_linear_dubins_PEZ_single(
         captureRadius,
     )
     linearizationPoints = (boundingAngles[:-1] + boundingAngles[1:]) / 2.0
-    return boundingAngles, linearizationPoints
+
+    # slopes = []
+    # intercepts = []
+    # bounds = []
+
+    # Vectorize the function over angle and index
+    def linear_model_with_bounds(angle, i):
+        a, b = create_linear_model(
+            evaderPositions,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            angle,
+            pursuerSpeed,
+            minimumTurnRadius,
+            pursuerRange,
+            captureRadius,
+        )
+        bound = (boundingAngles[i], boundingAngles[i + 1])
+        return a, b
+
+    # vmap over the indices of linearizationPoints
+    # indices = jnp.arange(len(linearizationPoints))
+    indices = jnp.arange(len(linearizationPoints))
+    slopes, intercepts = jax.vmap(linear_model_with_bounds, in_axes=(0, 0))(
+        linearizationPoints, indices
+    )
+
+    # for i, angle in enumerate(linearizationPoints):
+    #     a, b = create_linear_model(
+    #         evaderPositions,
+    #         evaderHeadings,
+    #         evaderSpeed,
+    #         pursuerPosition,
+    #         angle,
+    #         pursuerSpeed,
+    #         minimumTurnRadius,
+    #         pursuerRange,
+    #         captureRadius,
+    #     )
+    #     slopes.append(a)
+    #     intercepts.append(b)
+    #     bounds.append((boundingAngles[i], boundingAngles[i + 1]))
+
+    prob = piecewise_linear_cdf_single_y(
+        0.0,
+        pursuerHeading,
+        jnp.sqrt(pursuerHeadingVar),
+        boundingAngles[1:],
+        slopes,
+        intercepts,
+    )
+    return prob, slopes, intercepts, boundingAngles
+
+
+piecewise_linear_dubins_pez = jax.jit(
+    jax.vmap(
+        piecewise_linear_dubins_PEZ_single,
+        in_axes=(
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+)
+
+
+def evaluate_linear_model(a, b, bounds, numSamples):
+    x = jnp.linspace(bounds[0], bounds[1], numSamples)
+    return a * x + b
 
 
 def test_piecewise_linear_plot(
@@ -1794,7 +2055,7 @@ def test_piecewise_linear_plot(
 ):
     evaderPosition = evaderPosition.flatten()
     evaderHeading = evaderHeading[0]
-    allAngles, linearizationAngles = piecewise_linear_dubins_PEZ_single(
+    prob, slopes, intercepts, bounds = piecewise_linear_dubins_PEZ_single(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -1835,9 +2096,15 @@ def test_piecewise_linear_plot(
     )
     fig2, ax2 = plt.subplots()
 
+    for a, b, bounds in zip(slopes, intercepts, bounds):
+        y = evaluate_linear_model(a, b, bounds, numSamples)
+        ax2.plot(
+            jnp.linspace(bounds[0], bounds[1], numSamples),
+            y,
+            label="Piecewise Linear Model",
+        )
+
     ax2.scatter(headingSamples, ez, c="blue", label="EZ")
-    ax2.scatter(allAngles, jnp.zeros_like(allAngles), c="red", label="Discontinuity")
-    ax2.scatter(linearizationAngles, jnp.zeros_like(linearizationAngles), c="green")
 
 
 def plot_dubins_PEZ(
@@ -1863,6 +2130,7 @@ def plot_dubins_PEZ(
     useCubic=False,
     useCombinedLinear=False,
     useCombinedQuadratic=False,
+    usePiecewiseLinear=False,
 ):
     numPoints = 200
     if useLinear:
@@ -2064,6 +2332,30 @@ def plot_dubins_PEZ(
             captureRadius,
         )
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
+    elif usePiecewiseLinear:
+        rangeX = 2
+        x = jnp.linspace(-rangeX, rangeX, numPoints)
+        y = jnp.linspace(-rangeX, rangeX, numPoints)
+        [X, Y] = jnp.meshgrid(x, y)
+        X = X.flatten()
+        Y = Y.flatten()
+        evaderHeadings = np.ones_like(X) * evaderHeading
+        ZTrue, _, _, _ = piecewise_linear_dubins_pez(
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
 
@@ -2113,6 +2405,7 @@ def plot_dubins_PEZ_diff(
     useCubic=False,
     useCombinedLinear=False,
     useCombinedQuadratic=False,
+    usePiecewiseLinear=False,
 ):
     numPoints = 200
     rangeX = 1.0
@@ -2270,6 +2563,25 @@ def plot_dubins_PEZ_diff(
             captureRadius,
         )
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
+    elif usePiecewiseLinear:
+        print("Piecewise Linear")
+        ZTrue, _, _, _ = piecewise_linear_dubins_pez(
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        ax.set_title("Piecewise Linear Dubins PEZ", fontsize=20)
 
     ZMC = ZMC.reshape(numPoints, numPoints)
     ZTrue = ZTrue.reshape(numPoints, numPoints)
@@ -2592,6 +2904,29 @@ def compare_distribution(
         captureRadius,
     )
     print("combined linear", inEZ)
+    inEZ, slopes, intercepts, bounds = piecewise_linear_dubins_pez(
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        captureRadius,
+    )
+    slopes = slopes.flatten()
+    intercepts = intercepts.flatten()
+    bounds = bounds.flatten()
+    print("piecewise linear", inEZ)
+    print("slopes", slopes)
+    print("intercepts", intercepts)
+    print("bounds", bounds)
 
     sortedEZindices = jnp.argsort(ez).flatten()
     ezSorted = ez.flatten()[sortedEZindices]
@@ -2711,6 +3046,17 @@ def compare_distribution(
         label="Tangent",
     )
     ax1.plot(pursuerHeadingSamples.flatten(), quadApprox.flatten(), label="Quadratic")
+    numSamples = 100
+    for i in range(len(slopes)):
+        a = slopes[i]
+        b = intercepts[i]
+        bound = (bounds[i], bounds[i + 1])
+        y = evaluate_linear_model(a, b, bound, numSamples)
+        ax1.plot(
+            jnp.linspace(bound[0], bound[1], numSamples),
+            y,
+            label="Piecewise Linear Model",
+        )
     # ax1.scatter(pursuerHeadingSamples.flatten(), rightEZ, label="Right")
     # ax1.scatter(pursuerHeadingSamples.flatten(), leftEZ, label="Left")
     # ax1.plot(pursuerHeadingSamples.flatten(), leftLinApprox, label="Left Linear")
@@ -2770,26 +3116,6 @@ def compare_PEZ(
         axes[0][0],
         useMC=True,
     )
-    usEZ = plot_dubins_PEZ(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-        axes[1][2],
-        useLinear=False,
-        useUnscented=True,
-        useQuadratic=False,
-        useMC=False,
-    )
     quadEZ = plot_dubins_PEZ(
         pursuerPosition,
         pursuerPositionCov,
@@ -2840,6 +3166,23 @@ def compare_PEZ(
         evaderSpeed,
         axes[1][1],
         useCombinedQuadratic=True,
+    )
+    piecewise_linear = plot_dubins_PEZ(
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        captureRadius,
+        pursuerRange,
+        pursuerRangeVar,
+        evaderHeading,
+        evaderSpeed,
+        axes[1][2],
+        usePiecewiseLinear=True,
     )
 
     print("lin rmse", np.sqrt(np.mean((linEZ - mcEZ) ** 2)))
@@ -2902,7 +3245,7 @@ def plot_all_error(
         evaderHeading,
         evaderSpeed,
         axes[1][2],
-        useUnscented=True,
+        usePiecewiseLinear=True,
     )
     quadEZ = plot_dubins_PEZ_diff(
         pursuerPosition,
@@ -2994,14 +3337,13 @@ def main():
 
     captureRadius = 0.0
 
-    evaderHeading = jnp.array([(0 / 20) * np.pi, (0 / 20) * np.pi])
-    evaderHeading = jnp.array([(0.0 / 20.0) * np.pi])
+    evaderHeading = jnp.array([(5.0 / 20.0) * np.pi])
     # evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
 
     evaderSpeed = 0.5
     evaderPosition = np.array([[-0.25, 0.35]])
     # evaderPosition = np.array([[-0.2, 0.0]])
-    evaderPosition = np.array([[0.0, 0.25]])
+    # evaderPosition = np.array([[0.0, 0.25]])
     print("evader position", evaderPosition)
 
     # compare_distribution(
@@ -3020,41 +3362,7 @@ def main():
     #     pursuerRangeVar,
     #     captureRadius,
     # )
-    # plot_all_error(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    # )
-    # compare_PEZ(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    # )
-
-    test_piecewise_linear_plot(
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
+    plot_all_error(
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
@@ -3063,10 +3371,44 @@ def main():
         pursuerSpeedVar,
         minimumTurnRadius,
         minimumTurnRadiusVar,
+        captureRadius,
         pursuerRange,
         pursuerRangeVar,
-        captureRadius,
+        evaderHeading,
+        evaderSpeed,
     )
+    compare_PEZ(
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        captureRadius,
+        pursuerRange,
+        pursuerRangeVar,
+        evaderHeading,
+        evaderSpeed,
+    )
+
+    # test_piecewise_linear_plot(
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     captureRadius,
+    # )
 
     plt.show()
 
