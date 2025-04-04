@@ -1,4 +1,5 @@
 import numpy as np
+
 import jax.numpy as jnp
 import jax
 import matplotlib.pyplot as plt
@@ -113,7 +114,7 @@ def mc_dubins_PEZ(
     pursuerRangeVar,
     captureRadius,
 ):
-    numSamples = 3000
+    numSamples = 5000
 
     key, subkey = generate_random_key()
     # Generate heading samples
@@ -1583,7 +1584,7 @@ def circle_intersection(c1, c2, r1, r2):
     no_intersection = (d > r1 + r2) | (d < jnp.abs(r1 - r2)) | (d == 0)
 
     def no_intersect_case():
-        return jnp.full((2, 2), jnp.inf)  # Return NaN-filled array of shape (2,2)
+        return jnp.full((2, 2), jnp.nan)  # Return NaN-filled array of shape (2,2)
 
     def intersect_case():
         a = (r1**2 - r2**2 + d**2) / (2 * d)
@@ -1653,10 +1654,6 @@ def find_heading_discontinuity(
     return allAnglesDisc
 
 
-# def filter_angles(allAnglesDisc, minAngle, maxAngle):
-#     mask = jnp.logical_and(allAnglesDisc >= minAngle, allAnglesDisc <= maxAngle)
-#
-#     return allAnglesDisc[mask]
 def filter_angles(allAnglesDisc, minAngle, maxAngle):
     # Step 1: Augment angles with minAngle and maxAngle
     augmented = jnp.concatenate([allAnglesDisc, jnp.array([minAngle, maxAngle])])
@@ -2414,9 +2411,10 @@ def plot_dubins_PEZ_diff(
     [X, Y] = jnp.meshgrid(x, y)
     X = X.flatten()
     Y = Y.flatten()
+    points = jnp.array([X, Y]).T
     evaderHeadings = np.ones_like(X) * evaderHeading
     ZMC, _, _, _, _, _, _ = mc_dubins_PEZ(
-        jnp.array([X, Y]).T,
+        points,
         evaderHeadings,
         evaderSpeed,
         pursuerPosition,
@@ -2434,7 +2432,7 @@ def plot_dubins_PEZ_diff(
     if useLinear:
         print("Linear")
         ZTrue, _, _ = linear_dubins_pez(
-            jnp.array([X, Y]).T,
+            points,
             evaderHeadings,
             evaderSpeed,
             pursuerPosition,
@@ -2453,7 +2451,7 @@ def plot_dubins_PEZ_diff(
     elif useUnscented:
         print("Unscented")
         ZTrue, _, _ = uncented_dubins_pez(
-            jnp.array([X, Y]).T,
+            points,
             evaderHeadings,
             evaderSpeed,
             pursuerPosition,
@@ -2472,7 +2470,7 @@ def plot_dubins_PEZ_diff(
     elif useQuadratic:
         print("Quadratic")
         ZTrue, _, _ = quadratic_dubins_pez(
-            jnp.array([X, Y]).T,
+            points,
             evaderHeadings,
             evaderSpeed,
             pursuerPosition,
@@ -2491,7 +2489,7 @@ def plot_dubins_PEZ_diff(
     elif useEdgeworth:
         print("Edgeworth")
         ZTrue, _, _, _ = second_order_taylor_expansion_edgeworth_dubins_PEZ(
-            jnp.array([X, Y]).T,
+            points,
             evaderHeadings,
             evaderSpeed,
             pursuerPosition,
@@ -2509,7 +2507,7 @@ def plot_dubins_PEZ_diff(
     elif useCubic:
         print("Cubic")
         ZTrue, _, _ = cubic_dubins_PEZ(
-            jnp.array([X, Y]).T,
+            points,
             evaderHeadings,
             evaderSpeed,
             pursuerPosition,
@@ -2528,7 +2526,7 @@ def plot_dubins_PEZ_diff(
     elif useCombinedLinear:
         print("Combined Linear")
         ZTrue = combined_left_right_dubins_PEZ(
-            jnp.array([X, Y]).T,
+            points,
             evaderHeadings,
             evaderSpeed,
             pursuerPosition,
@@ -2547,7 +2545,7 @@ def plot_dubins_PEZ_diff(
     elif useCombinedQuadratic:
         print("Combined Quadratic")
         ZTrue = combined_left_right_quadratic_dubins_PEZ(
-            jnp.array([X, Y]).T,
+            points,
             evaderHeadings,
             evaderSpeed,
             pursuerPosition,
@@ -2566,7 +2564,7 @@ def plot_dubins_PEZ_diff(
     elif usePiecewiseLinear:
         print("Piecewise Linear")
         ZTrue, _, _, _ = piecewise_linear_dubins_pez(
-            jnp.array([X, Y]).T,
+            points,
             evaderHeadings,
             evaderSpeed,
             pursuerPosition,
@@ -2583,14 +2581,17 @@ def plot_dubins_PEZ_diff(
         )
         ax.set_title("Piecewise Linear Dubins PEZ", fontsize=20)
 
-    ZMC = ZMC.reshape(numPoints, numPoints)
-    ZTrue = ZTrue.reshape(numPoints, numPoints)
     rmse = jnp.sqrt(jnp.mean((ZTrue - ZMC) ** 2))
     print("RMSE", rmse)
     average_abs_diff = jnp.mean(jnp.abs(ZTrue - ZMC))
     print("Average Abs Diff", average_abs_diff)
     max_abs_diff = jnp.max(jnp.abs(ZTrue - ZMC))
     print("Max Abs Diff", max_abs_diff)
+    print("points", points[jnp.argmax(jnp.abs(ZTrue - ZMC))])
+    print("ztrue", ZTrue[jnp.argmax(jnp.abs(ZTrue - ZMC))])
+    print("zmc", ZMC[jnp.argmax(jnp.abs(ZTrue - ZMC))])
+    ZMC = ZMC.reshape(numPoints, numPoints)
+    ZTrue = ZTrue.reshape(numPoints, numPoints)
     # write rmse on image
     ax.text(
         0.0,
@@ -2622,7 +2623,7 @@ def plot_dubins_PEZ_diff(
 
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
-    c = ax.pcolormesh(X, Y, jnp.abs(ZTrue - ZMC), vmin=0, vmax=1.0)
+    c = ax.pcolormesh(X, Y, jnp.abs(ZTrue - ZMC), vmin=0, vmax=0.85)
     cb = plt.colorbar(c)
     # if useUnscented:
     ax.set_xlabel("X", fontsize=26)
@@ -2634,17 +2635,17 @@ def plot_dubins_PEZ_diff(
     ax.scatter(*pursuerPosition, c="r")
     ax.set_aspect("equal", "box")
     ax.set_aspect("equal", "box")
-    dubinsEZ.plot_dubins_EZ(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        evaderHeading,
-        evaderSpeed,
-        ax,
-    )
+    # dubinsEZ.plot_dubins_EZ(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     pursuerSpeed,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     ax,
+    # )
 
     return ZTrue.flatten()
 
@@ -3337,31 +3338,31 @@ def main():
 
     captureRadius = 0.0
 
-    evaderHeading = jnp.array([(5.0 / 20.0) * np.pi])
+    evaderHeading = jnp.array([(0.0 / 20.0) * np.pi])
     # evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
 
     evaderSpeed = 0.5
     evaderPosition = np.array([[-0.25, 0.35]])
-    # evaderPosition = np.array([[-0.2, 0.0]])
-    # evaderPosition = np.array([[0.0, 0.25]])
+    evaderPosition = np.array([[0.7487437185929648, 0.04522613065326636]])
+    evaderPosition = np.array([[0.205, -0.89]])
     print("evader position", evaderPosition)
 
-    # compare_distribution(
-    #     evaderPosition,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     captureRadius,
-    # )
+    compare_distribution(
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        captureRadius,
+    )
     plot_all_error(
         pursuerPosition,
         pursuerPositionCov,
@@ -3377,21 +3378,21 @@ def main():
         evaderHeading,
         evaderSpeed,
     )
-    compare_PEZ(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-    )
+    # compare_PEZ(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    # )
 
     # test_piecewise_linear_plot(
     #     evaderPosition,
