@@ -1654,35 +1654,9 @@ def find_heading_discontinuity(
 
 
 def filter_angles(allAnglesDisc, minAngle, maxAngle):
-    # filter out angles outside the range
-    # Normalize everything to [-π, π]
+    mask = jnp.logical_and(allAnglesDisc >= minAngle, allAnglesDisc <= maxAngle)
 
-    def range_crosses_zero():
-        return jnp.logical_or(
-            jnp.logical_and(allAnglesDisc >= minAngle, allAnglesDisc <= jnp.pi),
-            jnp.logical_and(allAnglesDisc >= -jnp.pi, allAnglesDisc <= maxAngle),
-        )
-
-    def range_does_not_cross_zero():
-        return jnp.logical_and(allAnglesDisc >= minAngle, allAnglesDisc <= maxAngle)
-
-    mask = jax.lax.cond(
-        maxAngle < minAngle, range_crosses_zero, range_does_not_cross_zero
-    )
-
-    print("allAnglesDisc", allAnglesDisc)
-    print("minAngle", minAngle)
-    print("maxAngle", maxAngle)
-
-    print("mask", mask)
-    print("allAnglesDisc[mask]", allAnglesDisc[mask])
     return allAnglesDisc[mask]
-
-
-def normalize_angle(theta):
-    """Normalize angle to [-π, π]."""
-    return theta
-    return jnp.arctan2(jnp.sin(theta), jnp.cos(theta))
 
 
 def find_switch_angle(
@@ -1703,13 +1677,14 @@ def find_switch_angle(
     goalAngle = jnp.arctan2(
         goalPosition[1] - pursuerPosition[1], goalPosition[0] - pursuerPosition[0]
     )
-    print("goalPosition", goalPosition)
-    print("pursuerPosition", pursuerPosition)
-    print("goalAngle", goalAngle)
     return jnp.array([goalAngle - jnp.pi, goalAngle + jnp.pi])
 
 
-def piecewise_linear_dubins_PEZ_single(
+def clockwise_angle_diff(angle, start):
+    return (start - angle) % (2 * np.pi)
+
+
+def find_piecwise_bounds(
     evaderPositions,
     evaderHeadings,
     evaderSpeed,
@@ -1749,13 +1724,56 @@ def piecewise_linear_dubins_PEZ_single(
         pursuerRange,
         captureRadius,
     )
-    print("switchAngle", switchAngle)
     # comnbine all angles
     allAngles = jnp.concatenate([allAnglesDisc, switchAngle])
-    minAngle = normalize_angle(pursuerHeading - 3.0 * jnp.sqrt(pursuerHeadingVar))
-    maxAngle = normalize_angle(pursuerHeading + 3.0 * jnp.sqrt(pursuerHeadingVar))
+    minAngle = pursuerHeading - 3.0 * jnp.sqrt(pursuerHeadingVar)
+    maxAngle = pursuerHeading + 3.0 * jnp.sqrt(pursuerHeadingVar)
     filteredAngles = filter_angles(allAngles, minAngle, maxAngle)
-    return filteredAngles
+
+    sortedAngles = jnp.sort(filteredAngles)
+    print("sortedAngles", sortedAngles)
+
+    allAngles = jnp.concatenate(
+        [jnp.array([minAngle]), sortedAngles, jnp.array([maxAngle])]
+    )
+
+    return allAngles
+
+
+def piecewise_linear_dubins_PEZ_single(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    boundingAngles = find_piecwise_bounds(
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        captureRadius,
+    )
+    linearizationPoints = (boundingAngles[:-1] + boundingAngles[1:]) / 2.0
+    return boundingAngles, linearizationPoints
 
 
 def test_piecewise_linear_plot(
@@ -1776,7 +1794,7 @@ def test_piecewise_linear_plot(
 ):
     evaderPosition = evaderPosition.flatten()
     evaderHeading = evaderHeading[0]
-    allAngles = piecewise_linear_dubins_PEZ_single(
+    allAngles, linearizationAngles = piecewise_linear_dubins_PEZ_single(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -1819,6 +1837,7 @@ def test_piecewise_linear_plot(
 
     ax2.scatter(headingSamples, ez, c="blue", label="EZ")
     ax2.scatter(allAngles, jnp.zeros_like(allAngles), c="red", label="Discontinuity")
+    ax2.scatter(linearizationAngles, jnp.zeros_like(linearizationAngles), c="green")
 
 
 def plot_dubins_PEZ(
@@ -2961,7 +2980,7 @@ def main():
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
     pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
 
-    pursuerHeading = -(3.0 / 4.0) * np.pi
+    pursuerHeading = (0.0 / 4.0) * np.pi
     pursuerHeadingVar = 0.2
 
     pursuerSpeed = 2.0
