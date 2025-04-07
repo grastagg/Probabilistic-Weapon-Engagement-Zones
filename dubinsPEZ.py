@@ -1786,99 +1786,6 @@ def create_linear_model(
     return a, b
 
 
-# def piecewise_linear_cdf_single_y(y, mu, sigma, breakpoints, slopes, intercepts):
-#     """
-#     Compute the CDF of Y = f(X) at a single value y,
-#     where X ~ N(mu, sigma^2) and f is piecewise linear.
-#
-#     Parameters:
-#         y : float
-#             The value at which to compute F_Y(y)
-#         mu : float
-#             Mean of the normal distribution
-#         sigma : float
-#             Standard deviation of the normal distribution
-#         breakpoints : list of floats
-#             Breakpoints [c1, c2, ..., cn]
-#         slopes : list of floats
-#             Slopes [a1, a2, ..., an+1]
-#         intercepts : list of floats
-#             Intercepts [b1, b2, ..., bn+1]
-#
-#     Returns:
-#         float: CDF value F_Y(y)
-#     """
-#     cdf = 0.0
-#     c = np.concatenate(([-np.inf], breakpoints, [np.inf]))
-#
-#     for i in range(len(slopes)):
-#         a = slopes[i]
-#         b = intercepts[i]
-#         x_star = (y - b) / a if a != 0 else np.inf
-#
-#         left = c[i]
-#         right = c[i + 1]
-#
-#         if a > 0:
-#             interval_left = max(left, -np.inf)
-#             interval_right = min(right, x_star)
-#         else:
-#             interval_left = max(left, x_star)
-#             interval_right = min(right, np.inf)
-#
-#         if interval_left < interval_right:
-#             Phi_right = jax.scipy.stats.norm.cdf((interval_right - mu) / sigma)
-#             Phi_left = jax.scipy.stats.norm.cdf((interval_left - mu) / sigma)
-#             cdf += Phi_right - Phi_left
-#
-#     return cdf
-# def piecewise_linear_cdf_single_y(y, mu, sigma, breakpoints, slopes, intercepts):
-#     """
-#     JAX-compatible version to compute the CDF of Y = f(X) at a single value y,
-#     where X ~ N(mu, sigma^2) and f is piecewise linear.
-#     """
-#     # Prepare breakpoints: [-inf, c1, c2, ..., cn, inf]
-#     c = jnp.concatenate([jnp.array([-jnp.inf]), breakpoints, jnp.array([jnp.inf])])
-#
-#     def compute_interval(i, cdf):
-#         a = slopes[i]
-#         b = intercepts[i]
-#
-#         # Avoid divide by zero by setting x_star = inf when a == 0
-#         x_star = jax.lax.cond(
-#             a != 0, lambda _: (y - b) / a, lambda _: jnp.inf, operand=None
-#         )
-#
-#         left = c[i]
-#         right = c[i + 1]
-#
-#         # Handle increasing and decreasing cases
-#         def for_positive(_):
-#             return jnp.maximum(left, -jnp.inf), jnp.minimum(right, x_star)
-#
-#         def for_negative(_):
-#             return jnp.maximum(left, x_star), jnp.minimum(right, jnp.inf)
-#
-#         interval_left, interval_right = jax.lax.cond(
-#             a > 0, for_positive, for_negative, operand=None
-#         )
-#
-#         def compute_contrib(_):
-#             Phi_right = jax.scipy.stats.norm.cdf((interval_right - mu) / sigma)
-#             Phi_left = jax.scipy.stats.norm.cdf((interval_left - mu) / sigma)
-#             return cdf + (Phi_right - Phi_left)
-#
-#         cdf = jax.lax.cond(
-#             interval_left < interval_right, compute_contrib, lambda _: cdf, operand=None
-#         )
-#         return cdf
-#
-#     # Iterate over all segments
-#     def body_fun(i, cdf):
-#         return compute_interval(i, cdf)
-#
-#     cdf = jax.lax.fori_loop(0, len(slopes), body_fun, 0.0)
-#     return cdf
 def piecewise_linear_cdf_single_y(y, mu, sigma, breakpoints, slopes, intercepts):
     c = jnp.concatenate([jnp.array([-jnp.inf]), breakpoints, jnp.array([jnp.inf])])
     n_segments = slopes.shape[0]
@@ -1918,7 +1825,7 @@ def piecewise_linear_cdf_single_y(y, mu, sigma, breakpoints, slopes, intercepts)
     return jax.lax.fori_loop(0, n_segments, body, 0.0)
 
 
-def piecewise_linear_dubins_PEZ_single(
+def piecewise_linear_dubins_PEZ_single_heading_only(
     evaderPositions,
     evaderHeadings,
     evaderSpeed,
@@ -2012,9 +1919,9 @@ def piecewise_linear_dubins_PEZ_single(
     return prob, slopes, intercepts, boundingAngles
 
 
-piecewise_linear_dubins_pez = jax.jit(
+piecewise_linear_dubins_pez_heading_only = jax.jit(
     jax.vmap(
-        piecewise_linear_dubins_PEZ_single,
+        piecewise_linear_dubins_PEZ_single_heading_only,
         in_axes=(
             0,
             0,
@@ -2406,7 +2313,7 @@ def plot_dubins_PEZ(
         Y = Y.flatten()
         evaderHeadings = np.ones_like(X) * evaderHeading
         start = time.time()
-        ZTrue, _, _, _ = piecewise_linear_dubins_pez(
+        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_only(
             jnp.array([X, Y]).T,
             evaderHeadings,
             evaderSpeed,
@@ -2634,7 +2541,7 @@ def plot_dubins_PEZ_diff(
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
     elif usePiecewiseLinear:
         print("Piecewise Linear")
-        ZTrue, _, _, _ = piecewise_linear_dubins_pez(
+        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_only(
             points,
             evaderHeadings,
             evaderSpeed,
@@ -2977,7 +2884,7 @@ def compare_distribution(
         captureRadius,
     )
     print("combined linear", inEZ)
-    inEZ, slopes, intercepts, bounds = piecewise_linear_dubins_pez(
+    inEZ, slopes, intercepts, bounds = piecewise_linear_dubins_pez_heading_only(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
