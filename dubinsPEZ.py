@@ -2070,15 +2070,15 @@ def test_piecewise_linear_plot(
     )
     minHeading = pursuerHeading - 3 * jnp.sqrt(pursuerHeadingVar)
     maxHeading = pursuerHeading + 3 * jnp.sqrt(pursuerHeadingVar)
-    numSamples = 100
+    numSamples = 200**2
     headingSamples = jnp.linspace(minHeading, maxHeading, numSamples).reshape(
         (numSamples,)
     )
     pursuerPositionSamples = jnp.tile(pursuerPosition, (numSamples, 1))
-    pursuerSpeedSamples = pursuerSpeed * jnp.ones((numSamples)).reshape((numSamples,))
     turnRadiusSamples = minimumTurnRadius * jnp.ones((numSamples)).reshape(
         (numSamples,)
     )
+    pursuerSpeedSamples = pursuerSpeed * jnp.ones((numSamples)).reshape((numSamples,))
     pursuerRangeSamples = pursuerRange * jnp.ones((numSamples)).reshape((numSamples,))
     ez = in_dubins_engagement_zone(
         pursuerPositionSamples,
@@ -2093,15 +2093,71 @@ def test_piecewise_linear_plot(
     )
     fig2, ax2 = plt.subplots()
 
-    for a, b, bounds in zip(slopes, intercepts, bounds):
-        y = evaluate_linear_model(a, b, bounds, numSamples)
+    for i in range(len(slopes)):
+        a = slopes[i]
+        b = intercepts[i]
+        bound = (bounds[i], bounds[i + 1])
+        y = evaluate_linear_model(a, b, bound, numSamples)
         ax2.plot(
-            jnp.linspace(bounds[0], bounds[1], numSamples),
+            jnp.linspace(bound[0], bound[1], numSamples),
             y,
             label="Piecewise Linear Model",
         )
 
     ax2.scatter(headingSamples, ez, c="blue", label="EZ")
+
+    fig3, ax3 = plt.subplots()
+    pursuerHeadingSamples = pursuerHeading * jnp.ones((numSamples)).reshape(
+        (numSamples,)
+    )
+    minPursuerSpeed = pursuerSpeed - 3 * jnp.sqrt(pursuerSpeedVar)
+    maxPursuerSpeed = pursuerSpeed + 3 * jnp.sqrt(pursuerSpeedVar)
+    pursuerSpeedSamples = jnp.linspace(minPursuerSpeed, maxPursuerSpeed, numSamples)
+    ez = in_dubins_engagement_zone(
+        pursuerPositionSamples,
+        pursuerHeadingSamples,
+        turnRadiusSamples,
+        captureRadius,
+        pursuerRangeSamples,
+        pursuerSpeedSamples,
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+    )
+    ax3.scatter(pursuerSpeedSamples, ez, c="blue", label="EZ")
+
+    fig4, ax4 = plt.subplots()
+    sqrtNumSamples = int(np.sqrt(numSamples))
+    pursuerHeadingSamples = jnp.linspace(
+        minHeading, maxHeading, int(np.sqrt(numSamples))
+    )
+    pursuerSpeedSamples = jnp.linspace(
+        minPursuerSpeed, maxPursuerSpeed, int(np.sqrt(numSamples))
+    )
+    print("pursuerHeadingSamples.shape", pursuerHeadingSamples.shape)
+    print("pursuerSpeedSamples.shape", pursuerSpeedSamples.shape)
+    [pursuerHeadingSamples, pursuerSpeedSamples] = jnp.meshgrid(
+        pursuerHeadingSamples, pursuerSpeedSamples
+    )
+    print("pursuerHeadingSamples.shape", pursuerHeadingSamples.shape)
+    print("pursuerSpeedSamples.shape", pursuerSpeedSamples.shape)
+    ez = in_dubins_engagement_zone(
+        pursuerPositionSamples,
+        pursuerHeadingSamples.ravel(),
+        turnRadiusSamples,
+        captureRadius,
+        pursuerRangeSamples,
+        pursuerSpeedSamples.ravel(),
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+    )
+    ez = ez.reshape(sqrtNumSamples, sqrtNumSamples)
+    pursuerHeadingSamples = pursuerHeadingSamples.reshape(
+        sqrtNumSamples, sqrtNumSamples
+    )
+    pursuerSpeedSamples = pursuerSpeedSamples.reshape(sqrtNumSamples, sqrtNumSamples)
+    ax4.pcolormesh(pursuerHeadingSamples, pursuerSpeedSamples, ez)
 
 
 def plot_dubins_PEZ(
@@ -2353,6 +2409,7 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
+        ax.set_title("Piecewise Linear Dubins PEZ", fontsize=20)
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
 
@@ -3343,8 +3400,8 @@ def main():
 
     evaderSpeed = 0.5
     evaderPosition = np.array([[-0.25, 0.35]])
-    evaderPosition = np.array([[0.7487437185929648, 0.04522613065326636]])
-    evaderPosition = np.array([[0.205, -0.89]])
+    # evaderPosition = np.array([[0.7487437185929648, 0.04522613065326636]])
+    # evaderPosition = np.array([[0.205, -0.89]])
     print("evader position", evaderPosition)
 
     compare_distribution(
@@ -3378,21 +3435,21 @@ def main():
         evaderHeading,
         evaderSpeed,
     )
-    # compare_PEZ(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    # )
+    compare_PEZ(
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        captureRadius,
+        pursuerRange,
+        pursuerRangeVar,
+        evaderHeading,
+        evaderSpeed,
+    )
 
     # test_piecewise_linear_plot(
     #     evaderPosition,
