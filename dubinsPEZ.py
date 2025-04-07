@@ -1934,22 +1934,28 @@ def piecewise_linear_dubins_PEZ_single(
     pursuerRangeVar,
     captureRadius,
 ):
-    boundingAngles, numValid = find_piecwise_bounds(
-        evaderPositions,
-        evaderHeadings,
-        evaderSpeed,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        pursuerRange,
-        pursuerRangeVar,
-        captureRadius,
-    )
+    # boundingAngles, numValid = find_piecwise_bounds(
+    #     evaderPositions,
+    #     evaderHeadings,
+    #     evaderSpeed,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     captureRadius,
+    # )
+    # crete evenly space bounding angles including min and max angles
+    minAngle = pursuerHeading - 3.0 * jnp.sqrt(pursuerHeadingVar)
+    maxAngle = pursuerHeading + 3.0 * jnp.sqrt(pursuerHeadingVar)
+    numAngles = 51
+    boundingAngles = jnp.linspace(minAngle, maxAngle, numAngles)
+
     linearizationPoints = (boundingAngles[:-1] + boundingAngles[1:]) / 2.0
 
     # slopes = []
@@ -2158,6 +2164,8 @@ def test_piecewise_linear_plot(
     )
     pursuerSpeedSamples = pursuerSpeedSamples.reshape(sqrtNumSamples, sqrtNumSamples)
     ax4.pcolormesh(pursuerHeadingSamples, pursuerSpeedSamples, ez)
+    ax4.set_xlabel("Pursuer Heading")
+    ax4.set_ylabel("Pursuer Speed")
 
 
 def plot_dubins_PEZ(
@@ -2194,6 +2202,7 @@ def plot_dubins_PEZ(
         X = X.flatten()
         Y = Y.flatten()
         evaderHeadings = np.ones_like(X) * evaderHeading
+        start = time.time()
         ZTrue, _, _ = linear_dubins_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2210,6 +2219,7 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
+        print("linear_dubins_pez time", time.time() - start)
         ax.set_title("Linear Dubins PEZ", fontsize=20)
     elif useUnscented:
         rangeX = 2
@@ -2244,6 +2254,7 @@ def plot_dubins_PEZ(
         X = X.flatten()
         Y = Y.flatten()
         evaderHeadings = np.ones_like(X) * evaderHeading
+        start = time.time()
         ZTrue, _, _, _, _, _, _ = mc_dubins_PEZ(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2260,6 +2271,7 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
+        print("mc_dubins_PEZ time", time.time() - start)
         ax.set_title("Monte Carlo Dubins PEZ", fontsize=20)
     elif useQuadratic:
         rangeX = 2
@@ -2393,6 +2405,7 @@ def plot_dubins_PEZ(
         X = X.flatten()
         Y = Y.flatten()
         evaderHeadings = np.ones_like(X) * evaderHeading
+        start = time.time()
         ZTrue, _, _, _ = piecewise_linear_dubins_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2409,6 +2422,7 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
+        print("piecewise_linear_dubins_pez time", time.time() - start)
         ax.set_title("Piecewise Linear Dubins PEZ", fontsize=20)
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
@@ -2681,7 +2695,8 @@ def plot_dubins_PEZ_diff(
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
     c = ax.pcolormesh(X, Y, jnp.abs(ZTrue - ZMC), vmin=0, vmax=0.85)
-    cb = plt.colorbar(c)
+    # make colorbar smaller
+    cb = plt.colorbar(c, ax=ax, shrink=0.5)
     # if useUnscented:
     ax.set_xlabel("X", fontsize=26)
     ax.set_ylabel("Y", fontsize=26)
@@ -3105,7 +3120,12 @@ def compare_distribution(
     )
     ax1.plot(pursuerHeadingSamples.flatten(), quadApprox.flatten(), label="Quadratic")
     numSamples = 100
+
     for i in range(len(slopes)):
+        if i % 2 == 0:
+            color = "r"
+        else:
+            color = "lime"
         a = slopes[i]
         b = intercepts[i]
         bound = (bounds[i], bounds[i + 1])
@@ -3114,13 +3134,12 @@ def compare_distribution(
             jnp.linspace(bound[0], bound[1], numSamples),
             y,
             label="Piecewise Linear Model",
+            color=color,
         )
     # ax1.scatter(pursuerHeadingSamples.flatten(), rightEZ, label="Right")
     # ax1.scatter(pursuerHeadingSamples.flatten(), leftEZ, label="Left")
     # ax1.plot(pursuerHeadingSamples.flatten(), leftLinApprox, label="Left Linear")
     # ax1.plot(pursuerHeadingSamples.flatten(), rightLinApprox, label="Right Linear")
-
-    ax1.legend()
 
 
 def compare_PEZ(
@@ -3139,7 +3158,7 @@ def compare_PEZ(
     evaderSpeed,
 ):
     evaderHeading = jnp.array([(0 / 20) * np.pi])
-    fig, axes = plt.subplots(2, 3, constrained_layout=True)
+    fig, axes = plt.subplots(1, 3, constrained_layout=True)
     linEZ = plot_dubins_PEZ(
         pursuerPosition,
         pursuerPositionCov,
@@ -3154,7 +3173,7 @@ def compare_PEZ(
         pursuerRangeVar,
         evaderHeading,
         evaderSpeed,
-        axes[0][1],
+        axes[1],
         useLinear=True,
     )
     mcEZ = plot_dubins_PEZ(
@@ -3171,60 +3190,60 @@ def compare_PEZ(
         pursuerRangeVar,
         evaderHeading,
         evaderSpeed,
-        axes[0][0],
+        axes[0],
         useMC=True,
     )
-    quadEZ = plot_dubins_PEZ(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-        axes[0][2],
-        useQuadratic=True,
-    )
-    combined_linear = plot_dubins_PEZ(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-        axes[1][0],
-        useCombinedLinear=True,
-    )
-    combined_quadratic = plot_dubins_PEZ(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-        axes[1][1],
-        useCombinedQuadratic=True,
-    )
+    # quadEZ = plot_dubins_PEZ(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     axes[0][2],
+    #     useQuadratic=True,
+    # )
+    # combined_linear = plot_dubins_PEZ(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     axes[1][0],
+    #     useCombinedLinear=True,
+    # )
+    # combined_quadratic = plot_dubins_PEZ(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     axes[1][1],
+    #     useCombinedQuadratic=True,
+    # )
     piecewise_linear = plot_dubins_PEZ(
         pursuerPosition,
         pursuerPositionCov,
@@ -3239,14 +3258,10 @@ def compare_PEZ(
         pursuerRangeVar,
         evaderHeading,
         evaderSpeed,
-        axes[1][2],
+        axes[2],
         usePiecewiseLinear=True,
     )
 
-    print("lin rmse", np.sqrt(np.mean((linEZ - mcEZ) ** 2)))
-    print("quadratic rmse", np.sqrt(np.mean((quadEZ - mcEZ) ** 2)))
-    print("combined linear rmse", np.sqrt(np.mean((combined_linear - mcEZ) ** 2)))
-    print("combined quadratic rmse", np.sqrt(np.mean((combined_quadratic - mcEZ) ** 2)))
     #
     # print("unscented rmse", np.sqrt(np.mean((usEZ - mcEZ) ** 2)))
     # print("quadratic rmse", np.sqrt(np.mean((quadEZ - mcEZ) ** 2)))
@@ -3270,7 +3285,7 @@ def plot_all_error(
     evaderSpeed,
 ):
     evaderHeading = jnp.array([(0 / 20) * np.pi])
-    fig, axes = plt.subplots(2, 3, constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, constrained_layout=True)
     linEZ = plot_dubins_PEZ_diff(
         pursuerPosition,
         pursuerPositionCov,
@@ -3285,7 +3300,7 @@ def plot_all_error(
         pursuerRangeVar,
         evaderHeading,
         evaderSpeed,
-        axes[0][0],
+        axes[0],
         useLinear=True,
     )
     usEZ = plot_dubins_PEZ_diff(
@@ -3302,78 +3317,78 @@ def plot_all_error(
         pursuerRangeVar,
         evaderHeading,
         evaderSpeed,
-        axes[1][2],
+        axes[1],
         usePiecewiseLinear=True,
     )
-    quadEZ = plot_dubins_PEZ_diff(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-        axes[0][1],
-        useQuadratic=True,
-    )
-    cubicEZ = plot_dubins_PEZ_diff(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-        axes[0][2],
-        useCubic=True,
-    )
-
-    combined_linear = plot_dubins_PEZ_diff(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-        axes[1][0],
-        useCombinedLinear=True,
-    )
-    combined_quadratic = plot_dubins_PEZ_diff(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-        axes[1][1],
-        useCombinedQuadratic=True,
-    )
+    # quadEZ = plot_dubins_PEZ_diff(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     axes[0][1],
+    #     useQuadratic=True,
+    # )
+    # cubicEZ = plot_dubins_PEZ_diff(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     axes[0][2],
+    #     useCubic=True,
+    # )
+    #
+    # combined_linear = plot_dubins_PEZ_diff(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     axes[1][0],
+    #     useCombinedLinear=True,
+    # )
+    # combined_quadratic = plot_dubins_PEZ_diff(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     axes[1][1],
+    #     useCombinedQuadratic=True,
+    # )
 
 
 def main():
@@ -3421,6 +3436,21 @@ def main():
         captureRadius,
     )
     plot_all_error(
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        captureRadius,
+        pursuerRange,
+        pursuerRangeVar,
+        evaderHeading,
+        evaderSpeed,
+    )
+    compare_PEZ(
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
