@@ -1942,6 +1942,222 @@ piecewise_linear_dubins_pez_heading_only = jax.jit(
 )
 
 
+@jax.jit
+def create_linear_model_heading_and_speed(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerHeadings,
+    pursuerSpeeds,
+    minimumTurnRadius,
+    pursuerRange,
+    captureRadius,
+    pursuerHeadingIndex,
+    pursuerSpeedIndex,
+):
+    pursuerHeading = pursuerHeadings[pursuerHeadingIndex]
+    pursuerSpeed = pursuerSpeeds[pursuerSpeedIndex]
+    dDubinsEZ_dPursuerHeadingValue = dDubinsEZ_dPursuerHeading(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    dDubinsEZ_dPursuerSpeedValue = dDubinsEZ_dPursuerSpeed(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    val = dubinsEZ.in_dubins_engagement_zone_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    c = (
+        val
+        - dDubinsEZ_dPursuerHeadingValue * pursuerHeading
+        - dDubinsEZ_dPursuerSpeedValue * pursuerSpeed
+    )
+    a = dDubinsEZ_dPursuerHeadingValue
+    b = dDubinsEZ_dPursuerSpeedValue
+    return a, b, c
+
+
+# vectorize for heading and speed
+create_linear_model_heading_and_speed_vmap = jax.vmap(
+    create_linear_model_heading_and_speed,
+    in_axes=(None, None, None, None, None, None, None, None, None, 0, 0),
+)
+
+
+def compute_region_weight(
+    pursuerHeadingBounds,
+    pursuerSpeedBounds,
+    pursuerHeadingIndex,
+    pursuerSpeedIndex,
+    pursuerHeadingMean,
+    pursuerHeadingVar,
+    pursuerSpeedMean,
+    pursuerSpeedVar,
+):
+    pursuerSpeedstd = jnp.sqrt(pursuerSpeedVar)
+    pursuerHeadingstd = jnp.sqrt(pursuerHeadingVar)
+    i = pursuerHeadingIndex
+    j = pursuerSpeedIndex
+    pursuerSpeedNormalizedLowerBound = (
+        pursuerSpeedBounds[j] - pursuerSpeedMean
+    ) / pursuerSpeedstd
+    pursuerSpeedNormalizedUpperBound = (
+        pursuerSpeedBounds[j + 1] - pursuerSpeedMean
+    ) / pursuerSpeedstd
+    pursuerHeadingNormalizedLowerBound = (
+        pursuerHeadingBounds[i] - pursuerHeadingMean
+    ) / pursuerHeadingstd
+    pursuerHeadingNormalizedUpperBound = (
+        pursuerHeadingBounds[i + 1] - pursuerHeadingMean
+    ) / pursuerHeadingstd
+    # Compute the probability of the region
+    # This is the product of the two independent normal distributions
+    return (
+        jax.scipy.stats.norm.cdf(pursuerSpeedNormalizedUpperBound)
+        - jax.scipy.stats.norm.cdf(pursuerSpeedNormalizedLowerBound)
+    ) * (
+        jax.scipy.stats.norm.cdf(pursuerHeadingNormalizedUpperBound)
+        - jax.scipy.stats.norm.cdf(pursuerHeadingNormalizedLowerBound)
+    )
+
+
+# vectorize compute_region_weight
+compute_region_weight_vmap = jax.vmap(
+    compute_region_weight, in_axes=(None, None, 0, 0, None, None, None, None)
+)
+
+
+def piecewise_linear_dubins_PEZ_single_heading_and_speed(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    numBoundingPoints = 11
+    maxPursuerHeading = pursuerHeading + 3 * jnp.sqrt(pursuerHeadingVar)
+    minPursuerHeading = pursuerHeading - 3 * jnp.sqrt(pursuerHeadingVar)
+    maxPursuerSpeed = pursuerSpeed + 3 * jnp.sqrt(pursuerSpeedVar)
+    minPursuerSpeed = pursuerSpeed - 3 * jnp.sqrt(pursuerSpeedVar)
+
+    boundingPursuerHeading = jnp.linspace(
+        minPursuerHeading, maxPursuerHeading, numBoundingPoints
+    )
+    boundingPursuerSpeed = jnp.linspace(
+        minPursuerSpeed, maxPursuerSpeed, numBoundingPoints
+    )
+    linearizationPursuerHeadings = (
+        boundingPursuerHeading[:-1] + boundingPursuerHeading[1:]
+    ) / 2.0
+    linearizationPursuerSpeeds = (
+        boundingPursuerSpeed[:-1] + boundingPursuerSpeed[1:]
+    ) / 2.0
+
+    # create meash grid of indices
+    pursuerHeadingIndices = jnp.arange(len(linearizationPursuerHeadings))
+    pursuerSpeedIndices = jnp.arange(len(linearizationPursuerSpeeds))
+    pursuerHeadingIndices, pursuerSpeedIndices = jnp.meshgrid(
+        pursuerHeadingIndices, pursuerSpeedIndices
+    )
+    pursuerHeadingIndices = pursuerHeadingIndices.ravel()
+    pursuerSpeedIndices = pursuerSpeedIndices.ravel()
+    pursuerHeadingSlopes, pursuerSpeedSlopes, intercepts = (
+        create_linear_model_heading_and_speed_vmap(
+            evaderPositions,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            linearizationPursuerHeadings,
+            linearizationPursuerSpeeds,
+            minimumTurnRadius,
+            pursuerRange,
+            captureRadius,
+            pursuerHeadingIndices,
+            pursuerSpeedIndices,
+        )
+    )
+    weights = compute_region_weight_vmap(
+        boundingPursuerHeading,
+        boundingPursuerSpeed,
+        pursuerHeadingIndices,
+        pursuerSpeedIndices,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+    )
+    # mean of ez function
+    mean = (
+        pursuerHeadingSlopes * pursuerHeading
+        + pursuerSpeedSlopes * pursuerSpeed
+        + intercepts
+    )
+    # variance of ez function
+    var = (
+        pursuerHeadingSlopes**2 * pursuerHeadingVar
+        + pursuerSpeedSlopes**2 * pursuerSpeedVar
+    )
+    # cdf of ez function
+    probs = jax.scipy.stats.norm.cdf(0.0 - mean / jnp.sqrt(var))
+    return jnp.sum(probs * weights), 0, 0, 0
+
+
+piecewise_linear_dubins_pez_heading_and_speed = jax.jit(
+    jax.vmap(
+        piecewise_linear_dubins_PEZ_single_heading_and_speed,
+        in_axes=(
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+)
+
+
 def evaluate_linear_model(a, b, bounds, numSamples):
     x = jnp.linspace(bounds[0], bounds[1], numSamples)
     return a * x + b
@@ -1965,7 +2181,7 @@ def test_piecewise_linear_plot(
 ):
     evaderPosition = evaderPosition.flatten()
     evaderHeading = evaderHeading[0]
-    prob, slopes, intercepts, bounds = piecewise_linear_dubins_PEZ_single(
+    prob, slopes, intercepts, bounds = piecewise_linear_dubins_PEZ_single_heading_only(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -2313,7 +2529,7 @@ def plot_dubins_PEZ(
         Y = Y.flatten()
         evaderHeadings = np.ones_like(X) * evaderHeading
         start = time.time()
-        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_only(
+        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_and_speed(
             jnp.array([X, Y]).T,
             evaderHeadings,
             evaderSpeed,
@@ -2541,7 +2757,7 @@ def plot_dubins_PEZ_diff(
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
     elif usePiecewiseLinear:
         print("Piecewise Linear")
-        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_only(
+        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_and_speed(
             points,
             evaderHeadings,
             evaderSpeed,
@@ -3307,7 +3523,7 @@ def main():
     pursuerHeadingVar = 0.2
 
     pursuerSpeed = 2.0
-    pursuerSpeedVar = 0.0
+    pursuerSpeedVar = 0.3
 
     pursuerRange = 1.0
     pursuerRangeVar = 0.0
@@ -3324,24 +3540,23 @@ def main():
     evaderPosition = np.array([[-0.25, 0.35]])
     # evaderPosition = np.array([[0.7487437185929648, 0.04522613065326636]])
     # evaderPosition = np.array([[0.205, -0.89]])
-    print("evader position", evaderPosition)
 
-    compare_distribution(
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        pursuerRange,
-        pursuerRangeVar,
-        captureRadius,
-    )
+    # compare_distribution(
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     captureRadius,
+    # )
     plot_all_error(
         pursuerPosition,
         pursuerPositionCov,
