@@ -1,3 +1,4 @@
+from jax.lax import with_sharding_constraint
 import numpy as np
 
 import jax.numpy as jnp
@@ -2051,7 +2052,174 @@ compute_region_weight_vmap = jax.vmap(
 )
 
 
-def piecewise_linear_dubins_PEZ_single_heading_and_speed(
+def piecewise_linear_dubins_PEZ_single_heading_and_speed_gmm(
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerHeadingVar,
+    boundingPursuerHeading,
+    linearizationPursuerHeadings,
+    pursuerHeadingIndices,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    boundingPursuerSpeed,
+    linearizationPursuerSpeeds,
+    pursuerSpeedIndices,
+    minimumTurnRadius,
+    pursuerRange,
+    captureRadius,
+    weights,
+):
+    pursuerHeadingSlopes, pursuerSpeedSlopes, intercepts = (
+        create_linear_model_heading_and_speed_vmap(
+            evaderPosition,
+            evaderHeading,
+            evaderSpeed,
+            pursuerPosition,
+            linearizationPursuerHeadings,
+            linearizationPursuerSpeeds,
+            minimumTurnRadius,
+            pursuerRange,
+            captureRadius,
+            pursuerHeadingIndices,
+            pursuerSpeedIndices,
+        )
+    )
+
+    # mean of ez function
+    mean = (
+        pursuerHeadingSlopes * pursuerHeading
+        + pursuerSpeedSlopes * pursuerSpeed
+        + intercepts
+    )
+    # variance of ez function
+    var = (
+        pursuerHeadingSlopes**2 * pursuerHeadingVar
+        + pursuerSpeedSlopes**2 * pursuerSpeedVar
+    )
+    # cdf of ez function
+    probs = jax.scipy.stats.norm.cdf(0.0 - mean / jnp.sqrt(var))
+    return jnp.sum(probs * weights), 0, 0, 0
+
+
+piecewise_linear_dubins_PEZ_single_heading_and_speed_gmm_vmap = jax.vmap(
+    piecewise_linear_dubins_PEZ_single_heading_and_speed_gmm,
+    in_axes=(
+        0,
+        0,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ),
+)
+
+
+@jax.jit
+def piecewise_linear_dubins_pez_heading_and_speed(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    numBoundingPoints = 21
+    maxPursuerHeading = pursuerHeading + 3 * jnp.sqrt(pursuerHeadingVar)
+    minPursuerHeading = pursuerHeading - 3 * jnp.sqrt(pursuerHeadingVar)
+    maxPursuerSpeed = pursuerSpeed + 3 * jnp.sqrt(pursuerSpeedVar)
+    minPursuerSpeed = pursuerSpeed - 3 * jnp.sqrt(pursuerSpeedVar)
+
+    boundingPursuerHeading = jnp.linspace(
+        minPursuerHeading, maxPursuerHeading, numBoundingPoints
+    )
+    boundingPursuerSpeed = jnp.linspace(
+        minPursuerSpeed, maxPursuerSpeed, numBoundingPoints
+    )
+    linearizationPursuerHeadings = (
+        boundingPursuerHeading[:-1] + boundingPursuerHeading[1:]
+    ) / 2.0
+    linearizationPursuerSpeeds = (
+        boundingPursuerSpeed[:-1] + boundingPursuerSpeed[1:]
+    ) / 2.0
+
+    # create meash grid of indices
+    pursuerHeadingIndices = jnp.arange(len(linearizationPursuerHeadings))
+    pursuerSpeedIndices = jnp.arange(len(linearizationPursuerSpeeds))
+    pursuerHeadingIndices, pursuerSpeedIndices = jnp.meshgrid(
+        pursuerHeadingIndices, pursuerSpeedIndices
+    )
+    pursuerHeadingIndices = pursuerHeadingIndices.ravel()
+    pursuerSpeedIndices = pursuerSpeedIndices.ravel()
+    weights = compute_region_weight_vmap(
+        boundingPursuerHeading,
+        boundingPursuerSpeed,
+        pursuerHeadingIndices,
+        pursuerSpeedIndices,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+    )
+    prob, slopes, intercepts, bounds = (
+        piecewise_linear_dubins_PEZ_single_heading_and_speed_gmm_vmap(
+            evaderPositions,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerHeading,
+            pursuerHeadingVar,
+            boundingPursuerHeading,
+            linearizationPursuerHeadings,
+            pursuerHeadingIndices,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            boundingPursuerSpeed,
+            linearizationPursuerSpeeds,
+            pursuerSpeedIndices,
+            minimumTurnRadius,
+            pursuerRange,
+            captureRadius,
+            weights,
+        )
+    )
+    return prob, slopes, intercepts, bounds
+
+
+def compute_peicewise_approximate_pdf(
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerHeadingEdges,
+    pursuerSpeedEdges,
+    slopes,
+    intercepts,
+):
+    pass
+
+
+def piecewise_linear_dubins_PEZ_single_heading_and_speed_pddf(
     evaderPositions,
     evaderHeadings,
     evaderSpeed,
@@ -2109,35 +2277,11 @@ def piecewise_linear_dubins_PEZ_single_heading_and_speed(
             pursuerSpeedIndices,
         )
     )
-    weights = compute_region_weight_vmap(
-        boundingPursuerHeading,
-        boundingPursuerSpeed,
-        pursuerHeadingIndices,
-        pursuerSpeedIndices,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-    )
-    # mean of ez function
-    mean = (
-        pursuerHeadingSlopes * pursuerHeading
-        + pursuerSpeedSlopes * pursuerSpeed
-        + intercepts
-    )
-    # variance of ez function
-    var = (
-        pursuerHeadingSlopes**2 * pursuerHeadingVar
-        + pursuerSpeedSlopes**2 * pursuerSpeedVar
-    )
-    # cdf of ez function
-    probs = jax.scipy.stats.norm.cdf(0.0 - mean / jnp.sqrt(var))
-    return jnp.sum(probs * weights), 0, 0, 0
 
 
-piecewise_linear_dubins_pez_heading_and_speed = jax.jit(
+piecewise_linear_dubins_pez_heading_and_speed_pddf = jax.jit(
     jax.vmap(
-        piecewise_linear_dubins_PEZ_single_heading_and_speed,
+        piecewise_linear_dubins_PEZ_single_heading_and_speed_pddf,
         in_axes=(
             0,
             0,
