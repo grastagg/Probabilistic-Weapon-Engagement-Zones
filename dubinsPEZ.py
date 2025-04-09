@@ -2208,18 +2208,171 @@ def piecewise_linear_dubins_pez_heading_and_speed(
     return prob, slopes, intercepts, bounds
 
 
+def insert_n_between_elements(arr, n):
+    # Create a (m-1) x (n+2) array where each row is a linspace between consecutive elements
+    expanded = jnp.linspace(arr[:-1], arr[1:], n + 2, axis=1)
+
+    # Flatten and remove repeated values at segment boundaries
+    result = expanded[:, :-1].ravel()
+
+    # Append the last element of the original array
+    return jnp.append(result, arr[-1])
+
+
+def norm_logpdf(x, mean=0.0, std=1.0):
+    var = std**2
+    return -0.5 * (jnp.log(2 * jnp.pi * var) + ((x - mean) ** 2) / var)
+
+
+def independent_gaussian_logpdf(x, mean, std):
+    return jnp.sum(norm_logpdf(x, mean, std), axis=-1)
+
+
+def independent_gaussian_pdf(x, mean, std):
+    return jnp.exp(independent_gaussian_logpdf(x, mean, std))
+
+
+def compute_average_pdf_single(
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerHeadingGrid,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    pursuerSpeedGrid,
+    pursuerHeadingIndex,
+    pursuerSpeedIndex,
+):
+    # Standard deviations
+    heading_std = jnp.sqrt(pursuerHeadingVar)
+    speed_std = jnp.sqrt(pursuerSpeedVar)
+
+    # Grid corners
+    h0 = pursuerHeadingGrid[pursuerHeadingIndex]
+    h1 = pursuerHeadingGrid[pursuerHeadingIndex + 1]
+    s0 = pursuerSpeedGrid[pursuerSpeedIndex]
+    s1 = pursuerSpeedGrid[pursuerSpeedIndex + 1]
+
+    # Evaluate 1D PDFs at each coordinate
+    h_pdf_0 = jax.scipy.stats.norm.pdf(h0, pursuerHeading, heading_std)
+    h_pdf_1 = jax.scipy.stats.norm.pdf(h1, pursuerHeading, heading_std)
+    s_pdf_0 = jax.scipy.stats.norm.pdf(s0, pursuerSpeed, speed_std)
+    s_pdf_1 = jax.scipy.stats.norm.pdf(s1, pursuerSpeed, speed_std)
+
+    # Compute 2D PDF at four corners
+    p00 = h_pdf_0 * s_pdf_0  # (h0, s0)
+    p01 = h_pdf_0 * s_pdf_1  # (h0, s1)
+    p10 = h_pdf_1 * s_pdf_0  # (h1, s0)
+    p11 = h_pdf_1 * s_pdf_1  # (h1, s1)
+
+    # Average PDF over the cell
+    average_pdf = (p00 + p01 + p10 + p11) / 4.0
+    return average_pdf
+
+
+compute_average_pdf = jax.jit(
+    jax.vmap(
+        compute_average_pdf_single, in_axes=(None, None, None, None, None, None, 0, 0)
+    )
+)
+
+
+def compute_probability_mass_in_cell_single(
+    pursuerHeadingGridCenters,
+    pursuerSpeedGridCenters,
+    peicewiseAveragePdf,
+    pursuerHeadingGridIndex,
+    pursuerSpeedGridIndex,
+    pursuerHeadingSlopes,
+    pursuerSpeedSlopes,
+    intercepts,
+    linearizationPursuerHeadingIndecies,
+    linearizationPursuerSpeedIndecies,
+    numSubdivisions,
+    cellArea,
+):
+    linearizationPursuerHeadingIndex = pursuerHeadingGridIndex // numSubdivisions
+    linearizationPursuerSpeedIndex = pursuerSpeedGridIndex // numSubdivisions
+    pursuerHeadingSlope = pursuerHeadingSlopes[
+        linearizationPursuerHeadingIndex, linearizationPursuerSpeedIndex
+    ]
+    pursuerSpeedSlope = pursuerSpeedSlopes[
+        linearizationPursuerHeadingIndex, linearizationPursuerSpeedIndex
+    ]
+    intercept = intercepts[
+        linearizationPursuerHeadingIndex, linearizationPursuerSpeedIndex
+    ]
+    z = (
+        pursuerHeadingSlope * pursuerHeadingGridCenters[pursuerHeadingGridIndex]
+        + pursuerSpeedSlope * pursuerSpeedGridCenters[pursuerSpeedGridIndex]
+        + intercept
+    )
+
+    probmass = jnp.where(
+        z < 0,
+        peicewiseAveragePdf[pursuerHeadingGridIndex, pursuerSpeedGridIndex] * cellArea,
+        0.0,
+    )
+    return probmass
+
+
+compute_probability_mass_in_cell = jax.jit(
+    jax.vmap(
+        compute_probability_mass_in_cell_single,
+        in_axes=(None, None, None, 0, 0, None, None, None, None, None, None, None),
+    )
+)
+
+
 def compute_peicewise_approximate_pdf(
     pursuerHeading,
     pursuerHeadingVar,
-    pursuerHeadingEdges,
-    pursuerSpeedEdges,
-    slopes,
-    intercepts,
+    boundingPursuerHeading,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    boundingPursuerSpeed,
+    numSubdivisions,
 ):
-    pass
+    # create list of headings filling in boundingpursuerheading
+    pursuerHeadingGrid = insert_n_between_elements(
+        boundingPursuerHeading, numSubdivisions
+    )
+    # create list of speeds filling in boundingpursuerspeed
+    pursuerSpeedGrid = insert_n_between_elements(boundingPursuerSpeed, numSubdivisions)
+    pursuerHeadingGridCenters = (pursuerHeadingGrid[:-1] + pursuerHeadingGrid[1:]) / 2.0
+    pursuerSpeedGridCenters = (pursuerSpeedGrid[:-1] + pursuerSpeedGrid[1:]) / 2.0
+    cellArea = (pursuerHeadingGrid[1] - pursuerHeadingGrid[0]) * (
+        pursuerSpeedGrid[1] - pursuerSpeedGrid[0]
+    )
+    pursuerHeadingGridIndices = jnp.arange(len(pursuerHeadingGridCenters))
+    pursuerSpeedGridIndices = jnp.arange(len(pursuerSpeedGridCenters))
+    pursuerHeadingGridIndices, pursuerSpeedGridIndices = jnp.meshgrid(
+        pursuerHeadingGridIndices, pursuerSpeedGridIndices
+    )
+
+    pursuerHeadingGridIndices = pursuerHeadingGridIndices.ravel()
+    pursuerSpeedGridIndices = pursuerSpeedGridIndices.ravel()
+    # compute the average pdf over the grid
+    peicewiseAveragePdf = compute_average_pdf(
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerHeadingGrid,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        pursuerSpeedGrid,
+        pursuerHeadingGridIndices,
+        pursuerSpeedGridIndices,
+    )
+    return (
+        peicewiseAveragePdf,
+        pursuerHeadingGridCenters,
+        pursuerHeadingGridIndices,
+        pursuerSpeedGridCenters,
+        pursuerSpeedGridIndices,
+        cellArea,
+    )
 
 
-def piecewise_linear_dubins_PEZ_single_heading_and_speed_pddf(
+def piecewise_linear_dubins_pez_heading_and_speed_pddf_single(
     evaderPositions,
     evaderHeadings,
     evaderSpeed,
@@ -2235,7 +2388,8 @@ def piecewise_linear_dubins_PEZ_single_heading_and_speed_pddf(
     pursuerRangeVar,
     captureRadius,
 ):
-    numBoundingPoints = 11
+    numBoundingPoints = 50
+    numSubdivisions = 10
     maxPursuerHeading = pursuerHeading + 3 * jnp.sqrt(pursuerHeadingVar)
     minPursuerHeading = pursuerHeading - 3 * jnp.sqrt(pursuerHeadingVar)
     maxPursuerSpeed = pursuerSpeed + 3 * jnp.sqrt(pursuerSpeedVar)
@@ -2260,6 +2414,7 @@ def piecewise_linear_dubins_PEZ_single_heading_and_speed_pddf(
     pursuerHeadingIndices, pursuerSpeedIndices = jnp.meshgrid(
         pursuerHeadingIndices, pursuerSpeedIndices
     )
+
     pursuerHeadingIndices = pursuerHeadingIndices.ravel()
     pursuerSpeedIndices = pursuerSpeedIndices.ravel()
     pursuerHeadingSlopes, pursuerSpeedSlopes, intercepts = (
@@ -2278,10 +2433,83 @@ def piecewise_linear_dubins_PEZ_single_heading_and_speed_pddf(
         )
     )
 
+    pursuerHeadingSlopes = pursuerHeadingSlopes.flatten()
+    pursuerSpeedSlopes = pursuerSpeedSlopes.flatten()
+    intercepts = intercepts.flatten()
+    pursuerHeadingSlopes = pursuerHeadingSlopes.reshape(
+        numBoundingPoints - 1, numBoundingPoints - 1
+    )
+    pursuerSpeedSlopes = pursuerSpeedSlopes.reshape(
+        numBoundingPoints - 1, numBoundingPoints - 1
+    )
+    intercepts = intercepts.reshape(numBoundingPoints - 1, numBoundingPoints - 1)
+
+    # compute the average pdf over the grid
+    (
+        peicewiseAveragePdf,
+        pursuerHeadingGrid,
+        pursuerHeadingGridIndices,
+        pursuerSpeedGrid,
+        pursuerSpeedGridIndices,
+        cellArea,
+    ) = compute_peicewise_approximate_pdf(
+        pursuerHeading,
+        pursuerHeadingVar,
+        boundingPursuerHeading,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        boundingPursuerSpeed,
+        numSubdivisions,
+    )
+    numGrid = len(pursuerHeadingGrid)
+    peicewiseAveragePdf = peicewiseAveragePdf.reshape(numGrid, numGrid)
+
+    probMass = compute_probability_mass_in_cell(
+        pursuerHeadingGrid,
+        pursuerSpeedGrid,
+        peicewiseAveragePdf,
+        pursuerHeadingGridIndices,
+        pursuerSpeedGridIndices,
+        pursuerHeadingSlopes,
+        pursuerSpeedSlopes,
+        intercepts,
+        pursuerHeadingIndices,
+        pursuerSpeedIndices,
+        numSubdivisions,
+        cellArea,
+    )
+    totalProbMass = jnp.sum(probMass)
+    return totalProbMass, 0, 0, 0
+
+    # plot peicewise pdf
+    # fig, ax = plt.subplots()
+    # pursuerHeadingGridPlot = pursuerHeadingGrid[pursuerHeadingGridIndices].reshape(
+    #     numGrid, numGrid
+    # )
+    # pursuerSpeedGridPlot = pursuerSpeedGrid[pursuerSpeedGridIndices].reshape(
+    #     numGrid, numGrid
+    # )
+    # peicewiseAveragePdfPlot = peicewiseAveragePdf.reshape(numGrid, numGrid)
+    # ax.pcolormesh(pursuerHeadingGridPlot, pursuerSpeedGridPlot, peicewiseAveragePdfPlot)
+    # ax.set_aspect("equal")
+    # # plot boxes for boundingPursuerHeading and boundingPursuerSpeed
+    # for i in range(len(boundingPursuerHeading)):
+    #     ax.plot(
+    #         [boundingPursuerHeading[i], boundingPursuerHeading[i]],
+    #         [boundingPursuerSpeed[0], boundingPursuerSpeed[-1]],
+    #         color="red",
+    #     )
+    # for i in range(len(boundingPursuerSpeed)):
+    #     ax.plot(
+    #         [boundingPursuerHeading[0], boundingPursuerHeading[-1]],
+    #         [boundingPursuerSpeed[i], boundingPursuerSpeed[i]],
+    #         color="red",
+    #     )
+
 
 piecewise_linear_dubins_pez_heading_and_speed_pddf = jax.jit(
     jax.vmap(
-        piecewise_linear_dubins_PEZ_single_heading_and_speed_pddf,
+        piecewise_linear_dubins_pez_heading_and_speed_pddf_single,
         in_axes=(
             0,
             0,
@@ -2673,7 +2901,7 @@ def plot_dubins_PEZ(
         Y = Y.flatten()
         evaderHeadings = np.ones_like(X) * evaderHeading
         start = time.time()
-        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_and_speed(
+        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_and_speed_pddf(
             jnp.array([X, Y]).T,
             evaderHeadings,
             evaderSpeed,
@@ -2901,7 +3129,9 @@ def plot_dubins_PEZ_diff(
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
     elif usePiecewiseLinear:
         print("Piecewise Linear")
-        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_and_speed(
+        print("points", points.shape)
+        print("evaderHeadings", evaderHeadings.shape)
+        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_and_speed_pddf(
             points,
             evaderHeadings,
             evaderSpeed,
@@ -3731,23 +3961,39 @@ def main():
         evaderHeading,
         evaderSpeed,
     )
-    compare_PEZ(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-    )
+    # compare_PEZ(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    # )
 
     # test_piecewise_linear_plot(
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     captureRadius,
+    # )
+    # piecewise_linear_dubins_pez_heading_and_speed_pddf(
     #     evaderPosition,
     #     evaderHeading,
     #     evaderSpeed,
