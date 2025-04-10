@@ -2388,7 +2388,7 @@ def piecewise_linear_dubins_pez_heading_and_speed_pddf_single(
     pursuerRangeVar,
     captureRadius,
 ):
-    numBoundingPoints = 25
+    numBoundingPoints = 20
     numSubdivisions = 50
     maxPursuerHeading = pursuerHeading + 3 * jnp.sqrt(pursuerHeadingVar)
     minPursuerHeading = pursuerHeading - 3 * jnp.sqrt(pursuerHeadingVar)
@@ -2558,14 +2558,9 @@ piecewise_linear_dubins_pez_heading_and_speed_pddf = jax.jit(
 )
 
 
-def evaluate_linear_model(a, b, bounds, numSamples):
-    x = jnp.linspace(bounds[0], bounds[1], numSamples)
-    return a * x + b
-
-
-def test_piecewise_linear_plot(
-    evaderPosition,
-    evaderHeading,
+def piecewise_linear_dubins_pez_heading_and_speed_pddf_single(
+    evaderPositions,
+    evaderHeadings,
     evaderSpeed,
     pursuerPosition,
     pursuerPositionCov,
@@ -2579,398 +2574,151 @@ def test_piecewise_linear_plot(
     pursuerRangeVar,
     captureRadius,
 ):
-    evaderPosition = evaderPosition.flatten()
-    evaderHeading = evaderHeading[0]
-    prob, slopes, intercepts, bounds = piecewise_linear_dubins_PEZ_single_heading_only(
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-        pursuerPosition,
-        pursuerPositionCov,
+    numBoundingPoints = 25
+    numSubdivisions = 50
+    maxPursuerHeading = pursuerHeading + 3 * jnp.sqrt(pursuerHeadingVar)
+    minPursuerHeading = pursuerHeading - 3 * jnp.sqrt(pursuerHeadingVar)
+    maxPursuerSpeed = pursuerSpeed + 3 * jnp.sqrt(pursuerSpeedVar)
+    minPursuerSpeed = pursuerSpeed - 3 * jnp.sqrt(pursuerSpeedVar)
+
+    boundingPursuerHeading = jnp.linspace(
+        minPursuerHeading, maxPursuerHeading, numBoundingPoints
+    )
+    boundingPursuerSpeed = jnp.linspace(
+        minPursuerSpeed, maxPursuerSpeed, numBoundingPoints
+    )
+    linearizationPursuerHeadings = (
+        boundingPursuerHeading[:-1] + boundingPursuerHeading[1:]
+    ) / 2.0
+    linearizationPursuerSpeeds = (
+        boundingPursuerSpeed[:-1] + boundingPursuerSpeed[1:]
+    ) / 2.0
+
+    # create meash grid of indices
+    pursuerHeadingIndices = jnp.arange(len(linearizationPursuerHeadings))
+    pursuerSpeedIndices = jnp.arange(len(linearizationPursuerSpeeds))
+    pursuerHeadingIndices, pursuerSpeedIndices = jnp.meshgrid(
+        pursuerHeadingIndices, pursuerSpeedIndices
+    )
+
+    pursuerHeadingIndices = pursuerHeadingIndices.ravel()
+    pursuerSpeedIndices = pursuerSpeedIndices.ravel()
+    pursuerHeadingSlopes, pursuerSpeedSlopes, intercepts = (
+        create_linear_model_heading_and_speed_vmap(
+            evaderPositions,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            linearizationPursuerHeadings,
+            linearizationPursuerSpeeds,
+            minimumTurnRadius,
+            pursuerRange,
+            captureRadius,
+            pursuerHeadingIndices,
+            pursuerSpeedIndices,
+        )
+    )
+
+    pursuerHeadingSlopes = pursuerHeadingSlopes.flatten()
+    pursuerSpeedSlopes = pursuerSpeedSlopes.flatten()
+    intercepts = intercepts.flatten()
+    pursuerHeadingSlopes = pursuerHeadingSlopes.reshape(
+        numBoundingPoints - 1, numBoundingPoints - 1
+    )
+    pursuerSpeedSlopes = pursuerSpeedSlopes.reshape(
+        numBoundingPoints - 1, numBoundingPoints - 1
+    )
+    intercepts = intercepts.reshape(numBoundingPoints - 1, numBoundingPoints - 1)
+
+    # compute the average pdf over the grid
+    (
+        peicewiseAveragePdf,
+        pursuerHeadingGrid,
+        pursuerHeadingGridIndices,
+        pursuerSpeedGrid,
+        pursuerSpeedGridIndices,
+        cellArea,
+    ) = compute_peicewise_approximate_pdf(
         pursuerHeading,
         pursuerHeadingVar,
+        boundingPursuerHeading,
         pursuerSpeed,
         pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        pursuerRange,
-        pursuerRangeVar,
-        captureRadius,
+        boundingPursuerSpeed,
+        numSubdivisions,
     )
-    minHeading = pursuerHeading - 3 * jnp.sqrt(pursuerHeadingVar)
-    maxHeading = pursuerHeading + 3 * jnp.sqrt(pursuerHeadingVar)
-    numSamples = 200**2
-    headingSamples = jnp.linspace(minHeading, maxHeading, numSamples).reshape(
-        (numSamples,)
-    )
-    pursuerPositionSamples = jnp.tile(pursuerPosition, (numSamples, 1))
-    turnRadiusSamples = minimumTurnRadius * jnp.ones((numSamples)).reshape(
-        (numSamples,)
-    )
-    pursuerSpeedSamples = pursuerSpeed * jnp.ones((numSamples)).reshape((numSamples,))
-    pursuerRangeSamples = pursuerRange * jnp.ones((numSamples)).reshape((numSamples,))
-    ez = in_dubins_engagement_zone(
-        pursuerPositionSamples,
-        headingSamples,
-        turnRadiusSamples,
-        captureRadius,
-        pursuerRangeSamples,
-        pursuerSpeedSamples,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-    )
-    fig2, ax2 = plt.subplots()
+    numGrid = len(pursuerHeadingGrid)
+    peicewiseAveragePdf = peicewiseAveragePdf.reshape(numGrid, numGrid)
 
-    for i in range(len(slopes)):
-        a = slopes[i]
-        b = intercepts[i]
-        bound = (bounds[i], bounds[i + 1])
-        y = evaluate_linear_model(a, b, bound, numSamples)
-        ax2.plot(
-            jnp.linspace(bound[0], bound[1], numSamples),
-            y,
-            label="Piecewise Linear Model",
-        )
-
-    ax2.scatter(headingSamples, ez, c="blue", label="EZ")
-
-    fig3, ax3 = plt.subplots()
-    pursuerHeadingSamples = pursuerHeading * jnp.ones((numSamples)).reshape(
-        (numSamples,)
+    probMass, z = compute_probability_mass_in_cell(
+        pursuerHeadingGrid,
+        pursuerSpeedGrid,
+        peicewiseAveragePdf,
+        pursuerHeadingGridIndices,
+        pursuerSpeedGridIndices,
+        pursuerHeadingSlopes,
+        pursuerSpeedSlopes,
+        intercepts,
+        pursuerHeadingIndices,
+        pursuerSpeedIndices,
+        numSubdivisions,
+        cellArea,
     )
-    minPursuerSpeed = pursuerSpeed - 3 * jnp.sqrt(pursuerSpeedVar)
-    maxPursuerSpeed = pursuerSpeed + 3 * jnp.sqrt(pursuerSpeedVar)
-    pursuerSpeedSamples = jnp.linspace(minPursuerSpeed, maxPursuerSpeed, numSamples)
-    ez = in_dubins_engagement_zone(
-        pursuerPositionSamples,
-        pursuerHeadingSamples,
-        turnRadiusSamples,
-        captureRadius,
-        pursuerRangeSamples,
-        pursuerSpeedSamples,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-    )
-    ax3.scatter(pursuerSpeedSamples, ez, c="blue", label="EZ")
+    totalProbMass = jnp.sum(probMass)
 
-    fig4, ax4 = plt.subplots()
-    sqrtNumSamples = int(np.sqrt(numSamples))
-    pursuerHeadingSamples = jnp.linspace(
-        minHeading, maxHeading, int(np.sqrt(numSamples))
-    )
-    pursuerSpeedSamples = jnp.linspace(
-        minPursuerSpeed, maxPursuerSpeed, int(np.sqrt(numSamples))
-    )
-    print("pursuerHeadingSamples.shape", pursuerHeadingSamples.shape)
-    print("pursuerSpeedSamples.shape", pursuerSpeedSamples.shape)
-    [pursuerHeadingSamples, pursuerSpeedSamples] = jnp.meshgrid(
-        pursuerHeadingSamples, pursuerSpeedSamples
-    )
-    print("pursuerHeadingSamples.shape", pursuerHeadingSamples.shape)
-    print("pursuerSpeedSamples.shape", pursuerSpeedSamples.shape)
-    ez = in_dubins_engagement_zone(
-        pursuerPositionSamples,
-        pursuerHeadingSamples.ravel(),
-        turnRadiusSamples,
-        captureRadius,
-        pursuerRangeSamples,
-        pursuerSpeedSamples.ravel(),
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-    )
-    ez = ez.reshape(sqrtNumSamples, sqrtNumSamples)
-    pursuerHeadingSamples = pursuerHeadingSamples.reshape(
-        sqrtNumSamples, sqrtNumSamples
-    )
-    pursuerSpeedSamples = pursuerSpeedSamples.reshape(sqrtNumSamples, sqrtNumSamples)
-    ax4.pcolormesh(pursuerHeadingSamples, pursuerSpeedSamples, ez)
-    ax4.set_xlabel("Pursuer Heading")
-    ax4.set_ylabel("Pursuer Speed")
-
-
-def plot_dubins_PEZ(
-    pursuerPosition,
-    pursuerPositionCov,
-    pursuerHeading,
-    pursuerHeadindgVar,
-    pursuerSpeed,
-    pursuerSpeedVar,
-    minimumTurnRadius,
-    minimumTurnRadiusVar,
-    captureRadius,
-    pursuerRange,
-    pursuerRangeVar,
-    evaderHeading,
-    evaderSpeed,
-    ax,
-    useLinear=False,
-    useUnscented=False,
-    useQuadratic=False,
-    useMC=False,
-    useEdgeworth=False,
-    useCubic=False,
-    useCombinedLinear=False,
-    useCombinedQuadratic=False,
-    usePiecewiseLinear=False,
-):
-    numPoints = 200
-    if useLinear:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
-        start = time.time()
-        ZTrue, _, _ = linear_dubins_pez(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        print("linear_dubins_pez time", time.time() - start)
-        ax.set_title("Linear Dubins PEZ", fontsize=20)
-    elif useUnscented:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
-        ZTrue, _, _ = uncented_dubins_pez(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Unscented Dubins PEZ")
-    elif useMC:
-        rangeX = 2.0
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
-        start = time.time()
-        ZTrue, _, _, _, _, _, _ = mc_dubins_PEZ(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        print("mc_dubins_PEZ time", time.time() - start)
-        ax.set_title("Monte Carlo Dubins PEZ", fontsize=20)
-    elif useQuadratic:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
-        ZTrue, _, _ = quadratic_dubins_pez(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Quadratic Dubins PEZ", fontsize=20)
-    elif useEdgeworth:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
-        ZTrue, _, _, _ = second_order_taylor_expansion_edgeworth_dubins_PEZ(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-    elif useCubic:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
-        ZTrue, _, _ = cubic_dubins_PEZ(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Cubic Dubins PEZ", fontsize=20)
-    elif useCombinedLinear:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
-        ZTrue = combined_left_right_dubins_PEZ(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Combined Linear Dubins PEZ", fontsize=20)
-    elif useCombinedQuadratic:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
-        ZTrue = combined_left_right_quadratic_dubins_PEZ(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
-    elif usePiecewiseLinear:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
-        start = time.time()
-        ZTrue, _, _, _ = piecewise_linear_dubins_pez_heading_and_speed_pddf(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        print("piecewise_linear_dubins_pez time", time.time() - start)
-        ax.set_title("Piecewise Linear Dubins PEZ", fontsize=20)
-
-    ZTrue = ZTrue.reshape(numPoints, numPoints)
-
-    X = X.reshape(numPoints, numPoints)
-    Y = Y.reshape(numPoints, numPoints)
-    c = ax.contour(
-        X,
-        Y,
-        ZTrue,
-        levels=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-    )
-    plt.clabel(c, inline=True, fontsize=20)
-    # c = ax.pcolormesh(X, Y, ZTrue)
-    # if useUnscented:
-    ax.set_xlabel("X", fontsize=26)
-    ax.set_ylabel("Y", fontsize=26)
-    # set tick size
-    ax.tick_params(axis="both", which="major", labelsize=20)
-
-    # ax.contour(X, Y, ZGeometric, cmap="summer")
-    ax.scatter(*pursuerPosition, c="r")
-    ax.set_aspect("equal", "box")
-    ax.set_aspect("equal", "box")
-    return ZTrue.flatten()
+    # plot peicewise pdf
+    # fig, ax = plt.subplots()
+    # pursuerHeadingGridPlot = pursuerHeadingGrid[pursuerHeadingGridIndices].reshape(
+    #     numGrid, numGrid
+    # )
+    # pursuerSpeedGridPlot = pursuerSpeedGrid[pursuerSpeedGridIndices].reshape(
+    #     numGrid, numGrid
+    # )
+    # peicewiseAveragePdfPlot = peicewiseAveragePdf.reshape(numGrid, numGrid)
+    # ax.pcolormesh(pursuerHeadingGridPlot, pursuerSpeedGridPlot, peicewiseAveragePdfPlot)
+    # ax.set_aspect("equal")
+    # # plot boxes for boundingPursuerHeading and boundingPursuerSpeed
+    # for i in range(len(boundingPursuerHeading)):
+    #     ax.plot(
+    #         [boundingPursuerHeading[i], boundingPursuerHeading[i]],
+    #         [boundingPursuerSpeed[0], boundingPursuerSpeed[-1]],
+    #         color="red",
+    #     )
+    # for i in range(len(boundingPursuerSpeed)):
+    #     ax.plot(
+    #         [boundingPursuerHeading[0], boundingPursuerHeading[-1]],
+    #         [boundingPursuerSpeed[i], boundingPursuerSpeed[i]],
+    #         color="red",
+    #     )
+    # fig2, ax2 = plt.subplots()
+    # ax2.pcolormesh(
+    #     pursuerHeadingGridPlot, pursuerSpeedGridPlot, z.reshape(numGrid, numGrid)
+    # )
+    #
+    # fig3, ax3 = plt.subplots()
+    # sqrtnumgrid = numGrid
+    # numGrid = numGrid**2
+    # pursuerPositionSamples = jnp.tile(pursuerPosition, (numGrid, 1))
+    # pursuerRangeSamples = pursuerRange * jnp.ones((numGrid)).reshape((numGrid,))
+    # turnRadiusSamples = minimumTurnRadius * jnp.ones((numGrid)).reshape((numGrid,))
+    # ez = in_dubins_engagement_zone(
+    #     pursuerPositionSamples,
+    #     pursuerHeadingGridPlot.ravel(),
+    #     turnRadiusSamples,
+    #     captureRadius,
+    #     pursuerRangeSamples,
+    #     pursuerSpeedGridPlot.ravel(),
+    #     evaderPositions,
+    #     evaderHeadings,
+    #     evaderSpeed,
+    # )
+    # ax3.pcolormesh(
+    #     pursuerHeadingGridPlot,
+    #     pursuerSpeedGridPlot,
+    #     ez.reshape(sqrtnumgrid, sqrtnumgrid),
+    # )
+    #
+    return totalProbMass, 0, 0, 0
 
 
 def plot_dubins_PEZ_diff(
