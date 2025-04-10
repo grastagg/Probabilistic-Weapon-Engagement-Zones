@@ -1943,72 +1943,6 @@ piecewise_linear_dubins_pez_heading_only = jax.jit(
 )
 
 
-@jax.jit
-def create_linear_model_heading_and_speed(
-    evaderPositions,
-    evaderHeadings,
-    evaderSpeed,
-    pursuerPosition,
-    pursuerHeadings,
-    pursuerSpeeds,
-    minimumTurnRadius,
-    pursuerRange,
-    captureRadius,
-    pursuerHeadingIndex,
-    pursuerSpeedIndex,
-):
-    pursuerHeading = pursuerHeadings[pursuerHeadingIndex]
-    pursuerSpeed = pursuerSpeeds[pursuerSpeedIndex]
-    dDubinsEZ_dPursuerHeadingValue = dDubinsEZ_dPursuerHeading(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPositions,
-        evaderHeadings,
-        evaderSpeed,
-    )
-    dDubinsEZ_dPursuerSpeedValue = dDubinsEZ_dPursuerSpeed(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPositions,
-        evaderHeadings,
-        evaderSpeed,
-    )
-    val = dubinsEZ.in_dubins_engagement_zone_single(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPositions,
-        evaderHeadings,
-        evaderSpeed,
-    )
-    c = (
-        val
-        - dDubinsEZ_dPursuerHeadingValue * pursuerHeading
-        - dDubinsEZ_dPursuerSpeedValue * pursuerSpeed
-    )
-    a = dDubinsEZ_dPursuerHeadingValue
-    b = dDubinsEZ_dPursuerSpeedValue
-    return a, b, c
-
-
-# vectorize for heading and speed
-create_linear_model_heading_and_speed_vmap = jax.vmap(
-    create_linear_model_heading_and_speed,
-    in_axes=(None, None, None, None, None, None, None, None, None, 0, 0),
-)
-
-
 def compute_region_weight(
     pursuerHeadingBounds,
     pursuerSpeedBounds,
@@ -2208,6 +2142,72 @@ def piecewise_linear_dubins_pez_heading_and_speed(
     return prob, slopes, intercepts, bounds
 
 
+@jax.jit
+def create_linear_model_heading_and_speed(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerHeadings,
+    pursuerSpeeds,
+    minimumTurnRadius,
+    pursuerRange,
+    captureRadius,
+    pursuerHeadingIndex,
+    pursuerSpeedIndex,
+):
+    pursuerHeading = pursuerHeadings[pursuerHeadingIndex]
+    pursuerSpeed = pursuerSpeeds[pursuerSpeedIndex]
+    dDubinsEZ_dPursuerHeadingValue = dDubinsEZ_dPursuerHeading(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    dDubinsEZ_dPursuerSpeedValue = dDubinsEZ_dPursuerSpeed(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    val = dubinsEZ.in_dubins_engagement_zone_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    c = (
+        val
+        - dDubinsEZ_dPursuerHeadingValue * pursuerHeading
+        - dDubinsEZ_dPursuerSpeedValue * pursuerSpeed
+    )
+    a = dDubinsEZ_dPursuerHeadingValue
+    b = dDubinsEZ_dPursuerSpeedValue
+    return a, b, c
+
+
+# vectorize for heading and speed
+create_linear_model_heading_and_speed_vmap = jax.vmap(
+    create_linear_model_heading_and_speed,
+    in_axes=(None, None, None, None, None, None, None, None, None, 0, 0),
+)
+
+
 def insert_n_between_elements(arr, n):
     # Create a (m-1) x (n+2) array where each row is a linspace between consecutive elements
     expanded = jnp.linspace(arr[:-1], arr[1:], n + 2, axis=1)
@@ -2293,13 +2293,13 @@ def compute_probability_mass_in_cell_single(
     linearizationPursuerHeadingIndex = pursuerHeadingGridIndex // numSubdivisions
     linearizationPursuerSpeedIndex = pursuerSpeedGridIndex // numSubdivisions
     pursuerHeadingSlope = pursuerHeadingSlopes[
-        linearizationPursuerHeadingIndex, linearizationPursuerSpeedIndex
+        linearizationPursuerSpeedIndex, linearizationPursuerHeadingIndex
     ]
     pursuerSpeedSlope = pursuerSpeedSlopes[
-        linearizationPursuerHeadingIndex, linearizationPursuerSpeedIndex
+        linearizationPursuerSpeedIndex, linearizationPursuerHeadingIndex
     ]
     intercept = intercepts[
-        linearizationPursuerHeadingIndex, linearizationPursuerSpeedIndex
+        linearizationPursuerSpeedIndex, linearizationPursuerHeadingIndex
     ]
     z = (
         pursuerHeadingSlope * pursuerHeadingGridCenters[pursuerHeadingGridIndex]
@@ -2312,7 +2312,7 @@ def compute_probability_mass_in_cell_single(
         peicewiseAveragePdf[pursuerHeadingGridIndex, pursuerSpeedGridIndex] * cellArea,
         0.0,
     )
-    return probmass
+    return probmass, z
 
 
 compute_probability_mass_in_cell = jax.jit(
@@ -2388,8 +2388,8 @@ def piecewise_linear_dubins_pez_heading_and_speed_pddf_single(
     pursuerRangeVar,
     captureRadius,
 ):
-    numBoundingPoints = 50
-    numSubdivisions = 10
+    numBoundingPoints = 25
+    numSubdivisions = 50
     maxPursuerHeading = pursuerHeading + 3 * jnp.sqrt(pursuerHeadingVar)
     minPursuerHeading = pursuerHeading - 3 * jnp.sqrt(pursuerHeadingVar)
     maxPursuerSpeed = pursuerSpeed + 3 * jnp.sqrt(pursuerSpeedVar)
@@ -2464,7 +2464,7 @@ def piecewise_linear_dubins_pez_heading_and_speed_pddf_single(
     numGrid = len(pursuerHeadingGrid)
     peicewiseAveragePdf = peicewiseAveragePdf.reshape(numGrid, numGrid)
 
-    probMass = compute_probability_mass_in_cell(
+    probMass, z = compute_probability_mass_in_cell(
         pursuerHeadingGrid,
         pursuerSpeedGrid,
         peicewiseAveragePdf,
@@ -2479,7 +2479,6 @@ def piecewise_linear_dubins_pez_heading_and_speed_pddf_single(
         cellArea,
     )
     totalProbMass = jnp.sum(probMass)
-    return totalProbMass, 0, 0, 0
 
     # plot peicewise pdf
     # fig, ax = plt.subplots()
@@ -2505,6 +2504,35 @@ def piecewise_linear_dubins_pez_heading_and_speed_pddf_single(
     #         [boundingPursuerSpeed[i], boundingPursuerSpeed[i]],
     #         color="red",
     #     )
+    # fig2, ax2 = plt.subplots()
+    # ax2.pcolormesh(
+    #     pursuerHeadingGridPlot, pursuerSpeedGridPlot, z.reshape(numGrid, numGrid)
+    # )
+    #
+    # fig3, ax3 = plt.subplots()
+    # sqrtnumgrid = numGrid
+    # numGrid = numGrid**2
+    # pursuerPositionSamples = jnp.tile(pursuerPosition, (numGrid, 1))
+    # pursuerRangeSamples = pursuerRange * jnp.ones((numGrid)).reshape((numGrid,))
+    # turnRadiusSamples = minimumTurnRadius * jnp.ones((numGrid)).reshape((numGrid,))
+    # ez = in_dubins_engagement_zone(
+    #     pursuerPositionSamples,
+    #     pursuerHeadingGridPlot.ravel(),
+    #     turnRadiusSamples,
+    #     captureRadius,
+    #     pursuerRangeSamples,
+    #     pursuerSpeedGridPlot.ravel(),
+    #     evaderPositions,
+    #     evaderHeadings,
+    #     evaderSpeed,
+    # )
+    # ax3.pcolormesh(
+    #     pursuerHeadingGridPlot,
+    #     pursuerSpeedGridPlot,
+    #     ez.reshape(sqrtnumgrid, sqrtnumgrid),
+    # )
+    #
+    return totalProbMass, 0, 0, 0
 
 
 piecewise_linear_dubins_pez_heading_and_speed_pddf = jax.jit(
@@ -3894,7 +3922,7 @@ def main():
     pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
 
     pursuerHeading = (0.0 / 4.0) * np.pi
-    pursuerHeadingVar = 0.2
+    pursuerHeadingVar = 0.5
 
     pursuerSpeed = 2.0
     pursuerSpeedVar = 0.3
@@ -3908,10 +3936,12 @@ def main():
     captureRadius = 0.0
 
     evaderHeading = jnp.array([(0.0 / 20.0) * np.pi])
+    evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
     # evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
 
     evaderSpeed = 0.5
     evaderPosition = np.array([[-0.25, 0.35]])
+    evaderPosition = np.array([-0.25, 0.35])
     # evaderPosition = np.array([[0.7487437185929648, 0.04522613065326636]])
     # evaderPosition = np.array([[0.205, -0.89]])
 
@@ -3993,7 +4023,7 @@ def main():
     #     pursuerRangeVar,
     #     captureRadius,
     # )
-    # piecewise_linear_dubins_pez_heading_and_speed_pddf(
+    # piecewise_linear_dubins_pez_heading_and_speed_pddf_single(
     #     evaderPosition,
     #     evaderHeading,
     #     evaderSpeed,
