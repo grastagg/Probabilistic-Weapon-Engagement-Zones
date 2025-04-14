@@ -3,7 +3,8 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 from matplotlib import patches
-from fast_pursuer import plotEngagementZone, inEngagementZone, inEngagementZoneJax
+
+# from fast_pursuer import plotEngagementZone, inEngagementZone, inEngagementZoneJax
 import jax
 import jax.numpy as jnp
 
@@ -180,171 +181,6 @@ find_dubins_path_length_left_strait_vec = jax.vmap(
 
 
 @jax.jit
-def circle_intersection(c1, c2, r1, r2):
-    x1, y1 = c1
-    x2, y2 = c2
-
-    # Distance between centers
-    d = jnp.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-
-    # Check for no intersection or identical circles
-    no_intersection = (d > r1 + r2) | (d < jnp.abs(r1 - r2)) | (d == 0)
-
-    def no_intersect_case():
-        return jnp.full((2, 2), jnp.inf)  # Return NaN-filled array of shape (2,2)
-
-    def intersect_case():
-        a = (r1**2 - r2**2 + d**2) / (2 * d)
-        h = jnp.sqrt(r1**2 - a**2)
-
-        xm = x1 + a * (x2 - x1) / d
-        ym = y1 + a * (y2 - y1) / d
-
-        x3_1 = xm + h * (y2 - y1) / d
-        y3_1 = ym - h * (x2 - x1) / d
-        x3_2 = xm - h * (y2 - y1) / d
-        y3_2 = ym + h * (x2 - x1) / d
-
-        return jnp.array([[x3_1, y3_1], [x3_2, y3_2]])
-
-    return jax.lax.cond(no_intersection, no_intersect_case, intersect_case)
-
-
-@jax.jit
-def find_dubins_path_length_left_right(
-    startPosition, startHeading, goalPosition, radius
-):
-    centerPoint = jnp.array(
-        [
-            startPosition[0] - radius * jnp.sin(startHeading),
-            startPosition[1] + radius * jnp.cos(startHeading),
-        ]
-    )
-
-    secondTurnCenterPoints = circle_intersection(
-        centerPoint, goalPosition, 2 * radius, radius
-    )
-
-    # Check if no intersection points exist
-    no_intersection = secondTurnCenterPoints.shape[0] == 0
-
-    def nan_case():
-        return jnp.inf, jnp.array([jnp.inf, jnp.inf])
-
-    def valid_case():
-        secondTurnCenterPoint1 = secondTurnCenterPoints[0]
-        secondTurnCenterPoint2 = secondTurnCenterPoints[1]
-
-        tangent1 = (secondTurnCenterPoint1 + centerPoint) / 2
-        tangent2 = (secondTurnCenterPoint2 + centerPoint) / 2
-
-        v4 = startPosition - centerPoint
-
-        theta1 = counterclockwise_angle(v4, tangent1 - centerPoint)
-        theta2 = counterclockwise_angle(v4, tangent2 - centerPoint)
-
-        use_second = theta1 > theta2
-        secondCenterPoint = jax.lax.select(
-            use_second, secondTurnCenterPoint2, secondTurnCenterPoint1
-        )
-        arcDistanceAroundTurn1 = jax.lax.select(use_second, theta2, theta1)
-        tangentPoint = jax.lax.select(use_second, tangent2, tangent1)
-
-        arcDistanceAroundTurn2 = clockwise_angle(
-            tangentPoint - secondCenterPoint, goalPosition - secondCenterPoint
-        )
-
-        length = radius * (arcDistanceAroundTurn1 + arcDistanceAroundTurn2)
-
-        return length, secondCenterPoint
-
-    return jax.lax.cond(no_intersection, nan_case, valid_case)
-
-
-find_dubins_path_length_left_right_vec = jax.vmap(
-    find_dubins_path_length_left_right, in_axes=(None, None, 0, None)
-)
-
-
-@jax.jit
-def find_dubins_path_length_right_left(
-    startPosition, startHeading, goalPosition, radius
-):
-    centerPoint = jnp.array(
-        [
-            startPosition[0] + radius * jnp.sin(startHeading),
-            startPosition[1] - radius * jnp.cos(startHeading),
-        ]
-    )
-
-    secondTurnCenterPoints = circle_intersection(
-        centerPoint, goalPosition, 2 * radius, radius
-    )
-
-    # Check if no intersection points exist
-    no_intersection = secondTurnCenterPoints.shape[0] == 0
-
-    def nan_case():
-        return jnp.inf, jnp.array([jnp.inf, jnp.inf])
-
-    def valid_case():
-        secondTurnCenterPoint1 = secondTurnCenterPoints[0]
-        secondTurnCenterPoint2 = secondTurnCenterPoints[1]
-
-        tangent1 = (secondTurnCenterPoint1 + centerPoint) / 2
-        tangent2 = (secondTurnCenterPoint2 + centerPoint) / 2
-
-        v4 = startPosition - centerPoint
-
-        theta1 = clockwise_angle(v4, tangent1 - centerPoint)
-        theta2 = clockwise_angle(v4, tangent2 - centerPoint)
-
-        use_second = theta1 > theta2
-        secondCenterPoint = jax.lax.select(
-            use_second, secondTurnCenterPoint2, secondTurnCenterPoint1
-        )
-        arcDistanceAroundTurn1 = jax.lax.select(use_second, theta2, theta1)
-        tangentPoint = jax.lax.select(use_second, tangent2, tangent1)
-
-        arcDistanceAroundTurn2 = counterclockwise_angle(
-            tangentPoint - secondCenterPoint, goalPosition - secondCenterPoint
-        )
-
-        length = radius * (arcDistanceAroundTurn1 + arcDistanceAroundTurn2)
-
-        return length, secondCenterPoint
-
-    return jax.lax.cond(no_intersection, nan_case, valid_case)
-
-
-find_dubins_path_length_right_left_vec = jax.vmap(
-    find_dubins_path_length_right_left, in_axes=(None, None, 0, None)
-)
-
-
-# def differentiable_min(a, b):
-#     epsilon = 10
-#     return -(1.0 / epsilon) * jnp.log(jnp.exp(-(epsilon * a)) + jnp.exp(-(epsilon * b)))
-
-
-def differentiable_min(a, b):
-    epsilon = 10
-
-    # Replace NaNs with a large value to avoid discontinuities
-    safe_a = jnp.where(jnp.isnan(a), jnp.inf, a)
-    safe_b = jnp.where(jnp.isnan(b), jnp.inf, b)
-
-    # Numerically stable log-sum-exp trick
-    smooth_min = -(1.0 / epsilon) * jnp.log(
-        jnp.exp(-(epsilon * safe_a)) + jnp.exp(-(epsilon * safe_b))
-    )
-
-    # Preserve NaN if both inputs were NaN
-    both_nan = jnp.isnan(a) & jnp.isnan(b)
-    return jnp.where(both_nan, jnp.nan, smooth_min)
-
-
-@jax.jit
 def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, radius):
     # leftRightLength, _ = find_dubins_path_length_left_right(
     #     pursuerPosition, pursuerHeading, goalPosition, radius
@@ -370,10 +206,10 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
 
 
 # Vectorized version over goalPosition
-vectorized_find_shortest_dubins_path = jax.vmap(
-    find_shortest_dubins_path,
-    in_axes=(None, None, 0, None),  # Vectorize over goalPosition (3rd argument)
-)
+# vectorized_find_shortest_dubins_path = jax.vmap(
+#     find_shortest_dubins_path,
+#     in_axes=(None, None, 0, None),  # Vectorize over goalPosition (3rd argument)
+# )
 
 
 @jax.jit
@@ -496,7 +332,7 @@ def plot_dubins_EZ(
     evaderSpeed,
     ax,
 ):
-    numPoints = 1500
+    numPoints = 2
     rangeX = 2.0
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -505,31 +341,6 @@ def plot_dubins_EZ(
     X = X.flatten()
     Y = Y.flatten()
     evaderHeadings = np.ones_like(X) * evaderHeading
-    # startTime = time.time()
-    # ZGeometric = in_dubins_engagement_zone_geometric(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     minimumTurnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     jnp.array([X, Y]).T,
-    #     evaderHeadings,
-    #     evaderSpeed,
-    # )
-    # startTime = time.time()
-    # ZGeometric = in_dubins_engagement_zone_geometric(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     minimumTurnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     jnp.array([X, Y]).T,
-    #     evaderHeadings,
-    #     evaderSpeed,
-    # )
-    # print("time to run geometric", time.time() - startTime)
 
     ZTrue = (
         in_dubins_engagement_zone(
@@ -545,20 +356,6 @@ def plot_dubins_EZ(
         )
         < 0
     )
-    # startTime = time.time()
-    # ZTrue = in_dubins_engagement_zone(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     minimumTurnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     jnp.array([X, Y]).T,
-    #     evaderHeadings,
-    #     evaderSpeed,
-    # )
-    # ZTrue = ZTrue.reshape(numPoints, numPoints)
-    # print("time to run true", time.time() - startTime)
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
     # ZGeometric = ZGeometric.reshape(numPoints, numPoints)
@@ -567,9 +364,9 @@ def plot_dubins_EZ(
     Y = Y.reshape(numPoints, numPoints)
     colors = ["red"]
     ax.contour(X, Y, ZTrue, levels=[0], colors=colors, zorder=10000)
-    # ax.contour(X, Y, ZGeometric, cmap="summer")
-    # ax.scatter(*pursuerPosition, c="r")
-    ax.set_aspect("equal", "box")
+    # # ax.contour(X, Y, ZGeometric, cmap="summer")
+    # # ax.scatter(*pursuerPosition, c="r")
+    # ax.set_aspect("equal", "box")
     return ax
 
 
@@ -958,3 +755,6 @@ def main_EZ():
 
 if __name__ == "__main__":
     main_EZ()
+    # fig, ax = plt.subplots()
+    # ax.scatter(0, 0, c="r")
+    # plt.show()
