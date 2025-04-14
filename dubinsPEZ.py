@@ -3465,7 +3465,7 @@ def main():
 
     minimumTurnRadius = 0.2
     minimumTurnRadiusVar = 0.005
-    minimumTurnRadiusVar = 0.00000000001
+    # minimumTurnRadiusVar = 0.00000000001
 
     captureRadius = 0.0
 
