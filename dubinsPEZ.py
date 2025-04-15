@@ -8,8 +8,10 @@ import time
 
 import dubinsEZ
 
-from jax import profiler
 
+jax.config.update("jax_enable_x64", False)
+
+numPoints = 45
 # Vectorized function using vmap
 in_dubins_engagement_zone = jax.jit(
     jax.vmap(
@@ -32,7 +34,7 @@ in_dubins_engagement_zone3 = jax.jit(
     jax.vmap(
         dubinsEZ.in_dubins_engagement_zone_single,
         in_axes=(
-            None,  # pursuerPosition
+            0,  # pursuerPosition
             0,  # pursuerHeading
             0,  # minimumTurnRadius
             None,  # catureRadius
@@ -1281,6 +1283,10 @@ def independent_gaussian_pdf(x, mean, std):
 
 
 def compute_average_pdf_single(
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerPositionGridX,
+    pursuerPositionGridY,
     pursuerHeading,
     pursuerHeadingVar,
     pursuerHeadingGrid,
@@ -1290,6 +1296,8 @@ def compute_average_pdf_single(
     pursuerTurnRadius,
     pursuerTurnRadiusVar,
     pursuerTurnRadiusGrid,
+    pursuerPositionXIndex,
+    pursuerPositionYIndex,
     pursuerHeadingIndex,
     pursuerSpeedIndex,
     pursuerTurnRadiusIndex,
@@ -1300,6 +1308,11 @@ def compute_average_pdf_single(
     pursuerTurnRadius_std = jnp.sqrt(pursuerTurnRadiusVar)
 
     # Grid corners
+
+    x0 = pursuerPositionGridX[pursuerPositionXIndex]
+    x1 = pursuerPositionGridX[pursuerPositionXIndex + 1]
+    y0 = pursuerPositionGridY[pursuerPositionYIndex]
+    y1 = pursuerPositionGridY[pursuerPositionYIndex + 1]
     h0 = pursuerHeadingGrid[pursuerHeadingIndex]
     h1 = pursuerHeadingGrid[pursuerHeadingIndex + 1]
     s0 = pursuerSpeedGrid[pursuerSpeedIndex]
@@ -1308,6 +1321,19 @@ def compute_average_pdf_single(
     r1 = pursuerTurnRadiusGrid[pursuerTurnRadiusIndex + 1]
 
     # Evaluate 1D PDFs at each coordinate
+    xy_pdf_00 = jax.scipy.stats.multivariate_normal.pdf(
+        jnp.array([x0, y0]), pursuerPosition, pursuerPositionCov
+    )
+    xy_pdf_01 = jax.scipy.stats.multivariate_normal.pdf(
+        jnp.array([x0, y1]), pursuerPosition, pursuerPositionCov
+    )
+    xy_pdf_10 = jax.scipy.stats.multivariate_normal.pdf(
+        jnp.array([x1, y0]), pursuerPosition, pursuerPositionCov
+    )
+    xy_pdf_11 = jax.scipy.stats.multivariate_normal.pdf(
+        jnp.array([x1, y1]), pursuerPosition, pursuerPositionCov
+    )
+
     h_pdf_0 = jax.scipy.stats.norm.pdf(h0, pursuerHeading, heading_std)
     h_pdf_1 = jax.scipy.stats.norm.pdf(h1, pursuerHeading, heading_std)
     s_pdf_0 = jax.scipy.stats.norm.pdf(s0, pursuerSpeed, speed_std)
@@ -1315,75 +1341,85 @@ def compute_average_pdf_single(
     r_pdf_0 = jax.scipy.stats.norm.pdf(r0, pursuerTurnRadius, pursuerTurnRadius_std)
     r_pdf_1 = jax.scipy.stats.norm.pdf(r1, pursuerTurnRadius, pursuerTurnRadius_std)
 
-    # Compute 2D PDF at eight corners
-    p000 = h_pdf_0 * s_pdf_0 * r_pdf_0  # (h0, s0, r0)
-    p001 = h_pdf_0 * s_pdf_0 * r_pdf_1  # (h0, s0, r1)
-    p010 = h_pdf_0 * s_pdf_1 * r_pdf_0  # (h0, s1, r0)
-    p011 = h_pdf_0 * s_pdf_1 * r_pdf_1  # (h0, s1, r1)
-    p100 = h_pdf_1 * s_pdf_0 * r_pdf_0  # (h1, s0, r0)
-    p101 = h_pdf_1 * s_pdf_0 * r_pdf_1  # (h1, s0, r1)
-    p110 = h_pdf_1 * s_pdf_1 * r_pdf_0  # (h1, s1, r0)
-    p111 = h_pdf_1 * s_pdf_1 * r_pdf_1  # (h1, s1, r1)
+    # Compute 2D PDF at 32 corners
+    p00000 = xy_pdf_00 * h_pdf_0 * s_pdf_0 * r_pdf_0  # (x0,y0,h0, s0, r0)
+    p00001 = xy_pdf_00 * h_pdf_0 * s_pdf_0 * r_pdf_1  # (x0,y0,h0, s0, r1)
+    p00010 = xy_pdf_00 * h_pdf_0 * s_pdf_1 * r_pdf_0  # (x0,y0,h0, s1, r0)
+    p00011 = xy_pdf_00 * h_pdf_0 * s_pdf_1 * r_pdf_1  # (x0,y0,h0, s1, r1)
+    p00100 = xy_pdf_00 * h_pdf_1 * s_pdf_0 * r_pdf_0  # (x0,y0,h1, s0, r0)
+    p00101 = xy_pdf_00 * h_pdf_1 * s_pdf_0 * r_pdf_1  # (x0,y0,h1, s0, r1)
+    p00110 = xy_pdf_00 * h_pdf_1 * s_pdf_1 * r_pdf_0  # (x0,y0,h1, s1, r0)
+    p00111 = xy_pdf_00 * h_pdf_1 * s_pdf_1 * r_pdf_1  # (x0,y0,h1, s1, r1)
+    p01000 = xy_pdf_01 * h_pdf_0 * s_pdf_0 * r_pdf_0  # (x0,y1,h0, s0, r0)
+    p01001 = xy_pdf_01 * h_pdf_0 * s_pdf_0 * r_pdf_1  # (x0,y1,h0, s0, r1)
+    p01010 = xy_pdf_01 * h_pdf_0 * s_pdf_1 * r_pdf_0  # (x0,y1,h0, s1, r0)
+    p01011 = xy_pdf_01 * h_pdf_0 * s_pdf_1 * r_pdf_1  # (x0,y1,h0, s1, r1)
+    p01100 = xy_pdf_01 * h_pdf_1 * s_pdf_0 * r_pdf_0  # (x0,y1,h1, s0, r0)
+    p01101 = xy_pdf_01 * h_pdf_1 * s_pdf_0 * r_pdf_1  # (x0,y1,h1, s0, r1)
+    p01110 = xy_pdf_01 * h_pdf_1 * s_pdf_1 * r_pdf_0  # (x0,y1,h1, s1, r0)
+    p01111 = xy_pdf_01 * h_pdf_1 * s_pdf_1 * r_pdf_1  # (x0,y1,h1, s1, r1)
+    p10000 = xy_pdf_10 * h_pdf_0 * s_pdf_0 * r_pdf_0  # (x1,y0,h0, s0, r0)
+    p10001 = xy_pdf_10 * h_pdf_0 * s_pdf_0 * r_pdf_1  # (x1,y0,h0, s0, r1)
+    p10010 = xy_pdf_10 * h_pdf_0 * s_pdf_1 * r_pdf_0  # (x1,y0,h0, s1, r0)
+    p10011 = xy_pdf_10 * h_pdf_0 * s_pdf_1 * r_pdf_1  # (x1,y0,h0, s1, r1)
+    p10100 = xy_pdf_10 * h_pdf_1 * s_pdf_0 * r_pdf_0  # (x1,y0,h1, s0, r0)
+    p10101 = xy_pdf_10 * h_pdf_1 * s_pdf_0 * r_pdf_1  # (x1,y0,h1, s0, r1)
+    p10110 = xy_pdf_10 * h_pdf_1 * s_pdf_1 * r_pdf_0  # (x1,y0,h1, s1, r0)
+    p10111 = xy_pdf_10 * h_pdf_1 * s_pdf_1 * r_pdf_1  # (x1,y0,h1, s1, r1)
+    p11000 = xy_pdf_11 * h_pdf_0 * s_pdf_0 * r_pdf_0  # (x1,y1,h0, s0, r0)
+    p11001 = xy_pdf_11 * h_pdf_0 * s_pdf_0 * r_pdf_1  # (x1,y1,h0, s0, r1)
+    p11010 = xy_pdf_11 * h_pdf_0 * s_pdf_1 * r_pdf_0  # (x1,y1,h0, s1, r0)
+    p11011 = xy_pdf_11 * h_pdf_0 * s_pdf_1 * r_pdf_1  # (x1,y1,h0, s1, r1)
+    p11100 = xy_pdf_11 * h_pdf_1 * s_pdf_0 * r_pdf_0  # (x1,y1,h1, s0, r0)
+    p11101 = xy_pdf_11 * h_pdf_1 * s_pdf_0 * r_pdf_1  # (x1,y1,h1, s0, r1)
+    p11110 = xy_pdf_11 * h_pdf_1 * s_pdf_1 * r_pdf_0  # (x1,y1,h1, s1, r0)
+    p11111 = xy_pdf_11 * h_pdf_1 * s_pdf_1 * r_pdf_1  # (x1,y1,h1, s1, r1)
 
-    # p00 = h_pdf_0 * s_pdf_0  # (h0, s0)
-    # p01 = h_pdf_0 * s_pdf_1  # (h0, s1)
-    # p10 = h_pdf_1 * s_pdf_0  # (h1, s0)
-    # p11 = h_pdf_1 * s_pdf_1  # (h1, s1)
+    cellVolume = (x1 - x0) * (y1 - y0) * (h1 - h0) * (s1 - s0) * (r1 - r0)
 
     # Average PDF over the cell
-    average_pdf = (p000 + p001 + p010 + p011 + p100 + p101 + p110 + p111) / 8.0
+    average_pdf = (
+        p00000
+        + p00001
+        + p00010
+        + p00011
+        + p00100
+        + p00101
+        + p00110
+        + p00111
+        + p01000
+        + p01001
+        + p01010
+        + p01011
+        + p01100
+        + p01101
+        + p01110
+        + p01111
+        + p10000
+        + p10001
+        + p10010
+        + p10011
+        + p10100
+        + p10101
+        + p10110
+        + p10111
+        + p11000
+        + p11001
+        + p11010
+        + p11011
+        + p11100
+        + p11101
+        + p11110
+        + p11111
+    ) / 32.0
+    # average_pdf = (p000 + p001 + p010 + p011 + p100 + p101 + p110 + p111) / 8.0
     # average_pdf = (p00 + p01 + p10 + p11) / 4.0
-    return average_pdf
+    return average_pdf * cellVolume
 
 
 compute_average_pdf = jax.jit(
     jax.vmap(
         compute_average_pdf_single,
-        in_axes=(None, None, None, None, None, None, None, None, None, 0, 0, 0),
-    )
-)
-
-
-def compute_probability_mass_in_cell_single(
-    pursuerPosition,
-    pursuerRange,
-    evaderPosition,
-    evaderHeading,
-    evaderSpeed,
-    pursuerHeadingGridCenters,
-    pursuerSpeedGridCenters,
-    pursuerTurnRadiusGridCenters,
-    peicewiseAveragePdf,
-    pursuerHeadingGridIndex,
-    pursuerSpeedGridIndex,
-    pursuerTurnRadiusGridIndex,
-    cellArea,
-):
-    pursuerHeading = pursuerHeadingGridCenters[pursuerHeadingGridIndex]
-    pursuerSpeed = pursuerSpeedGridCenters[pursuerSpeedGridIndex]
-    pursuerTurnRadius = pursuerTurnRadiusGridCenters[pursuerTurnRadiusGridIndex]
-    z = dubinsEZ.in_dubins_engagement_zone_single(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerTurnRadius,
-        0.0,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-    )
-    probmass = jnp.where(
-        z < 0,
-        peicewiseAveragePdf[pursuerHeadingGridIndex, pursuerSpeedGridIndex] * cellArea,
-        0.0,
-    )
-    return probmass, z
-
-
-compute_probability_mass_in_cell = jax.jit(
-    jax.vmap(
-        compute_probability_mass_in_cell_single,
         in_axes=(
             None,
             None,
@@ -1394,16 +1430,34 @@ compute_probability_mass_in_cell = jax.jit(
             None,
             None,
             None,
-            0,
-            0,
-            0,
             None,
+            None,
+            None,
+            None,
+            0,
+            0,
+            0,
+            0,
+            0,
         ),
     )
 )
 
 
+def sample_parameter(mean, var, num_samples):
+    beta = 3.5
+    std = jnp.sqrt(var)
+    min_value = mean - beta * std
+    max_value = mean + beta * std
+    values = jnp.linspace(min_value, max_value, num_samples)
+    # quantiles = jnp.linspace(0.0005, 0.9995, num_samples)
+    # values = mean + std * jax.scipy.stats.norm.ppf(quantiles)
+    return values
+
+
 def compute_peicewise_approximate_pdf_heading_speed(
+    pursuerPosition,
+    pursuerPositionCov,
     pursuerHeading,
     pursuerHeadingVar,
     pursuerSpeed,
@@ -1412,47 +1466,73 @@ def compute_peicewise_approximate_pdf_heading_speed(
     pursuerTurnRadiusVar,
     numSubdivisions,
 ):
-    minPursuerHeading = pursuerHeading - 3 * jnp.sqrt(pursuerHeadingVar)
-    maxPursuerHeading = pursuerHeading + 3 * jnp.sqrt(pursuerHeadingVar)
-    minPursuerSpeed = pursuerSpeed - 3 * jnp.sqrt(pursuerSpeedVar)
-    maxPursuerSpeed = pursuerSpeed + 3 * jnp.sqrt(pursuerSpeedVar)
-    minPursuerTurnRadius = pursuerTurnRadius - 3 * jnp.sqrt(pursuerTurnRadiusVar)
-    maxPursuerTurnRadius = pursuerTurnRadius + 3 * jnp.sqrt(pursuerTurnRadiusVar)
-
-    pursuerHeadingGrid = jnp.linspace(
-        minPursuerHeading, maxPursuerHeading, numSubdivisions
+    pursuerPositionXGrid = sample_parameter(
+        pursuerPosition[0], pursuerPositionCov[0, 0], numSubdivisions
     )
-    pursuerSpeedGrid = jnp.linspace(minPursuerSpeed, maxPursuerSpeed, numSubdivisions)
-    pursuerTurnRadiusGrid = jnp.linspace(
-        minPursuerTurnRadius, maxPursuerTurnRadius, numSubdivisions
+    pursuerPositionYGrid = sample_parameter(
+        pursuerPosition[1], pursuerPositionCov[1, 1], numSubdivisions
+    )
+    pursuerHeadingGrid = sample_parameter(
+        pursuerHeading, pursuerHeadingVar, numSubdivisions
+    )
+    pursuerSpeedGrid = sample_parameter(pursuerSpeed, pursuerSpeedVar, numSubdivisions)
+    pursuerTurnRadiusGrid = sample_parameter(
+        pursuerTurnRadius, pursuerTurnRadiusVar, numSubdivisions
+    )
+    jax.debug.print(
+        "pursuerPositionXGrid {pursuerPositionXGrid}",
+        pursuerPositionXGrid=pursuerPositionXGrid,
     )
 
+    pursuerPositionXGridCenters = (
+        pursuerPositionXGrid[:-1] + pursuerPositionXGrid[1:]
+    ) / 2.0
+    pursuerPositionYGridCenters = (
+        pursuerPositionYGrid[:-1] + pursuerPositionYGrid[1:]
+    ) / 2.0
     pursuerHeadingGridCenters = (pursuerHeadingGrid[:-1] + pursuerHeadingGrid[1:]) / 2.0
     pursuerSpeedGridCenters = (pursuerSpeedGrid[:-1] + pursuerSpeedGrid[1:]) / 2.0
     pursuerTurnRadiusGridCenters = (
         pursuerTurnRadiusGrid[:-1] + pursuerTurnRadiusGrid[1:]
     ) / 2.0
-    cellArea = (
-        (pursuerHeadingGrid[1] - pursuerHeadingGrid[0])
-        * (pursuerSpeedGrid[1] - pursuerSpeedGrid[0])
-        * (pursuerTurnRadiusGrid[1] - pursuerTurnRadiusGrid[0])
-    )
+    # cellArea = (
+    #     (pursuerHeadingGrid[1] - pursuerHeadingGrid[0])
+    #     * (pursuerSpeedGrid[1] - pursuerSpeedGrid[0])
+    #     * (pursuerTurnRadiusGrid[1] - pursuerTurnRadiusGrid[0])
+    #     * (pursuerPositionXGrid[1] - pursuerPositionXGrid[0])
+    #     * (pursuerPositionYGrid[1] - pursuerPositionYGrid[0])
+    # )
+    pursuerPositionXGridIndices = jnp.arange(len(pursuerPositionXGridCenters))
+    pursuerPositionYGridIndices = jnp.arange(len(pursuerPositionYGridCenters))
     pursuerHeadingGridIndices = jnp.arange(len(pursuerHeadingGridCenters))
     pursuerSpeedGridIndices = jnp.arange(len(pursuerSpeedGridCenters))
     pursuerTurnRadiusGridIndices = jnp.arange(len(pursuerTurnRadiusGridCenters))
-    pursuerHeadingGridIndices, pursuerSpeedGridIndices, pursuerTurnRadiusGridIndices = (
-        jnp.meshgrid(
-            pursuerHeadingGridIndices,
-            pursuerSpeedGridIndices,
-            pursuerTurnRadiusGridIndices,
-        )
+    (
+        pursuerPositionXGridIndices,
+        pursuerPositionYGridIndices,
+        pursuerHeadingGridIndices,
+        pursuerSpeedGridIndices,
+        pursuerTurnRadiusGridIndices,
+    ) = jnp.meshgrid(
+        pursuerPositionXGridIndices,
+        pursuerPositionYGridIndices,
+        pursuerHeadingGridIndices,
+        pursuerSpeedGridIndices,
+        pursuerTurnRadiusGridIndices,
     )
+
+    pursuerPositionXGridIndices = pursuerPositionXGridIndices.ravel()
+    pursuerPositionYGridIndices = pursuerPositionYGridIndices.ravel()
 
     pursuerHeadingGridIndices = pursuerHeadingGridIndices.ravel()
     pursuerSpeedGridIndices = pursuerSpeedGridIndices.ravel()
     pursuerTurnRadiusGridIndices = pursuerTurnRadiusGridIndices.ravel()
     # compute the average pdf over the grid
-    peicewiseAveragePdf = compute_average_pdf(
+    peicewiseAveragePdfTimesCellArea = compute_average_pdf(
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerPositionXGrid,
+        pursuerPositionYGrid,
         pursuerHeading,
         pursuerHeadingVar,
         pursuerHeadingGrid,
@@ -1462,77 +1542,25 @@ def compute_peicewise_approximate_pdf_heading_speed(
         pursuerTurnRadius,
         pursuerTurnRadiusVar,
         pursuerTurnRadiusGrid,
+        pursuerPositionXGridIndices,
+        pursuerPositionYGridIndices,
         pursuerHeadingGridIndices,
         pursuerSpeedGridIndices,
         pursuerTurnRadiusGridIndices,
     )
     return (
-        peicewiseAveragePdf,
+        peicewiseAveragePdfTimesCellArea,
+        pursuerPositionXGridCenters,
+        pursuerPositionXGridIndices,
+        pursuerPositionYGridCenters,
+        pursuerPositionYGridIndices,
         pursuerHeadingGridCenters,
         pursuerHeadingGridIndices,
         pursuerSpeedGridCenters,
         pursuerSpeedGridIndices,
         pursuerTurnRadiusGridCenters,
         pursuerTurnRadiusGridIndices,
-        cellArea,
     )
-
-
-def dubins_pez_numerical_integration_heading_and_speed_single(
-    evaderPositions,
-    evaderHeadings,
-    evaderSpeed,
-    pursuerPosition,
-    pursuerRange,
-    pursuerHeadingGrid,
-    pursuerHeadingGridIndices,
-    pursuerSpeedGrid,
-    pursuerSpeedGridIndices,
-    pursuerTurnRadiusGrid,
-    pursuerTurnRadiusGridIndices,
-    peicewiseAveragePdf,
-    cellArea,
-):
-    probMass, z = compute_probability_mass_in_cell(
-        pursuerPosition,
-        pursuerRange,
-        evaderPositions,
-        evaderHeadings,
-        evaderSpeed,
-        pursuerHeadingGrid,
-        pursuerSpeedGrid,
-        pursuerTurnRadiusGrid,
-        peicewiseAveragePdf,
-        pursuerHeadingGridIndices,
-        pursuerSpeedGridIndices,
-        pursuerTurnRadiusGridIndices,
-        cellArea,
-    )
-    totalProbMass = jnp.sum(probMass)
-
-    return totalProbMass, 0, 0, 0
-
-
-dubins_pez_numerical_integration_heading_and_speed_single_vmap = jax.jit(
-    jax.vmap(
-        dubins_pez_numerical_integration_heading_and_speed_single,
-        in_axes=(
-            0,
-            0,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
-    )
-)
 
 
 @jax.jit
@@ -1552,18 +1580,23 @@ def dubins_pez_numerical_integration_heading_and_speed(
     pursuerRangeVar,
     captureRadius,
 ):
-    numSubdivisions = 35
+    numSubdivisions = 13
     # compute the average pdf over the ga
     (
-        peicewiseAveragePdf,
+        peicewiseAveragePdfTimesCellArea,
+        pursuerPositionXGrid,
+        pursuerPositionXGridIndices,
+        pursuerPositionYGrid,
+        pursuerPositionYGridIndices,
         pursuerHeadingGrid,
         pursuerHeadingGridIndices,
         pursuerSpeedGrid,
         pursuerSpeedGridIndices,
         pursuerTurnRadiusGrid,
         pursuerTurnRadiusGridIndices,
-        cellArea,
     ) = compute_peicewise_approximate_pdf_heading_speed(
+        pursuerPosition,
+        pursuerPositionCov,
         pursuerHeading,
         pursuerHeadingVar,
         pursuerSpeed,
@@ -1572,8 +1605,14 @@ def dubins_pez_numerical_integration_heading_and_speed(
         minimumTurnRadiusVar,
         numSubdivisions,
     )
+    pursuerPositions = jnp.column_stack(
+        [
+            pursuerPositionXGrid[pursuerPositionXGridIndices],
+            pursuerPositionYGrid[pursuerPositionYGridIndices],
+        ],
+    )
     Z = new_in_dubins_engagement_zone3(
-        pursuerPosition,
+        pursuerPositions,
         pursuerHeadingGrid[pursuerHeadingGridIndices],
         pursuerTurnRadiusGrid[pursuerTurnRadiusGridIndices],
         captureRadius,
@@ -1584,7 +1623,10 @@ def dubins_pez_numerical_integration_heading_and_speed(
         evaderSpeed,
     )
 
-    cellProb = jnp.where(Z < 0, peicewiseAveragePdf * cellArea, 0.0)
+    epsilon = 1e-2
+    weights = jax.nn.sigmoid(-Z / epsilon)
+    cellProb = weights * peicewiseAveragePdfTimesCellArea
+    # cellProb = jnp.where(Z < 0, peicewiseAveragePdf * cellArea, 0.0)
     probs = jnp.sum(cellProb, axis=1)
 
     return probs, 0, 0, 0
@@ -2168,7 +2210,6 @@ def numerical_dubins_pez(
         combinedCov,
         numSubdivisions,
     )
-    jax.debug.print("cellArea: {x}", x=cellArea)
 
     numGrid = len(pursuerHeadingGridCenters)
     peicewiseAveragePdf = peicewiseAveragePdf.reshape(
@@ -2194,7 +2235,6 @@ def numerical_dubins_pez(
         pursuerSpeedGridIndices,
         cellArea,
     )
-    jax.debug.print("prob: {x}", x=jnp.max(prob))
     return prob, 0, 0, 0
 
 
@@ -2246,7 +2286,6 @@ def plot_dubins_PEZ(
     useCombinedQuadratic=False,
     usePiecewiseLinear=False,
 ):
-    numPoints = 90
     if useLinear:
         rangeX = 2
         x = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -2479,6 +2518,7 @@ def plot_dubins_PEZ(
         print("numerical integration time", time.time() - start)
         ax.set_title("Numerical Integration Dubins PEZ", fontsize=20)
 
+    ZTrue = np.array(ZTrue.block_until_ready())
     ZTrue = ZTrue.reshape(numPoints, numPoints)
 
     X = X.reshape(numPoints, numPoints)
@@ -2529,7 +2569,6 @@ def plot_dubins_PEZ_diff(
     useCombinedQuadratic=False,
     usePiecewiseLinear=False,
 ):
-    numPoints = 90
     rangeX = 1.0
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -2554,6 +2593,7 @@ def plot_dubins_PEZ_diff(
         pursuerRangeVar,
         captureRadius,
     )
+    ZMC = np.array(ZMC.block_until_ready())
     if useLinear:
         print("Linear")
         ZTrue, _, _ = linear_dubins_pez(
@@ -2688,8 +2728,6 @@ def plot_dubins_PEZ_diff(
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
     elif usePiecewiseLinear:
         print("Piecewise Linear")
-        print("points", points.shape)
-        print("evaderHeadings", evaderHeadings.shape)
         ZTrue, _, _, _ = dubins_pez_numerical_integration_heading_and_speed(
             # ZTrue, _, _, _ = numerical_dubins_pez(
             points,
@@ -2709,6 +2747,7 @@ def plot_dubins_PEZ_diff(
         )
         ax.set_title("Numerical Dubins PEZ", fontsize=20)
 
+    ZTrue = np.array(ZTrue.block_until_ready())
     rmse = jnp.sqrt(jnp.mean((ZTrue - ZMC) ** 2))
     print("RMSE", rmse)
     average_abs_diff = jnp.mean(jnp.abs(ZTrue - ZMC))
@@ -3451,7 +3490,7 @@ def plot_all_error(
 def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
-    pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
+    # pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
 
     pursuerHeading = (0.0 / 4.0) * np.pi
     pursuerHeadingVar = 0.5
@@ -3469,7 +3508,7 @@ def main():
 
     captureRadius = 0.0
 
-    evaderHeading = jnp.array([(0.0 / 20.0) * np.pi])
+    evaderHeading = jnp.array([(5.0 / 20.0) * np.pi])
     # evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
 
     evaderSpeed = 0.5
