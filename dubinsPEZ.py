@@ -1,4 +1,5 @@
 import numpy as np
+import chaospy as cp
 
 import jax.numpy as jnp
 import jax
@@ -1564,7 +1565,7 @@ def compute_peicewise_approximate_pdf_heading_speed(
 
 
 @jax.jit
-def dubins_pez_numerical_integration_heading_and_speed(
+def dubins_pez_numerical_integration(
     evaderPositions,
     evaderHeadings,
     evaderSpeed,
@@ -1629,6 +1630,80 @@ def dubins_pez_numerical_integration_heading_and_speed(
     # cellProb = jnp.where(Z < 0, peicewiseAveragePdf * cellArea, 0.0)
     probs = jnp.sum(cellProb, axis=1)
 
+    return probs, 0, 0, 0
+
+
+# @jax.jit
+def dubins_pez_numerical_integration_sparse(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    mu = jnp.concatenate(
+        [
+            pursuerPosition,  # (2,)
+            jnp.array([pursuerHeading]),  # (1,)
+            jnp.array([minimumTurnRadius]),  # (1,)
+            jnp.array([pursuerSpeed]),  # (1,)
+        ]
+    ).flatten()
+    cov = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        minimumTurnRadiusVar,
+        pursuerSpeedVar,
+        pursuerRangeVar,
+    )[0:5, 0:5]
+    # 2. Create independent standard normal distribution in Chaospy
+    dim = mu.shape[0]
+    # indep_dist = cp.MvNormal(np.zeros(dim), np.eye(dim))
+    indep_dist = cp.J(*[cp.Normal(0, 1) for _ in range(dim)])
+
+    # 3. Generate sparse grid nodes in the standard space
+    nodes_z, weights = cp.generate_quadrature(
+        order=5, dist=indep_dist, rule="G", sparse=False
+    )  # nodes_z: shape (dim, n)
+
+    # 4. Transform Chaospy nodes to correlated space using Cholesky
+    L = jnp.linalg.cholesky(cov)  # shape (dim, dim)
+    nodes_z_jax = jnp.array(nodes_z)  # shape (dim, n)
+    nodes = mu[:, None] + L @ nodes_z_jax  # shape (dim, n)
+    pursuerPositions = nodes[0:2, :].T  # shape (n, 2)
+    pursuerHeadings = nodes[2, :]  # shape (n,)
+    pursuerTurnRadii = nodes[3, :]  # shape (n,)
+    pursuerSpeeds = nodes[4, :]  # shape (n,)
+
+    Z = new_in_dubins_engagement_zone3(
+        pursuerPositions,
+        pursuerHeadings,
+        pursuerTurnRadii,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeeds,
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+    )
+    print("weights", weights)
+    print("Z", Z)
+    epsilon = 1e-2
+    # smoothZ = jax.nn.sigmoid(-Z / epsilon)
+    smoothZ = jnp.where(Z < 0, 1.0, 0.0)
+    print("smoothZ", smoothZ)
+    probs = jnp.sum(weights * smoothZ, axis=1)
+
+    print("probs", probs)
     return probs, 0, 0, 0
 
 
@@ -2498,7 +2573,7 @@ def plot_dubins_PEZ(
         Y = Y.flatten()
         evaderHeadings = np.ones_like(X) * evaderHeading
         start = time.time()
-        ZTrue, _, _, _ = dubins_pez_numerical_integration_heading_and_speed(
+        ZTrue, _, _, _ = dubins_pez_numerical_integration_sparse(
             # ZTrue, _, _, _ = numerical_dubins_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2728,7 +2803,7 @@ def plot_dubins_PEZ_diff(
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
     elif usePiecewiseLinear:
         print("Piecewise Linear")
-        ZTrue, _, _, _ = dubins_pez_numerical_integration_heading_and_speed(
+        ZTrue, _, _, _ = dubins_pez_numerical_integration_sparse(
             # ZTrue, _, _, _ = numerical_dubins_pez(
             points,
             evaderHeadings,
