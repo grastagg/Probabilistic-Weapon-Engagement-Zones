@@ -55,6 +55,43 @@ def find_counter_clockwise_tangent_point(p1, c, r):
 
 
 @jax.jit
+def find_counter_clockwise_tangent_point_smooth(
+    p1: jnp.ndarray, c: jnp.ndarray, r: float
+) -> jnp.ndarray:
+    """
+    Smooth counterclockwise tangent point computation.
+    Uses an internal smooth ReLU (C1) to clamp the discriminant.
+    Matches the variable names of the original version.
+    """
+    gamma = 50.0  # smoothing sharpness
+
+    # Original variables
+    v1 = p1 - c
+    normV1 = jnp.linalg.norm(v1)
+
+    # Parallel component
+    v3Perallel = (r**2) / (normV1**2) * v1
+
+    # Perpendicular direction (90° clockwise rotation)
+    vPerpendicularNormalized = jnp.array([v1[1], -v1[0]]) / normV1
+
+    # Smooth discriminant: Delta = r^2 - r^4 / normV1^2
+    Delta = r**2 - (r**4) / (normV1**2)
+    # smooth ReLU: approx max(Delta,0)
+    Delta_pos = jnp.logaddexp(Delta, 0.0) / gamma
+
+    # Perpendicular component magnitude
+    v3Perpendicular = jnp.sqrt(Delta_pos) * vPerpendicularNormalized
+
+    # Combined tangent vector
+    v3 = v3Perallel + v3Perpendicular
+
+    # Tangent point
+    pt = c + v3
+    return pt
+
+
+@jax.jit
 def find_clockwise_tangent_point(p1, c, r):
     v1 = p1 - c
     normV1 = jnp.linalg.norm(v1)
@@ -63,6 +100,41 @@ def find_clockwise_tangent_point(p1, c, r):
     v3Perpendicular = jnp.sqrt(r**2 - r**4 / normV1**2) * vPerpendicularNormalized
 
     v3 = v3Perallel + v3Perpendicular
+    pt = c + v3
+    return pt
+
+
+@jax.jit
+def find_clockwise_tangent_point_smooth(
+    p1: jnp.ndarray, c: jnp.ndarray, r: float, gamma: float = 50.0
+) -> jnp.ndarray:
+    """
+    Smooth clockwise tangent point computation.
+    Uses an internal smooth ReLU (C1) to clamp the discriminant,
+    matching the variable names of the original function.
+    """
+    # Vector from circle center to point
+    v1 = p1 - c
+    normV1 = jnp.linalg.norm(v1)
+
+    # Parallel component
+    v3Perallel = (r**2) / (normV1**2) * v1
+
+    # Perpendicular direction (90° counterclockwise rotation)
+    vPerpendicularNormalized = jnp.array([-v1[1], v1[0]]) / normV1
+
+    # Smooth discriminant: Delta = r^2 - r^4 / normV1^2
+    Delta = r**2 - (r**4) / (normV1**2)
+    # C1‐smooth clamp to zero
+    Delta_pos = jnp.logaddexp(Delta, 0.0) / gamma
+
+    # Perpendicular component magnitude
+    v3Perpendicular = jnp.sqrt(Delta_pos) * vPerpendicularNormalized
+
+    # Combined tangent vector
+    v3 = v3Perallel + v3Perpendicular
+
+    # Tangent point
     pt = c + v3
     return pt
 
@@ -142,6 +214,34 @@ def find_dubins_path_length_right_strait(
     return totalLength, tangentPoint
 
 
+@jax.jit
+def find_dubins_path_length_right_strait_smooth(
+    startPosition, startHeading, goalPosition, radius
+):
+    centerPoint = jnp.array(
+        [
+            startPosition[0] + radius * jnp.sin(startHeading),
+            startPosition[1] - radius * jnp.cos(startHeading),
+        ]
+    )
+    tangentPoint = find_clockwise_tangent_point_smooth(
+        goalPosition, centerPoint, radius
+    )
+
+    # Compute angles for arc length
+    v4 = startPosition - centerPoint
+    v3 = tangentPoint - centerPoint
+
+    theta = clockwise_angle(v4, v3)
+
+    # Compute final path length
+    straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
+    arcLength = radius * theta
+    totalLength = arcLength + straightLineLength
+
+    return totalLength, tangentPoint
+
+
 find_dubins_path_length_right_strait_vec = jax.vmap(
     find_dubins_path_length_right_strait, in_axes=(None, None, 0, None)
 )
@@ -158,6 +258,34 @@ def find_dubins_path_length_left_strait(
         ]
     )
     tangentPoint = find_counter_clockwise_tangent_point(
+        goalPosition, centerPoint, radius
+    )
+
+    # Compute angles for arc length
+    v4 = startPosition - centerPoint
+    v3 = tangentPoint - centerPoint
+
+    theta = counterclockwise_angle(v4, v3)
+
+    # Compute final path length
+    straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
+    arcLength = radius * theta
+    totalLength = arcLength + straightLineLength
+
+    return totalLength, tangentPoint
+
+
+@jax.jit
+def find_dubins_path_length_left_strait_smooth(
+    startPosition, startHeading, goalPosition, radius
+):
+    centerPoint = jnp.array(
+        [
+            startPosition[0] - radius * jnp.sin(startHeading),
+            startPosition[1] + radius * jnp.cos(startHeading),
+        ]
+    )
+    tangentPoint = find_counter_clockwise_tangent_point_smooth(
         goalPosition, centerPoint, radius
     )
 
@@ -220,16 +348,16 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
 def find_shortest_dubins_path_soft_min(
     pursuerPosition, pursuerHeading, goalPosition, radius
 ):
-    straitLeftLength, _ = find_dubins_path_length_right_strait(
+    straitLeftLength, _ = find_dubins_path_length_right_strait_smooth(
         pursuerPosition, pursuerHeading, goalPosition, radius
     )
-    straitRightLength, _ = find_dubins_path_length_left_strait(
+    straitRightLength, _ = find_dubins_path_length_left_strait_smooth(
         pursuerPosition, pursuerHeading, goalPosition, radius
     )
 
     lengths = jnp.array([straitLeftLength, straitRightLength])
 
-    return soft_min(*lengths, 0.05)
+    return soft_min(*lengths, 0.01)
 
 
 # Vectorized version over goalPosition

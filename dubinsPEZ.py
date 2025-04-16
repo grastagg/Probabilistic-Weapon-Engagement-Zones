@@ -1644,7 +1644,7 @@ def create_quadrature_nodes_and_weights(mu, cov, order):
 
     # 3. Generate sparse grid nodes in the standard space
     nodes_z, weights = cp.generate_quadrature(
-        order=5, dist=indep_dist, rule="gaussian", sparse=False, growth=True
+        order=8, dist=indep_dist, rule="gaussian", sparse=False, growth=True
     )  # nodes_z: shape (dim, n)
 
     # 4. TTrueransform Chaospy nodes to correlated space using Cholesky
@@ -1706,9 +1706,9 @@ def dubins_pez_numerical_integration_sparse(
         evaderSpeed,
     )
 
-    # epsilon = 1e-3
-    # Zsmooth = jax.nn.sigmoid(-Z / epsilon)
-    Zsmooth = jnp.where(Z < 0, 1.0, 0.0)
+    epsilon = 1e-3
+    Zsmooth = jax.nn.sigmoid(-Z / epsilon)
+    # Zsmooth = jnp.where(Z < 0, 1.0, 0.0)
     probs = jnp.sum(weights * Zsmooth, axis=1)
     return probs, 0, 0
 
