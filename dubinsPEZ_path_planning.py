@@ -197,7 +197,8 @@ def compute_spline_constraints_for_dubins_PEZ(
 
     curvature = turn_rate / velocity
 
-    pez, _, _ = dubinsPEZ.linear_dubins_pez(
+    # pez, _, _ = dubinsPEZ.linear_dubins_pez(
+    pez, _, _ = dubinsPEZ.dubins_pez_numerical_integration_sparse(
         pos,
         agentHeadings,
         agentSpeed,
@@ -583,7 +584,7 @@ def main():
     pursuerSpeed = 2.0
     pursuerSpeedVar = 0.1
     pursuerTurnRadius = 0.2
-    pursuerTurnRadiusVar = 0.01
+    pursuerTurnRadiusVar = 0.005
     agentSpeed = 1
 
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
@@ -602,7 +603,7 @@ def main():
         0.0,
         pursuerPosition,
         pursuerHeading,
-        pursuerRange * 2,
+        pursuerRange,
         pursuerCaptureRadius,
         pursuerSpeed,
         pursuerTurnRadius,

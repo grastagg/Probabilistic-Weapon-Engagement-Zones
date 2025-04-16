@@ -12,7 +12,7 @@ import dubinsEZ
 
 jax.config.update("jax_enable_x64", False)
 
-numPoints = 45
+numPoints = 90
 # Vectorized function using vmap
 in_dubins_engagement_zone = jax.jit(
     jax.vmap(
@@ -30,6 +30,7 @@ in_dubins_engagement_zone = jax.jit(
         ),  # Vectorizing over evaderPosition & evaderHeading
     )
 )
+
 # Vectorized function using vmap
 in_dubins_engagement_zone3 = jax.jit(
     jax.vmap(
@@ -79,6 +80,8 @@ new_in_dubins_engagement_zone3 = jax.jit(
         in_axes=(None, None, None, None, None, None, 0, 0, None),
     )
 )
+
+
 # with ko as target:
 # in_dubins_engagement_zone = jax.jit(
 #     jax.vmap(
@@ -164,7 +167,7 @@ def mc_dubins_PEZ(
     pursuerRangeVar,
     captureRadius,
 ):
-    numSamples = 5000
+    numSamples = 10000
 
     key, subkey = generate_random_key()
     # Generate heading samples
@@ -1480,10 +1483,6 @@ def compute_peicewise_approximate_pdf_heading_speed(
     pursuerTurnRadiusGrid = sample_parameter(
         pursuerTurnRadius, pursuerTurnRadiusVar, numSubdivisions
     )
-    jax.debug.print(
-        "pursuerPositionXGrid {pursuerPositionXGrid}",
-        pursuerPositionXGrid=pursuerPositionXGrid,
-    )
 
     pursuerPositionXGridCenters = (
         pursuerPositionXGrid[:-1] + pursuerPositionXGrid[1:]
@@ -1581,7 +1580,7 @@ def dubins_pez_numerical_integration(
     pursuerRangeVar,
     captureRadius,
 ):
-    numSubdivisions = 13
+    numSubdivisions = 10
     # compute the average pdf over the ga
     (
         peicewiseAveragePdfTimesCellArea,
@@ -1606,6 +1605,7 @@ def dubins_pez_numerical_integration(
         minimumTurnRadiusVar,
         numSubdivisions,
     )
+    jax.debug.print("length {x}", x=pursuerPositionXGridIndices.shape)
     pursuerPositions = jnp.column_stack(
         [
             pursuerPositionXGrid[pursuerPositionXGridIndices],
@@ -1627,10 +1627,32 @@ def dubins_pez_numerical_integration(
     epsilon = 1e-2
     weights = jax.nn.sigmoid(-Z / epsilon)
     cellProb = weights * peicewiseAveragePdfTimesCellArea
+    jax.debug.print(
+        "sum peicewiseAveragePdfTimesCellArea {x}",
+        x=jnp.sum(peicewiseAveragePdfTimesCellArea),
+    )
     # cellProb = jnp.where(Z < 0, peicewiseAveragePdf * cellArea, 0.0)
     probs = jnp.sum(cellProb, axis=1)
 
-    return probs, 0, 0, 0
+    return probs, 0, 0
+
+
+def create_quadrature_nodes_and_weights(mu, cov, order):
+    dim = mu.shape[0]
+    # indep_dist = cp.MvNormal(np.zeros(dim), np.eye(dim))
+    indep_dist = cp.J(*[cp.Normal(0, 1) for _ in range(dim)])
+
+    # 3. Generate sparse grid nodes in the standard space
+    nodes_z, weights = cp.generate_quadrature(
+        order=5, dist=indep_dist, rule="gaussian", sparse=False, growth=True
+    )  # nodes_z: shape (dim, n)
+
+    # 4. TTrueransform Chaospy nodes to correlated space using Cholesky
+    L = jnp.linalg.cholesky(cov)  # shape (dim, dim)
+    nodes_z_jax = jnp.array(nodes_z)  # shape (dim, n)
+    nodes = mu[:, None] + L @ nodes_z_jax  # shape (dim, n)
+    print("sum of weights", jnp.sum(weights))
+    return nodes, weights
 
 
 # @jax.jit
@@ -1665,24 +1687,12 @@ def dubins_pez_numerical_integration_sparse(
         pursuerSpeedVar,
         pursuerRangeVar,
     )[0:5, 0:5]
-    # 2. Create independent standard normal distribution in Chaospy
-    dim = mu.shape[0]
-    # indep_dist = cp.MvNormal(np.zeros(dim), np.eye(dim))
-    indep_dist = cp.J(*[cp.Normal(0, 1) for _ in range(dim)])
-
-    # 3. Generate sparse grid nodes in the standard space
-    nodes_z, weights = cp.generate_quadrature(
-        order=5, dist=indep_dist, rule="G", sparse=False
-    )  # nodes_z: shape (dim, n)
-
-    # 4. Transform Chaospy nodes to correlated space using Cholesky
-    L = jnp.linalg.cholesky(cov)  # shape (dim, dim)
-    nodes_z_jax = jnp.array(nodes_z)  # shape (dim, n)
-    nodes = mu[:, None] + L @ nodes_z_jax  # shape (dim, n)
+    nodes, weights = create_quadrature_nodes_and_weights(mu, cov, order=9)
     pursuerPositions = nodes[0:2, :].T  # shape (n, 2)
     pursuerHeadings = nodes[2, :]  # shape (n,)
     pursuerTurnRadii = nodes[3, :]  # shape (n,)
     pursuerSpeeds = nodes[4, :]  # shape (n,)
+    print("pursuerPositions", pursuerPositions.shape)
 
     Z = new_in_dubins_engagement_zone3(
         pursuerPositions,
@@ -1695,16 +1705,12 @@ def dubins_pez_numerical_integration_sparse(
         evaderHeadings,
         evaderSpeed,
     )
-    print("weights", weights)
-    print("Z", Z)
-    epsilon = 1e-2
-    # smoothZ = jax.nn.sigmoid(-Z / epsilon)
-    smoothZ = jnp.where(Z < 0, 1.0, 0.0)
-    print("smoothZ", smoothZ)
-    probs = jnp.sum(weights * smoothZ, axis=1)
 
-    print("probs", probs)
-    return probs, 0, 0, 0
+    # epsilon = 1e-3
+    # Zsmooth = jax.nn.sigmoid(-Z / epsilon)
+    Zsmooth = jnp.where(Z < 0, 1.0, 0.0)
+    probs = jnp.sum(weights * Zsmooth, axis=1)
+    return probs, 0, 0
 
 
 def create_bounding_and_linearization_points(mean, std, numBoundingPoints):
@@ -2361,14 +2367,14 @@ def plot_dubins_PEZ(
     useCombinedQuadratic=False,
     usePiecewiseLinear=False,
 ):
+    rangeX = 1.5
+    x = jnp.linspace(-rangeX, rangeX, numPoints)
+    y = jnp.linspace(-rangeX, rangeX, numPoints)
+    [X, Y] = jnp.meshgrid(x, y)
+    X = X.flatten()
+    Y = Y.flatten()
+    evaderHeadings = np.ones_like(X) * evaderHeading
     if useLinear:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
         start = time.time()
         ZTrue, _, _ = linear_dubins_pez(
             jnp.array([X, Y]).T,
@@ -2389,13 +2395,6 @@ def plot_dubins_PEZ(
         print("linear_dubins_pez time", time.time() - start)
         ax.set_title("Linear Dubins PEZ", fontsize=20)
     elif useUnscented:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
         ZTrue, _, _ = uncented_dubins_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2414,13 +2413,6 @@ def plot_dubins_PEZ(
         )
         ax.set_title("Unscented Dubins PEZ")
     elif useMC:
-        rangeX = 2.0
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
         start = time.time()
         ZTrue, _, _, _, _, _, _ = mc_dubins_PEZ(
             jnp.array([X, Y]).T,
@@ -2441,13 +2433,6 @@ def plot_dubins_PEZ(
         print("mc_dubins_PEZ time", time.time() - start)
         ax.set_title("Monte Carlo Dubins PEZ", fontsize=20)
     elif useQuadratic:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
         ZTrue, _, _ = quadratic_dubins_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2466,13 +2451,6 @@ def plot_dubins_PEZ(
         )
         ax.set_title("Quadratic Dubins PEZ", fontsize=20)
     elif useEdgeworth:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
         ZTrue, _, _, _ = second_order_taylor_expansion_edgeworth_dubins_PEZ(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2490,13 +2468,6 @@ def plot_dubins_PEZ(
             captureRadius,
         )
     elif useCubic:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
         ZTrue, _, _ = cubic_dubins_PEZ(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2515,13 +2486,6 @@ def plot_dubins_PEZ(
         )
         ax.set_title("Cubic Dubins PEZ", fontsize=20)
     elif useCombinedLinear:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
         ZTrue = combined_left_right_dubins_PEZ(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2540,13 +2504,6 @@ def plot_dubins_PEZ(
         )
         ax.set_title("Combined Linear Dubins PEZ", fontsize=20)
     elif useCombinedQuadratic:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
         ZTrue = combined_left_right_quadratic_dubins_PEZ(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2565,15 +2522,8 @@ def plot_dubins_PEZ(
         )
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
     elif usePiecewiseLinear:
-        rangeX = 2
-        x = jnp.linspace(-rangeX, rangeX, numPoints)
-        y = jnp.linspace(-rangeX, rangeX, numPoints)
-        [X, Y] = jnp.meshgrid(x, y)
-        X = X.flatten()
-        Y = Y.flatten()
-        evaderHeadings = np.ones_like(X) * evaderHeading
         start = time.time()
-        ZTrue, _, _, _ = dubins_pez_numerical_integration_sparse(
+        ZTrue, _, _ = dubins_pez_numerical_integration_sparse(
             # ZTrue, _, _, _ = numerical_dubins_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2669,6 +2619,8 @@ def plot_dubins_PEZ_diff(
         captureRadius,
     )
     ZMC = np.array(ZMC.block_until_ready())
+    print("max ZMC", jnp.max(ZMC))
+    print("min ZMC", jnp.min(ZMC))
     if useLinear:
         print("Linear")
         ZTrue, _, _ = linear_dubins_pez(
@@ -2803,7 +2755,7 @@ def plot_dubins_PEZ_diff(
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
     elif usePiecewiseLinear:
         print("Piecewise Linear")
-        ZTrue, _, _, _ = dubins_pez_numerical_integration_sparse(
+        ZTrue, _, _ = dubins_pez_numerical_integration_sparse(
             # ZTrue, _, _, _ = numerical_dubins_pez(
             points,
             evaderHeadings,

@@ -181,13 +181,29 @@ find_dubins_path_length_left_strait_vec = jax.vmap(
 
 
 @jax.jit
+def soft_min(a: jnp.ndarray, b: jnp.ndarray, alpha: float) -> jnp.ndarray:
+    """
+    Smooth approximation to min(a, b) that handles NaNs:
+      - If a is NaN and b is not, returns b
+      - If b is NaN and a is not, returns a
+      - If both are NaN, returns NaN
+    Uses soft‑min:  -alpha * log(exp(-a/alpha) + exp(-b/alpha))
+    """
+    # Standard soft-min
+    smin = -alpha * jnp.log(jnp.exp(-a / alpha) + jnp.exp(-b / alpha))
+    # Identify NaNs
+    nan_a = jnp.isnan(a)
+    nan_b = jnp.isnan(b)
+    # Where one input is NaN, take the other
+    res = jnp.where(nan_a & ~nan_b, b, smin)
+    res = jnp.where(nan_b & ~nan_a, a, res)
+    # If both are NaN, result should be NaN
+    res = jnp.where(nan_a & nan_b, jnp.nan, res)
+    return res
+
+
+@jax.jit
 def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, radius):
-    # leftRightLength, _ = find_dubins_path_length_left_right(
-    #     pursuerPosition, pursuerHeading, goalPosition, radius
-    # )
-    # rightLeftLength, _ = find_dubins_path_length_right_left(
-    #     pursuerPosition, pursuerHeading, goalPosition, radius
-    # )
     straitLeftLength, _ = find_dubins_path_length_right_strait(
         pursuerPosition, pursuerHeading, goalPosition, radius
     )
@@ -195,14 +211,25 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
         pursuerPosition, pursuerHeading, goalPosition, radius
     )
 
-    # lengths = jnp.array(
-    #     [leftRightLength, rightLeftLength, straitLeftLength, straitRightLength]
-    # )
     lengths = jnp.array([straitLeftLength, straitRightLength])
-    # lengths = jnp.array([straitLeftLength])  # , straitRightLength])
 
     return jnp.nanmin(lengths)
-    # return differentiable_min(*lengths)
+
+
+@jax.jit
+def find_shortest_dubins_path_soft_min(
+    pursuerPosition, pursuerHeading, goalPosition, radius
+):
+    straitLeftLength, _ = find_dubins_path_length_right_strait(
+        pursuerPosition, pursuerHeading, goalPosition, radius
+    )
+    straitRightLength, _ = find_dubins_path_length_left_strait(
+        pursuerPosition, pursuerHeading, goalPosition, radius
+    )
+
+    lengths = jnp.array([straitLeftLength, straitRightLength])
+
+    return soft_min(*lengths, 0.05)
 
 
 # Vectorized version over goalPosition
@@ -210,6 +237,33 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
 #     find_shortest_dubins_path,
 #     in_axes=(None, None, 0, None),  # Vectorize over goalPosition (3rd argument)
 # )
+
+
+@jax.jit
+def in_dubins_engagement_zone_soft_min_single(
+    startPosition,
+    startHeading,
+    turnRadius,
+    captureRadius,
+    pursuerRange,
+    pursuerSpeed,
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+):
+    speedRatio = evaderSpeed / pursuerSpeed
+
+    # Compute goal positions
+    direction = jnp.array(
+        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
+    )  # Heading unit vector
+    goalPositions = evaderPosition + speedRatio * pursuerRange * direction
+    dubinsPathLengths = find_shortest_dubins_path_soft_min(
+        startPosition, startHeading, goalPositions, turnRadius
+    )
+
+    ez = dubinsPathLengths - (captureRadius + pursuerRange)
+    return ez
 
 
 @jax.jit
@@ -236,7 +290,6 @@ def in_dubins_engagement_zone_single(
     )
 
     ez = dubinsPathLengths - (captureRadius + pursuerRange)
-    # return dubinsPathLengths
     return ez
 
 

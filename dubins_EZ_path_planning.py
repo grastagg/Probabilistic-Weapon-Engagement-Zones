@@ -22,7 +22,7 @@ from bspline.matrix_evaluation import (
     matrix_bspline_derivative_evaluation_for_dataset,
 )
 
-from dubinsEZ import in_dubins_engagement_zone, vectorized_find_shortest_dubins_path
+from dubinsEZ import in_dubins_engagement_zone
 import dubinsEZ
 
 import pez_path_planner
