@@ -8,6 +8,7 @@ import time
 
 
 import dubinsEZ
+import polynomial_EZ
 
 
 jax.config.update("jax_enable_x64", False)
@@ -1713,6 +1714,110 @@ def dubins_pez_numerical_integration_sparse(
     return probs, 0, 0
 
 
+def evaluate_hermite_surrogate_single(
+    node, coeff, indices, pursuerRange, evaderPosition, evaderHeading
+):
+    X = jnp.array(
+        [
+            [
+                node[0],
+                node[1],
+                node[2],
+                node[3],
+                node[4],
+                pursuerRange,
+                evaderPosition[0],
+                evaderPosition[1],
+                evaderHeading,
+            ]
+        ]
+    )
+    Z = polynomial_EZ.eval_hermite_surrogate_jax(
+        X,
+        indices,
+        coeff,
+    )
+    return Z
+
+
+evaluate_hermite_surrogate_multiple_nodes = jax.jit(
+    jax.vmap(
+        evaluate_hermite_surrogate_single, in_axes=(0, None, None, None, None, None)
+    )
+)
+
+
+def evaluate_hermite_surrogate(
+    nodes, coeff, indices, pursuerRange, evaderPosition, evaderHeading
+):
+    return evaluate_hermite_surrogate_multiple_nodes(
+        nodes, coeff, indices, pursuerRange, evaderPosition, evaderHeading
+    )
+
+
+evaluate_hermite_surrogate_vmap = jax.vmap(
+    evaluate_hermite_surrogate,
+    in_axes=(None, None, None, None, 0, 0),
+)
+
+
+def dubins_pez_numerical_integration_surragate(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    mu = jnp.concatenate(
+        [
+            pursuerPosition,  # (2,)
+            jnp.array([pursuerHeading]),  # (1,)
+            jnp.array([minimumTurnRadius]),  # (1,)
+            jnp.array([pursuerSpeed]),  # (1,)
+            jnp.array([pursuerRange]),  # (1,)
+        ]
+    ).flatten()
+    cov = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        minimumTurnRadiusVar,
+        pursuerSpeedVar,
+        pursuerRangeVar,
+    )
+    nodes, weights = create_quadrature_nodes_and_weights(
+        mu[0:5], cov[0:5, 0:5], order=9
+    )
+    indices, coeff = polynomial_EZ.create_hermite_surragate(
+        mu,
+        cov,
+        np.array([-3, 3, -3, 3 - np.pi, np.pi, 0, 0, 0, 0]),
+        evaderSpeed,
+        1000,
+        degree=3,
+    )
+    indices = np.array(indices)
+    print("nodes", nodes.shape)
+    print("indices", indices.shape)
+    Z = evaluate_hermite_surrogate_vmap(
+        nodes.T, coeff, indices, pursuerRange, evaderPositions, evaderHeadings
+    )
+
+    epsilon = 1e-3
+    # Zsmooth = jax.nn.sigmoid(-Z / epsilon)
+    Zsmooth = jnp.where(Z < 0, 1.0, 0.0)
+    probs = jnp.sum(weights * Zsmooth, axis=1)
+    return probs, 0, 0
+
+
 def create_bounding_and_linearization_points(mean, std, numBoundingPoints):
     # create bounding points
     maxBound = mean + 3 * std
@@ -2523,7 +2628,7 @@ def plot_dubins_PEZ(
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
     elif usePiecewiseLinear:
         start = time.time()
-        ZTrue, _, _ = dubins_pez_numerical_integration_sparse(
+        ZTrue, _, _ = dubins_pez_numerical_integration_surragate(
             # ZTrue, _, _, _ = numerical_dubins_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2755,7 +2860,7 @@ def plot_dubins_PEZ_diff(
         ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
     elif usePiecewiseLinear:
         print("Piecewise Linear")
-        ZTrue, _, _ = dubins_pez_numerical_integration_sparse(
+        ZTrue, _, _ = dubins_pez_numerical_integration_surragate(
             # ZTrue, _, _, _ = numerical_dubins_pez(
             points,
             evaderHeadings,
