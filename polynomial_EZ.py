@@ -6,6 +6,8 @@ from sklearn.linear_model import LinearRegression
 import jax
 import jax.numpy as jnp
 from jax import jit, vmap, lax
+import matplotlib.pyplot as plt
+from functools import partial
 
 
 import dubinsEZ
@@ -20,6 +22,22 @@ in_dubins_engagement_zone = jax.jit(
             None,  # catureRadius
             0,  # pursuerRange
             0,  # pursuerSpeed
+            0,  # evaderPosition
+            0,  # evaderHeading
+            None,  # evaderSpeed
+        ),  # Vectorizing over evaderPosition & evaderHeading
+    )
+)
+in_dubins_engagement_zone_ev = jax.jit(
+    jax.vmap(
+        dubinsEZ.in_dubins_engagement_zone_single,
+        in_axes=(
+            None,  # pursuerPosition
+            None,  # pursuerHeading
+            None,  # minimumTurnRadius
+            None,  # catureRadius
+            None,  # pursuerRange
+            None,  # pursuerSpeed
             0,  # evaderPosition
             0,  # evaderHeading
             None,  # evaderSpeed
@@ -159,10 +177,9 @@ def eval_hermite_surrogate(X, indices, coeffs):
 # y_new = eval_hermite_surrogate(X_new, inds, cfs)
 
 
-@jit
 def hermite_prob(n: int, x: jnp.ndarray) -> jnp.ndarray:
     """
-    Compute probabilists' Hermite polynomial He_n(x) via recurrence:
+    Probabilists' Hermite polynomial He_n(x) via recurrence:
       He_0(x) = 1
       He_1(x) = x
       He_n(x) = x * He_{n-1}(x) - (n-1) * He_{n-2}(x)
@@ -173,7 +190,6 @@ def hermite_prob(n: int, x: jnp.ndarray) -> jnp.ndarray:
         H_n = x * H_nm1 - (i - 1) * H_nm2
         return (H_nm1, H_n), H_n
 
-    # handle n=0 and n=1 as special cases
     H0 = jnp.ones_like(x)
     if n == 0:
         return H0
@@ -181,43 +197,104 @@ def hermite_prob(n: int, x: jnp.ndarray) -> jnp.ndarray:
     if n == 1:
         return H1
 
-    # use lax.scan to iterate from 2..n
     (_, Hn), _ = lax.scan(body, (H0, H1), jnp.arange(2, n + 1))
     return Hn
 
 
-@jax.jit
-def eval_hermite_surrogate_jax(
-    X: jnp.ndarray, indices: jnp.ndarray, coeffs: jnp.ndarray
-) -> jnp.ndarray:
+def make_hermite_evaluator(indices: jnp.ndarray, coeffs_np: jnp.ndarray):
     """
-    Evaluate multivariate Hermite surrogate in JAX.
+    Create a JAX-jitted surrogate evaluator for multivariate Hermite chaos.
 
     Args:
-      X: array of shape (m, d) – new input points
-      indices: array of shape (n_terms, d) – multi-indices
-      coeffs: array of shape (n_terms,) – Hermite coefficients
+      indices_np: np.ndarray of shape (n_terms, d) -- integer multi-indices
+      coeffs_np:  np.ndarray of shape (n_terms,)    -- Hermite coefficients
 
     Returns:
-      y: array of shape (m,) – surrogate values
+      A function eval_H(X) that maps X of shape (m, d) -> (m,) surrogate values.
     """
+    # Convert to Python tuple of tuples of ints (static for JIT)
+    # indices_list = tuple(map(tuple, indices_np.tolist()))
+    # Static JAX array of coefficients
+    coeffs_jax = jnp.array(coeffs_np)
 
-    def eval_point(theta):
-        # theta: (d,)
-        def eval_term(alpha, c):
-            # alpha: (d,), c: scalar coefficient
-            # compute product of univariate Hermite polynomials
-            H_vals = [
-                hermite_prob(int(alpha[k]), theta[k]) for k in range(alpha.shape[0])
-            ]
-            return c * jnp.prod(jnp.stack(H_vals))
+    @jit
+    def eval_H(X: jnp.ndarray) -> jnp.ndarray:
+        # X: (m, d)
+        def eval_point(theta):
+            acc = 0.0
+            for alpha, c in zip(indices, coeffs_jax):
+                term = c
+                for k, ak in enumerate(alpha):
+                    # ak is a Python int here
+                    term = term * hermite_prob(ak, theta[k])
+                acc = acc + term
+            return acc
 
-        # vectorize over terms
-        terms = vmap(eval_term, in_axes=(0, 0))(indices, coeffs)  # (n_terms,)
-        return jnp.sum(terms)
+        # vectorize over m samples
+        return vmap(eval_point)(X)
 
-    # vectorize over sample points
-    return vmap(eval_point, in_axes=(0,))(X)  # (m,)
+    return eval_H
+
+
+def evaluate_hermite_grid(
+    pursuer_params: jnp.ndarray,  # shape (P, d1)
+    evader_params: jnp.ndarray,  # shape (E, d2)
+    indices_np: jnp.ndarray,  # shape (n_terms, d1+d2)
+    coeffs_np: jnp.ndarray,  # shape (n_terms,)
+) -> jnp.ndarray:
+    """
+    Evaluate the surrogate for all (pursuer, evader) pairs via nested vmap.
+
+    Returns:
+      Z_matrix of shape (P, E).
+    """
+    # Build the base surrogate evaluator: input X of shape (m, d1+d2) -> (m,)
+    eval_H = make_hermite_evaluator(indices_np, coeffs_np)
+
+    @jit
+    def eval_for_p(p: jnp.ndarray) -> jnp.ndarray:
+        # p: (d1,)
+        def eval_e(e: jnp.ndarray):
+            # build single row and evaluate
+            X = jnp.concatenate([p, e])[None, :]
+            return eval_H(X)[0]
+
+        return vmap(eval_e)(evader_params)  # -> (E,)
+
+    @jit
+    def eval_all(Ps: jnp.ndarray) -> jnp.ndarray:
+        # Ps: (P, d1) -> (P, E)
+        return vmap(eval_for_p)(Ps)
+
+    return eval_all(pursuer_params)  # shape (P, E)
+
+
+def fit_monomial_surrogate(X: np.ndarray, y: np.ndarray, degree: int):
+    """
+    Fit a global monomial surrogate z_poly(X) to data (X, y) using sklearn.
+
+    Args:
+        X: numpy.ndarray of shape (n_samples, d) — input samples.
+        y: numpy.ndarray of shape (n_samples,)   — target z(theta) values.
+        degree: int — maximum total degree of monomials.
+
+    Returns:
+        coeffs: numpy.ndarray of shape (n_terms,) — fitted coefficients.
+        powers: numpy.ndarray of shape (n_terms, d) — each row gives exponents for one term.
+    """
+    # 1) Build monomial features up to total degree
+    poly = PolynomialFeatures(degree=degree, include_bias=True)
+    Phi = poly.fit_transform(X)  # shape (n_samples, n_terms)
+
+    # 2) Fit linear model (no intercept, bias in features)
+    model = LinearRegression(fit_intercept=True)
+    model.fit(Phi, y)
+
+    # 3) Extract coefficients and exponent patterns
+    coeffs = model.coef_  # shape (n_terms,)
+    powers = poly.powers_  # shape (n_terms, d)
+
+    return coeffs, powers
 
 
 def create_input_output_data(
@@ -265,6 +342,147 @@ def create_hermite_surragate(
     return indicies, coeffs
 
 
+def make_monomial_evaluator(powers_np: jnp.ndarray, coeffs_np: jnp.ndarray):
+    """
+    Build a JAX-jitted evaluator for a monomial surrogate.
+
+    Args:
+      powers_np: array of shape (n_terms, d) of integer exponents
+      coeffs_np: array of shape (n_terms,) of float coefficients
+
+    Returns:
+      eval_mono: function mapping X (m, d) -> (m,) surrogate values
+    """
+    powers = jnp.array(powers_np)  # (n_terms, d)
+    coeffs = jnp.array(coeffs_np)  # (n_terms,)
+
+    @jit
+    def eval_mono(X: jnp.ndarray) -> jnp.ndarray:
+        # X: (m, d)
+        # Compute X^(powers) -> shape (m, n_terms, d)
+        X_exp = X[:, None, :] ** powers[None, :, :]
+        # Multiply across d to get each monomial term: (m, n_terms)
+        monom = jnp.prod(X_exp, axis=-1)
+        # Sum weighted terms: (m,)
+        return monom @ coeffs
+
+    return eval_mono
+
+
+def evaluate_monomial_grid(
+    pursuer_params: jnp.ndarray,  # shape (P, d1)
+    evader_params: jnp.ndarray,  # shape (E, d2)
+    powers_np: jnp.ndarray,  # shape (n_terms, d1+d2)
+    coeffs_np: jnp.ndarray,  # shape (n_terms,)
+) -> jnp.ndarray:
+    """
+    Evaluate the monomial surrogate for all combinations of pursuer and evader.
+
+    Returns:
+      Z_matrix of shape (P, E).
+    """
+    # Build the core surrogate evaluator
+    eval_mono = make_monomial_evaluator(powers_np, coeffs_np)
+
+    @jit
+    def eval_for_p(p: jnp.ndarray) -> jnp.ndarray:
+        # p: (d1,)
+        def eval_e(e: jnp.ndarray):
+            # Concatenate pursuer and evader parameters
+            x = jnp.concatenate([p, e])[None, :]  # shape (1, d1+d2)
+            # Evaluate surrogate on single point
+            return eval_mono(x)[0]  # scalar
+
+        # Vectorize over all evaders: returns (E,)
+        return vmap(eval_e)(evader_params)
+
+    @jit
+    def eval_all(Ps: jnp.ndarray) -> jnp.ndarray:
+        # Ps: (P, d1) -> returns (P, E)
+        return vmap(eval_for_p)(Ps)
+
+    # Compute the full grid
+    return eval_all(pursuer_params)  # shape (P, E)
+
+
+def create_monomial_surragate(
+    pursuerParams, pursuerParamsCov, evaderBounds, evaderSpeed, numSamples, degree
+):
+    X, y = create_input_output_data(
+        numSamples, pursuerParams, pursuerParamsCov, evaderBounds, evaderSpeed
+    )
+    coeffs, powers = fit_monomial_surrogate(X, y, degree)
+    return coeffs, powers
+
+
+def plot_surruagate(
+    pursuerParams, pursuerParamsCov, evaderBounds, evaderHeading, evaderSpeed
+):
+    coeffs, powers = create_monomial_surragate(
+        pursuerParams, pursuerParamsCov, evaderBounds, evaderSpeed, 2000, 11
+    )
+
+    rangeX = 1.5
+    numPoints = 100
+    x = jnp.linspace(-rangeX, rangeX, numPoints)
+    y = jnp.linspace(-rangeX, rangeX, numPoints)
+    [X, Y] = jnp.meshgrid(x, y)
+    X = X.flatten()
+    Y = Y.flatten()
+    evaderHeadings = np.ones_like(X) * evaderHeading
+    evaderPositions = np.column_stack((X, Y))
+
+    evaderParams = np.hstack([evaderPositions, evaderHeadings[:, None]])
+    Z = evaluate_monomial_grid(np.array([pursuerParams]), evaderParams, powers, coeffs)
+    Z = Z.reshape(numPoints, numPoints)
+    fig, ax = plt.subplots()
+    X = X.reshape(numPoints, numPoints)
+    Y = Y.reshape(numPoints, numPoints)
+    c = ax.pcolormesh(
+        X,
+        Y,
+        Z,
+    )
+    colors = ["red"]
+    ax.contour(X, Y, Z, levels=[0], colors=colors, zorder=10000)
+    cbar = plt.colorbar(c)
+    pursuerPosition = pursuerParams[:2]
+    pursuerHeading = pursuerParams[2]
+    minimumTurnRadius = pursuerParams[3]
+    captureRadius = 0.0
+    pursuerRange = pursuerParams[4]
+    pursuerSpeed = pursuerParams[5]
+    evaderPosition = evaderPositions
+    evaderHeading = evaderHeadings
+    y = in_dubins_engagement_zone_ev(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+    )
+    print(evaderHeadings)
+    fig2, ax2 = plt.subplots()
+    c = ax2.pcolormesh(X, Y, y.reshape(numPoints, numPoints))
+    dubinsEZ.plot_dubins_EZ(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        evaderHeading[0],
+        evaderSpeed,
+        ax2,
+    )
+    cbar = plt.colorbar(c)
+    plt.show()
+
+
 def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
@@ -297,19 +515,20 @@ def main():
         [
             pursuerPosition,  # (2,)
             np.array([pursuerHeading]),  # (1,)
-            np.array([pursuerSpeed]),  # (1,)
             np.array([minimumTurnRadius]),  # (1,)
             np.array([pursuerRange]),  # (1,)
+            np.array([pursuerSpeed]),  # (1,)
         ]
     )
     full_cov = stacked_cov(
         pursuerPositionCov,
         pursuerHeadingVar,
-        pursuerSpeedVar,
         minimumTurnRadiusVar,
         pursuerRangeVar,
+        pursuerSpeedVar,
     )
     evaderBounds = np.array([-3, 3, -3, 3, -np.pi, np.pi])
+    plot_surruagate(pursuerParams, full_cov, evaderBounds, evaderHeading, evaderSpeed)
 
 
 if __name__ == "__main__":
