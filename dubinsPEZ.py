@@ -216,6 +216,70 @@ def mc_dubins_PEZ(
     )
 
 
+def mc_dubins_PEZ_Single(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    numSamples = 10000
+
+    key, subkey = generate_random_key()
+    # Generate heading samples
+    pursuerHeadingSamples = pursuerHeading + jnp.sqrt(
+        pursuerHeadingVar
+    ) * jax.random.normal(subkey, shape=(numSamples,))
+
+    key, subkey = generate_random_key()
+
+    # generate turn radius samples
+    minimumTurnRadiusSamples = minimumTurnRadius + jnp.sqrt(
+        minimumTurnRadiusVar
+    ) * jax.random.normal(subkey, shape=(numSamples,))
+
+    key, subkey = generate_random_key()
+    # generate speed samples
+    pursuerSpeedSamples = pursuerSpeed + jnp.sqrt(pursuerSpeedVar) * jax.random.normal(
+        subkey, shape=(numSamples,)
+    )
+
+    key, subkey = generate_random_key()
+
+    # generate position samples
+    pursuerPositionSamples = jax.random.multivariate_normal(
+        key, pursuerPosition, pursuerPositionCov, shape=(numSamples,)
+    )
+
+    key, subkey = generate_random_key()
+
+    pursuerRangeSamples = pursuerRange + jnp.sqrt(pursuerRangeVar) * jax.random.normal(
+        subkey, shape=(numSamples,)
+    )
+
+    return mc_dubins_pez_single(
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerPositionSamples,
+        pursuerHeadingSamples,
+        pursuerSpeedSamples,
+        minimumTurnRadiusSamples,
+        pursuerRangeSamples,
+        captureRadius,
+        numSamples,
+    )
+
+
 def dubins_EZ_single_combined_input(pursuerParams, evaderParams):
     pursuerPosition = pursuerParams[:2]
     pursuerHeading = pursuerParams[2]
