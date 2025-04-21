@@ -9,6 +9,7 @@ import time
 
 import dubinsEZ
 import polynomial_EZ
+import nueral_network_EZ
 
 
 jax.config.update("jax_enable_x64", False)
@@ -100,6 +101,49 @@ new_in_dubins_engagement_zone3 = jax.jit(
 #         ),  # Vectorizing over evaderPosition & evaderHeading
 #     )
 # )
+
+
+def mc_dubins_PEZ_single_differentiable(
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
+    captureRadius,
+    numSamples,
+):
+    ez = in_dubins_engagement_zone(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+    )
+    # 2) smooth indicator: sigmoid(-β⋅ez) ≈ 1{ez≤0}
+    beta = 50
+    soft_ind = jax.nn.sigmoid(-beta * ez)  # shape (numSamples,)
+
+    # 3) average to get a probability
+    p_hit = jnp.mean(soft_ind)  # scalar
+
+    # var = jnp.var(ez)
+    # mean = jnp.mean(ez)
+    return (
+        p_hit,
+        ez,
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
+    )
 
 
 def mc_dubins_pez_single(
@@ -267,6 +311,70 @@ def mc_dubins_PEZ_Single(
     )
 
     return mc_dubins_pez_single(
+        evaderPositions,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerPositionSamples,
+        pursuerHeadingSamples,
+        pursuerSpeedSamples,
+        minimumTurnRadiusSamples,
+        pursuerRangeSamples,
+        captureRadius,
+        numSamples,
+    )
+
+
+def mc_dubins_PEZ_Single_differentiable(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadingVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    minimumTurnRadius,
+    minimumTurnRadiusVar,
+    pursuerRange,
+    pursuerRangeVar,
+    captureRadius,
+):
+    numSamples = 10000
+
+    key, subkey = generate_random_key()
+    # Generate heading samples
+    pursuerHeadingSamples = pursuerHeading + jnp.sqrt(
+        pursuerHeadingVar
+    ) * jax.random.normal(subkey, shape=(numSamples,))
+
+    key, subkey = generate_random_key()
+
+    # generate turn radius samples
+    minimumTurnRadiusSamples = minimumTurnRadius + jnp.sqrt(
+        minimumTurnRadiusVar
+    ) * jax.random.normal(subkey, shape=(numSamples,))
+
+    key, subkey = generate_random_key()
+    # generate speed samples
+    pursuerSpeedSamples = pursuerSpeed + jnp.sqrt(pursuerSpeedVar) * jax.random.normal(
+        subkey, shape=(numSamples,)
+    )
+
+    key, subkey = generate_random_key()
+
+    # generate position samples
+    pursuerPositionSamples = jax.random.multivariate_normal(
+        key, pursuerPosition, pursuerPositionCov, shape=(numSamples,)
+    )
+
+    key, subkey = generate_random_key()
+
+    pursuerRangeSamples = pursuerRange + jnp.sqrt(pursuerRangeVar) * jax.random.normal(
+        subkey, shape=(numSamples,)
+    )
+
+    return mc_dubins_PEZ_single_differentiable(
         evaderPositions,
         evaderHeadings,
         evaderSpeed,
@@ -637,27 +745,27 @@ def quadratic_dubins_PEZ_single(
     )
 
 
-# quadratic_dubins_pez = jax.jit(
-#     jax.vmap(
-#         quadratic_dubins_PEZ_single,
-#         in_axes=(
-#             0,
-#             0,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#         ),
-#     )
-# )
+quadratic_dubins_pez = jax.jit(
+    jax.vmap(
+        quadratic_dubins_PEZ_single,
+        in_axes=(
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+)
 
 
 def cubic_dubins_PEZ_single(
@@ -2487,11 +2595,8 @@ def plot_dubins_PEZ(
     useUnscented=False,
     useQuadratic=False,
     useMC=False,
-    useEdgeworth=False,
-    useCubic=False,
-    useCombinedLinear=False,
-    useCombinedQuadratic=False,
-    usePiecewiseLinear=False,
+    useNumerical=False,
+    useNueralNetwork=False,
 ):
     rangeX = 1.5
     x = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -2576,78 +2681,7 @@ def plot_dubins_PEZ(
             captureRadius,
         )
         ax.set_title("Quadratic Dubins PEZ", fontsize=20)
-    elif useEdgeworth:
-        ZTrue, _, _, _ = second_order_taylor_expansion_edgeworth_dubins_PEZ(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-    elif useCubic:
-        ZTrue, _, _ = cubic_dubins_PEZ(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Cubic Dubins PEZ", fontsize=20)
-    elif useCombinedLinear:
-        ZTrue = combined_left_right_dubins_PEZ(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Combined Linear Dubins PEZ", fontsize=20)
-    elif useCombinedQuadratic:
-        ZTrue = combined_left_right_quadratic_dubins_PEZ(
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
-    elif usePiecewiseLinear:
+    elif useNumerical:
         start = time.time()
         ZTrue, _, _ = dubins_pez_numerical_integration_sparse(
             # ZTrue, _, _, _ = numerical_dubins_pez(
@@ -2668,6 +2702,26 @@ def plot_dubins_PEZ(
         )
         print("numerical integration time", time.time() - start)
         ax.set_title("Numerical Integration Dubins PEZ", fontsize=20)
+    elif useNueralNetwork:
+        start = time.time()
+        ZTrue = nueral_network_EZ.nueral_network_pez(
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        ax.set_title("Neural Network Dubins PEZ", fontsize=20)
+        print("nueral_network_EZ time", time.time() - start)
 
     ZTrue = np.array(ZTrue.block_until_ready())
     ZTrue = ZTrue.reshape(numPoints, numPoints)
@@ -2713,12 +2767,8 @@ def plot_dubins_PEZ_diff(
     useLinear=False,
     useUnscented=False,
     useQuadratic=False,
-    useMC=False,
-    useEdgeworth=False,
-    useCubic=False,
-    useCombinedLinear=False,
-    useCombinedQuadratic=False,
-    usePiecewiseLinear=False,
+    useNumerical=False,
+    useNueralNetwork=False,
 ):
     rangeX = 1.0
     x = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -2804,82 +2854,7 @@ def plot_dubins_PEZ_diff(
             captureRadius,
         )
         ax.set_title("Quadratic Dubins PEZ", fontsize=20)
-    elif useEdgeworth:
-        print("Edgeworth")
-        ZTrue, _, _, _ = second_order_taylor_expansion_edgeworth_dubins_PEZ(
-            points,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-    elif useCubic:
-        print("Cubic")
-        ZTrue, _, _ = cubic_dubins_PEZ(
-            points,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Cubic Dubins PEZ", fontsize=20)
-    elif useCombinedLinear:
-        print("Combined Linear")
-        ZTrue = combined_left_right_dubins_PEZ(
-            points,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Combined Linear Dubins PEZ", fontsize=20)
-    elif useCombinedQuadratic:
-        print("Combined Quadratic")
-        ZTrue = combined_left_right_quadratic_dubins_PEZ(
-            points,
-            evaderHeadings,
-            evaderSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            minimumTurnRadius,
-            minimumTurnRadiusVar,
-            pursuerRange,
-            pursuerRangeVar,
-            captureRadius,
-        )
-        ax.set_title("Combined Quadratic Dubins PEZ", fontsize=20)
-    elif usePiecewiseLinear:
+    elif useNumerical:
         print("Piecewise Linear")
         ZTrue, _, _ = dubins_pez_numerical_integration_sparse(
             # ZTrue, _, _, _ = numerical_dubins_pez(
@@ -2899,6 +2874,25 @@ def plot_dubins_PEZ_diff(
             captureRadius,
         )
         ax.set_title("Numerical Dubins PEZ", fontsize=20)
+    elif useNueralNetwork:
+        print("Neural Network")
+        ZTrue = nueral_network_EZ.nueral_network_pez(
+            points,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        ax.set_title("Neural Network Dubins PEZ", fontsize=20)
 
     ZTrue = np.array(ZTrue.block_until_ready())
     rmse = jnp.sqrt(jnp.mean((ZTrue - ZMC) ** 2))
@@ -2907,9 +2901,6 @@ def plot_dubins_PEZ_diff(
     print("Average Abs Diff", average_abs_diff)
     max_abs_diff = jnp.max(jnp.abs(ZTrue - ZMC))
     print("Max Abs Diff", max_abs_diff)
-    print("points", points[jnp.argmax(jnp.abs(ZTrue - ZMC))])
-    print("ztrue", ZTrue[jnp.argmax(jnp.abs(ZTrue - ZMC))])
-    print("zmc", ZMC[jnp.argmax(jnp.abs(ZTrue - ZMC))])
     ZMC = ZMC.reshape(numPoints, numPoints)
     ZTrue = ZTrue.reshape(numPoints, numPoints)
     # write rmse on image
@@ -3459,7 +3450,7 @@ def compare_PEZ(
     #     axes[0][2],
     #     useQuadratic=True,
     # )
-    # combined_linear = plot_dubins_PEZ(
+    # numerical = plot_dubins_PEZ(
     #     pursuerPosition,
     #     pursuerPositionCov,
     #     pursuerHeading,
@@ -3473,27 +3464,10 @@ def compare_PEZ(
     #     pursuerRangeVar,
     #     evaderHeading,
     #     evaderSpeed,
-    #     axes[1][0],
-    #     useCombinedLinear=True,
+    #     axes[2],
+    #     useNumerical=True,
     # )
-    # combined_quadratic = plot_dubins_PEZ(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     axes[1][1],
-    #     useCombinedQuadratic=True,
-    # )
-    piecewise_linear = plot_dubins_PEZ(
+    nueralEZ = plot_dubins_PEZ(
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
@@ -3508,7 +3482,7 @@ def compare_PEZ(
         evaderHeading,
         evaderSpeed,
         axes[2],
-        usePiecewiseLinear=True,
+        useNueralNetwork=True,
     )
 
     #
@@ -3552,6 +3526,23 @@ def plot_all_error(
         axes[0],
         useLinear=True,
     )
+    # usEZ = plot_dubins_PEZ_diff(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     axes[1],
+    #     useNumerical=True,
+    # )
     usEZ = plot_dubins_PEZ_diff(
         pursuerPosition,
         pursuerPositionCov,
@@ -3567,7 +3558,7 @@ def plot_all_error(
         evaderHeading,
         evaderSpeed,
         axes[1],
-        usePiecewiseLinear=True,
+        useNueralNetwork=True,
     )
     # quadEZ = plot_dubins_PEZ_diff(
     #     pursuerPosition,
@@ -3585,58 +3576,6 @@ def plot_all_error(
     #     evaderSpeed,
     #     axes[0][1],
     #     useQuadratic=True,
-    # )
-    # cubicEZ = plot_dubins_PEZ_diff(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     axes[0][2],
-    #     useCubic=True,
-    # )
-    #
-    # combined_linear = plot_dubins_PEZ_diff(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     axes[1][0],
-    #     useCombinedLinear=True,
-    # )
-    # combined_quadratic = plot_dubins_PEZ_diff(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     axes[1][1],
-    #     useCombinedQuadratic=True,
     # )
 
 
