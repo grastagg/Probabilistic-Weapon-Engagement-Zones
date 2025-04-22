@@ -14,7 +14,7 @@ import nueral_network_EZ
 
 jax.config.update("jax_enable_x64", False)
 
-numPoints = 90
+numPoints = 10
 # Vectorized function using vmap
 in_dubins_engagement_zone = jax.jit(
     jax.vmap(
@@ -42,7 +42,7 @@ in_dubins_engagement_zone3 = jax.jit(
             0,  # pursuerHeading
             0,  # minimumTurnRadius
             None,  # catureRadius
-            None,  # pursuerRange
+            0,  # pursuerRange
             0,  # pursuerSpeed
             None,  # evaderPosition
             None,  # evaderHeading
@@ -1810,8 +1810,7 @@ def dubins_pez_numerical_integration(
     return probs, 0, 0
 
 
-def create_quadrature_nodes_and_weights(mu, cov, order):
-    dim = mu.shape[0]
+def create_quadrature_nodes_and_weights(dim, order):
     # indep_dist = cp.MvNormal(np.zeros(dim), np.eye(dim))
     indep_dist = cp.J(*[cp.Normal(0, 1) for _ in range(dim)])
 
@@ -1819,16 +1818,22 @@ def create_quadrature_nodes_and_weights(mu, cov, order):
     nodes_z, weights = cp.generate_quadrature(
         order=order, dist=indep_dist, rule="gaussian", sparse=False, growth=True
     )  # nodes_z: shape (dim, n)
+    return nodes_z, weights
 
+
+@jax.jit
+def transform_nodes_to_correlated_space(mu, cov, nodes_z, weights):
     # 4. TTrueransform Chaospy nodes to correlated space using Cholesky
     L = jnp.linalg.cholesky(cov)  # shape (dim, dim)
     nodes_z_jax = jnp.array(nodes_z)  # shape (dim, n)
     nodes = mu[:, None] + L @ nodes_z_jax  # shape (dim, n)
-    print("sum of weights", jnp.sum(weights))
     return nodes, weights
 
 
-# @jax.jit
+nodes, weights = create_quadrature_nodes_and_weights(6, order=8)
+
+
+@jax.jit
 def dubins_pez_numerical_integration_sparse(
     evaderPositions,
     evaderHeadings,
@@ -1844,6 +1849,8 @@ def dubins_pez_numerical_integration_sparse(
     pursuerRange,
     pursuerRangeVar,
     captureRadius,
+    nodes,
+    weights,
 ):
     mu = jnp.concatenate(
         [
@@ -1851,6 +1858,7 @@ def dubins_pez_numerical_integration_sparse(
             jnp.array([pursuerHeading]),  # (1,)
             jnp.array([minimumTurnRadius]),  # (1,)
             jnp.array([pursuerSpeed]),  # (1,)
+            jnp.array([pursuerRange]),  # (1,)
         ]
     ).flatten()
     cov = stacked_cov(
@@ -1859,26 +1867,25 @@ def dubins_pez_numerical_integration_sparse(
         minimumTurnRadiusVar,
         pursuerSpeedVar,
         pursuerRangeVar,
-    )[0:5, 0:5]
-    nodes, weights = create_quadrature_nodes_and_weights(mu, cov, order=8)
+    )
+    nodes, weights = transform_nodes_to_correlated_space(mu, cov, nodes, weights)
     pursuerPositions = nodes[0:2, :].T  # shape (n, 2)
     pursuerHeadings = nodes[2, :]  # shape (n,)
     pursuerTurnRadii = nodes[3, :]  # shape (n,)
     pursuerSpeeds = nodes[4, :]  # shape (n,)
-    print("pursuerPositions", pursuerPositions.shape)
+    pursuerRanges = nodes[5, :]  # shape (n,)
 
     Z = new_in_dubins_engagement_zone3(
         pursuerPositions,
         pursuerHeadings,
         pursuerTurnRadii,
         captureRadius,
-        pursuerRange,
+        pursuerRanges,
         pursuerSpeeds,
         evaderPositions,
         evaderHeadings,
         evaderSpeed,
     )
-    print("Z", Z.shape)
 
     epsilon = 1e-3
     Zsmooth = jax.nn.sigmoid(-Z / epsilon)
@@ -2597,6 +2604,7 @@ def plot_dubins_PEZ(
     useMC=False,
     useNumerical=False,
     useNueralNetwork=False,
+    useLinearPlusNueralNetwork=False,
 ):
     rangeX = 1.5
     x = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -2699,6 +2707,8 @@ def plot_dubins_PEZ(
             pursuerRange,
             pursuerRangeVar,
             captureRadius,
+            nodes,
+            weights,
         )
         print("numerical integration time", time.time() - start)
         ax.set_title("Numerical Integration Dubins PEZ", fontsize=20)
@@ -2722,6 +2732,41 @@ def plot_dubins_PEZ(
         )
         ax.set_title("Neural Network Dubins PEZ", fontsize=20)
         print("nueral_network_EZ time", time.time() - start)
+    elif useLinearPlusNueralNetwork:
+        start = time.time()
+        ZLinear, _, _ = linear_dubins_pez(
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        ZNueralNetwork = nueral_network_EZ.nueral_network_pez(
+            jnp.array([X, Y]).T,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        ZTrue = ZLinear - ZNueralNetwork
 
     ZTrue = np.array(ZTrue.block_until_ready())
     ZTrue = ZTrue.reshape(numPoints, numPoints)
@@ -2769,6 +2814,7 @@ def plot_dubins_PEZ_diff(
     useQuadratic=False,
     useNumerical=False,
     useNueralNetwork=False,
+    useLinearPlusNueralNetwork=False,
 ):
     rangeX = 1.0
     x = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -2872,6 +2918,8 @@ def plot_dubins_PEZ_diff(
             pursuerRange,
             pursuerRangeVar,
             captureRadius,
+            nodes,
+            weights,
         )
         ax.set_title("Numerical Dubins PEZ", fontsize=20)
     elif useNueralNetwork:
@@ -2893,6 +2941,41 @@ def plot_dubins_PEZ_diff(
             captureRadius,
         )
         ax.set_title("Neural Network Dubins PEZ", fontsize=20)
+    elif useLinearPlusNueralNetwork:
+        print("Linear + Neural Network")
+        ZLinear, _, _ = linear_dubins_pez(
+            points,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        ZNueralNetwork = nueral_network_EZ.nueral_network_pez(
+            points,
+            evaderHeadings,
+            evaderSpeed,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadindgVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            minimumTurnRadius,
+            minimumTurnRadiusVar,
+            pursuerRange,
+            pursuerRangeVar,
+            captureRadius,
+        )
+        ZTrue = ZLinear - ZNueralNetwork
 
     ZTrue = np.array(ZTrue.block_until_ready())
     rmse = jnp.sqrt(jnp.mean((ZTrue - ZMC) ** 2))
@@ -3482,7 +3565,9 @@ def compare_PEZ(
         evaderHeading,
         evaderSpeed,
         axes[2],
-        useNueralNetwork=True,
+        useNumerical=True,
+        # useNueralNetwork=True,
+        # useLinearPlusNueralNetwork=True,
     )
 
     #
@@ -3558,7 +3643,9 @@ def plot_all_error(
         evaderHeading,
         evaderSpeed,
         axes[1],
-        useNueralNetwork=True,
+        useNumerical=True,
+        # useNueralNetwork=True,
+        # useLinearPlusNueralNetwork=True,
     )
     # quadEZ = plot_dubins_PEZ_diff(
     #     pursuerPosition,
@@ -3592,7 +3679,6 @@ def main():
 
     pursuerRange = 1.0
     pursuerRangeVar = 0.1
-    pursuerRangeVar = 0.0
 
     minimumTurnRadius = 0.2
     minimumTurnRadiusVar = 0.005

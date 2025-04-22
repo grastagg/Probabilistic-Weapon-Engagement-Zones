@@ -1,14 +1,15 @@
 import enum
 import jax
+from jax._src.ad_checkpoint import saved_residuals
 import tqdm
 import os
 import time
+import datetime
 
 import optax
 import jax.numpy as jnp
 from jax import random, grad, jit, vmap
 from jax import random, jit, vmap, grad, value_and_grad
-from flax import linen as nn
 from flax import serialization
 import numpy as np
 from functools import partial
@@ -19,6 +20,7 @@ from scipy.stats import qmc
 
 import dubinsEZ
 import dubinsPEZ
+import mlp
 
 in_dubins_engagement_zone_ev = jax.jit(
     jax.vmap(
@@ -78,7 +80,7 @@ in_dubins_engagement_zone = jax.jit(
 
 
 def mc_combined_input_single(X):
-    pursuerPosition = jnp.array([0, 0])
+    pursuerPosition = jnp.array([0.0, 0.0])
     pursuerPositionCov = jnp.array([[X[0], X[2]], [X[2], X[1]]])
     pursuerHeading = X[3]
     pursuerHeadingVar = X[4]
@@ -91,7 +93,7 @@ def mc_combined_input_single(X):
     evaderPosition = X[11:13]
     evaderHeading = X[13]
     evaderSpeed = X[14]
-    z, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_Single(
+    p, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_Single(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -107,7 +109,28 @@ def mc_combined_input_single(X):
         pursuerRangeVar,
         0.0,
     )
-    return z
+    # zlinear, _, _ = dubinsPEZ.linear_dubins_PEZ_single(
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     0.0,
+    # )
+    # return zlinear - z
+    #
+    return p
+    # eps = 1e-6
+    # p = jnp.clip(z, eps, 1 - eps)
+    # return jnp.log(p / (1 - p))  # logit transformation
 
 
 def mc_combined_input_single_differentiable(X):
@@ -121,10 +144,13 @@ def mc_combined_input_single_differentiable(X):
     pursuerRangeVar = X[8]
     pursuerSpeed = X[9]
     pursuerSpeedVar = X[10]
+    # evaderPosition = jnp.array([X[11:13]])
+    # evaderHeading = jnp.array([X[13]])
     evaderPosition = X[11:13]
     evaderHeading = X[13]
     evaderSpeed = X[14]
     z, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_Single_differentiable(
+        # z, _, _ = dubinsPEZ.dubins_pez_numerical_integration_sparse(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -139,8 +165,11 @@ def mc_combined_input_single_differentiable(X):
         pursuerRange,
         pursuerRangeVar,
         0.0,
+        # dubinsPEZ.nodes,
+        # dubinsPEZ.weights,
     )
-    return z
+
+    return z.squeeze()
 
 
 mc_combined_input = jax.jit(jax.vmap(mc_combined_input_single, in_axes=(0,)))
@@ -285,7 +314,7 @@ def sample_inputs_lhs(
 # -----------------------------------------------------------------------------
 def batched_mc_dubins_pez(
     X,
-    batch_size=200,
+    batch_size=20,
 ):
     N = X.shape[0]
     ys = []
@@ -317,19 +346,41 @@ def create_input_output_data_full(
         X,
         batch_size=200,
     )
+    # train_test_split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+    ydot_train, ydot_test = train_test_split(ydot, test_size=0.2)
+    # save train and test data
+    xTrainDataFile = "data/xTrainData.csv"
+    yTrainDataFile = "data/yTrainData.csv"
+    ydotTrainDataFile = "data/ydotTrainData.csv"
+    xTestDataFile = "data/xTestData.csv"
+    yTestDataFile = "data/yTestData.csv"
+    ydotTestDataFile = "data/ydotTestData.csv"
+    with open(xTrainDataFile, "ab") as f:
+        np.savetxt(f, X_train, delimiter=",", newline="\n")
+    with open(yTrainDataFile, "ab") as f:
+        np.savetxt(f, y_train, delimiter=",", newline="\n")
+    with open(ydotTrainDataFile, "ab") as f:
+        np.savetxt(f, ydot_train, delimiter=",", newline="\n")
+    with open(xTestDataFile, "ab") as f:
+        np.savetxt(f, X_test, delimiter=",", newline="\n")
+    with open(yTestDataFile, "ab") as f:
+        np.savetxt(f, y_test, delimiter=",", newline="\n")
+    with open(ydotTestDataFile, "ab") as f:
+        np.savetxt(f, ydot_test, delimiter=",", newline="\n")
 
     # save data to csv
-    xDataFile = "data/xData.csv"
-    yDataFile = "data/yData.csv"
-    ydotDataFile = "data/ydotData.csv"
-    with open(xDataFile, "ab") as f:
-        np.savetxt(f, X, delimiter=",", newline="\n")
-    with open(yDataFile, "ab") as f:
-        np.savetxt(f, y, delimiter=",", newline="\n")
-    with open(ydotDataFile, "ab") as f:
-        np.savetxt(f, ydot, delimiter=",", newline="\n")
+    # xDataFile = "data/xData.csv"
+    # yDataFile = "data/yData.csv"
+    # ydotDataFile = "data/ydotData.csv"
+    # with open(xDataFile, "ab") as f:
+    #     np.savetxt(f, X, delimiter=",", newline="\n")
+    # with open(yDataFile, "ab") as f:
+    #     np.savetxt(f, y, delimiter=",", newline="\n")
+    # with open(ydotDataFile, "ab") as f:
+    #     np.savetxt(f, ydot, delimiter=",", newline="\n")
 
-    return X, y
+    # return X, y
 
 
 def create_input_output_data(
@@ -500,18 +551,14 @@ def generate_data(
 #
 
 
-class SimpleMLP(nn.Module):
-    hidden_sizes: list[int] = (64, 64)  # two hidden layers of 64 units
-
-    @nn.compact
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
-        # x: (batch, D)
-        for h in self.hidden_sizes:
-            x = nn.Dense(h)(x)  # dense → hidden dimension
-            # x = nn.relu(x)  # activation
-            x = nn.tanh(x)  # activation
-        x = nn.Dense(1)(x)  # final linear layer → scalar
-        return nn.sigmoid(x).squeeze(-1)
+def make_checkpoint_dir():
+    # 1. Generate timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 2. Create directory
+    base_dir = "./checkpoints"
+    save_dir = os.path.join(base_dir, timestamp)
+    os.makedirs(save_dir, exist_ok=True)
+    return save_dir
 
 
 # ---- train_mlp with a closed‑over, jitted update step ----
@@ -538,8 +585,8 @@ def train_mlp(
     y_dot = jnp.array(y_dot_np)
 
     # 2) init model + optimizer
-    # model = ResMLP(num_blocks=num_blocks, features=features, hidden=hidden)
-    model = SimpleMLP(hidden_sizes=hidden_sizes)
+    # model = mlp.SimpleMLP(hidden_sizes=hidden_sizes)
+    model = mlp.PEZResidualMLP(feat_dim=X.shape[1], hidden_dim=128, n_blocks=4)
     key = random.PRNGKey(seed)
     if init_params is not None:
         params = init_params
@@ -547,8 +594,8 @@ def train_mlp(
         params = model.init(key, X[:1])  # initialize with dummy input
     optimizer = optax.adam(lr)
     opt_state = optimizer.init(params)
-    ckpt_dir = "./checkpoints"
-    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_dir = make_checkpoint_dir()
+    model.save_model(ckpt_dir)
     save_every = 1000
 
     # 3) define a jitted update step that *closes over* model & optimizer
@@ -601,27 +648,15 @@ def train_mlp(
         new_params = optax.apply_updates(params, updates)
         return new_params, new_opt_state, loss
 
-    # @jit
-    # def update_step(params, opt_state, X_batch, y_batch):
-    #     def loss_fn(p):
-    #         preds = model.apply(p, X_batch)
-    #         return jnp.mean((preds - y_batch) ** 2)
-    #
-    #     loss, grads = value_and_grad(loss_fn)(params)
-    #     updates, new_opt_state = optimizer.update(grads, opt_state)
-    #     new_params = optax.apply_updates(params, updates)
-    #     return new_params, new_opt_state, loss
-
     # 4) training loop
     n = X.shape[0]
     steps = max(1, n // batch_size)
-    checkpoint_dir = "./checkpoints/"
     loss_history = []
     test_losses = []
     for epoch in tqdm.tqdm(range(epochs)):
         if epoch % save_every == 0 or epoch == epochs:
             fname = f"params_epoch{epoch:04d}.msgpack"
-            path = os.path.join(checkpoint_dir, fname)
+            path = os.path.join(ckpt_dir, fname)
             with open(path, "wb") as f:
                 f.write(serialization.to_bytes(params))
         # simple shuffling
@@ -645,11 +680,12 @@ def train_mlp(
 
     # save final model
     fname = "final.msgpack"
-    path = os.path.join(checkpoint_dir, fname)
+    path = os.path.join(ckpt_dir, fname)
     with open(path, "wb") as f:
         f.write(serialization.to_bytes(params))
 
-    return model, params, loss_history, test_losses
+    model.save_final_loss(ckpt_dir, test_losses[-1], loss_history[-1])
+    return model, params, loss_history, test_losses, ckpt_dir
 
 
 # ---- 4) evaluation over pursuer×evader grid ----
@@ -738,7 +774,8 @@ def stacked_cov(
     return full_cov
 
 
-def evaluate_surrogate_grid(model, params, pursuer_params, evader_params):
+# @jax.jit
+def evaluate_surrogate_grid(model, params, pursuer, evader):
     """
     Evaluate a Flax/JAX surrogate model over all combinations of pursuer and evader parameters.
 
@@ -752,9 +789,6 @@ def evaluate_surrogate_grid(model, params, pursuer_params, evader_params):
       Z: jnp.ndarray of shape (P, E) where
           Z[p, i] = model.apply(params, concat(pursuer_params[p], evader_params[i])).
     """
-    # Convert inputs to JAX arrays
-    pursuer = jnp.array(pursuer_params)  # shape (P, d1)
-    evader = jnp.array(evader_params)  # shape (E, d2)
 
     @jit
     def eval_pair(p, e):
@@ -773,6 +807,7 @@ def evaluate_surrogate_grid(model, params, pursuer_params, evader_params):
     return eval_grid(pursuer, evader)
 
 
+@jax.jit
 def create_pursuer_params(
     pursuerPositionCov,
     pursuerHeading,
@@ -784,7 +819,7 @@ def create_pursuer_params(
     pursuerSpeed,
     pursuerSpeedVar,
 ):
-    pursuerParams = np.array(
+    pursuerParams = jnp.array(
         [
             [
                 pursuerPositionCov[0, 0],
@@ -844,12 +879,9 @@ def plot_results(evaderHeading, evaderSpeed, model, restored_params, pursuerPara
     evaderParams = np.hstack(
         [evaderPositions, evaderHeadings[:, None], evaderSpeeds[:, None]]
     )
-    print("pursuerParams", pursuerParams.shape)
-    print("evaderParams", evaderParams.shape)
     Z = evaluate_surrogate_grid(model, restored_params, pursuerParams, evaderParams)
 
     Z = Z.reshape((numPoints, numPoints))
-    print("Z", Z)
 
     X = X.reshape((numPoints, numPoints))
     Y = Y.reshape((numPoints, numPoints))
@@ -951,16 +983,17 @@ def plot_results(evaderHeading, evaderSpeed, model, restored_params, pursuerPara
     plt.show()
 
 
-def load_model(file, hidden_sizes):
+def load_model(folder, type):
+    file = os.path.join(folder, "final.msgpack")
     with open(file, "rb") as f:
         byte_data = f.read()
+    if type == "mlp":
+        model = mlp.SimpleMLP()
+        model.load_model(folder)
+    else:
+        model = mlp.PEZResidualMLP(feat_dim=15, hidden_dim=64, n_blocks=4)
+        model.load_model(folder)
 
-    # model = ResMLP(
-    #     hidden=64,
-    #     num_blocks=6,
-    #     features=15,
-    # )
-    model = SimpleMLP(hidden_sizes=hidden_sizes)
     rng = jax.random.PRNGKey(0)
     dummy_input = jnp.ones((1, 15))  # D = your input dimension
     template_params = model.init(rng, dummy_input)
@@ -987,12 +1020,9 @@ def nueral_network_pez(
     evaderPositions -= pursuerPosition
     start = time.time()
     file = "./checkpoints/final.msgpack"
+    # file = "./oldModels/final.msgpack"
     numHidden = 128
     hidden_sizes = [
-        numHidden,
-        numHidden,
-        numHidden,
-        numHidden,
         numHidden,
         numHidden,
         numHidden,
@@ -1013,8 +1043,8 @@ def nueral_network_pez(
         pursuerSpeed,
         pursuerSpeedVar,
     )
-    evaderSpeeds = np.ones_like(evaderPositions[:, 0]) * evaderSpeed
-    evaderParams = np.hstack(
+    evaderSpeeds = jnp.ones_like(evaderPositions[:, 0]) * evaderSpeed
+    evaderParams = jnp.hstack(
         [evaderPositions, evaderHeadings[:, None], evaderSpeeds[:, None]]
     )
     Z = evaluate_surrogate_grid(model, restored_params, pursuerParams, evaderParams)
@@ -1063,8 +1093,8 @@ def main():
 
     generateData = False
     if generateData:
-        numberOfSamples = 1500000
-        X, y = create_input_output_data_full(numberOfSamples, *rng_args)
+        numberOfSamples = 400000
+        create_input_output_data_full(numberOfSamples, *rng_args)
 
         # generate_data(
         #     numberOfSamples,
@@ -1089,24 +1119,17 @@ def main():
         numHidden,
         numHidden,
         numHidden,
-        numHidden,
-        numHidden,
-        numHidden,
-        numHidden,
-        numHidden,
     ]
-    trainModel = False
+    trainModel = True
     if trainModel:
-        X = np.genfromtxt("data/xData.csv", delimiter=",")
-        print("X", X.shape)
-        y = np.genfromtxt("data/yData.csv", delimiter=",")
-        ydot = np.genfromtxt("data/ydotData.csv", delimiter=",")
-        # model, restored_params = load_model("./checkpoints/params_epoch0900.msgpack")
-        X_train, X_test, y_train, y_test, ydot_train, ydot_test = train_test_split(
-            X, y, ydot, test_size=0.2
-        )
+        X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
+        y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
+        ydot_test = np.genfromtxt("data/ydotTestData.csv", delimiter=",")
+        X_train = np.genfromtxt("data/xTrainData.csv", delimiter=",")
+        y_train = np.genfromtxt("data/yTrainData.csv", delimiter=",")
+        ydot_train = np.genfromtxt("data/ydotTrainData.csv", delimiter=",")
 
-        model, params, loss, test_loss = train_mlp(
+        model, params, loss, test_loss, saveDir = train_mlp(
             X_train,
             y_train,
             ydot_train,
@@ -1127,30 +1150,33 @@ def main():
         fig2, ax2 = plt.subplots()
         ax2.plot(test_loss)
         ax2.set_title("Test Loss")
+        print("fine loss", loss[-1])
+        print("fine test loss", test_loss[-1])
 
     plotTest = True
     if plotTest:
         pursuerPosition = np.array([0.0, 0.0])
+        # pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
         pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
-        pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
+        # pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
         pursuerHeading = (0.0 / 4.0) * np.pi
-        pursuerHeadingVar = 0.5
+        pursuerHeadingVar = 0.0
 
         pursuerSpeed = 2.0
-        pursuerSpeedVar = 0.3
-        pursuerSpeedVar = 0.0
-
+        pursuerSpeedVar = 0.1
+        # pursuerSpeedVar = 0.0
         pursuerRange = 1.0
-        pursuerRangeVar = 0.1
-        pursuerRangeVar = 0.0
+
+        pursuerRangeVar = 0.3
+        # pursuerRangeVar = 0.0
 
         minimumTurnRadius = 0.2
-        minimumTurnRadiusVar = 0.005
-        minimumTurnRadiusVar = 0.0
+        minimumTurnRadiusVar = 0.01
+        # minimumTurnRadiusVar = 0.0
 
         captureRadius = 0.0
 
-        evaderHeading = jnp.array([(5.0 / 20.0) * np.pi])
+        evaderHeading = jnp.array([(10.0 / 20.0) * np.pi])
         # evaderHeading = jnp.array((0.0 / 20.0) * np.pi)
 
         evaderSpeed = 0.5
@@ -1166,7 +1192,9 @@ def main():
             pursuerSpeed,
             pursuerSpeedVar,
         )
-        model, restored_params = load_model("./checkpoints/final.msgpack", hidden_sizes)
+        # saveDir = "./checkpoints/20250422_094726/"
+        loadDir = saveDir
+        model, restored_params = load_model(loadDir, "resmlp")
         #
         plot_results(
             evaderHeading,
@@ -1179,4 +1207,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    plt.show()
