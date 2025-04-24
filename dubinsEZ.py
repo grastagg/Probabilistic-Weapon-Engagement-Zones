@@ -513,7 +513,7 @@ def plot_dubins_EZ(
     evaderSpeed,
     ax,
 ):
-    numPoints = 200
+    numPoints = 500
     rangeX = 2.0
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)

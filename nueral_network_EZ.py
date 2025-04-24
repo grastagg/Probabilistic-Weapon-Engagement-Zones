@@ -109,6 +109,17 @@ def mc_combined_input_single(X):
         pursuerRangeVar,
         0.0,
     )
+    z = dubinsEZ.in_dubins_engagement_zone_single(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        0.0,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+    )
     # zlinear, _, _ = dubinsPEZ.linear_dubins_PEZ_single(
     #     evaderPosition,
     #     evaderHeading,
@@ -127,7 +138,7 @@ def mc_combined_input_single(X):
     # )
     # return zlinear - z
     #
-    return p
+    return p, z
     # eps = 1e-6
     # p = jnp.clip(z, eps, 1 - eps)
     # return jnp.log(p / (1 - p))  # logit transformation
@@ -319,15 +330,21 @@ def batched_mc_dubins_pez(
     N = X.shape[0]
     ys = []
     ydot = []
+    zs = []
     for i in tqdm.tqdm(range(0, N, batch_size)):
         j = i + batch_size
         X_batch = X[i:j]
-        yb = mc_combined_input(jnp.array(X_batch))
+        yb, z = mc_combined_input(jnp.array(X_batch))
         yd = mc_combined_input_jac(jnp.array(X_batch))
         ys.append(yb)
         ydot.append(yd)
+        zs.append(z)
 
-    return np.concatenate(ys, axis=0), np.concatenate(ydot, axis=0)  # shape (N,)
+    return (
+        np.concatenate(ys, axis=0),
+        np.concatenate(ydot, axis=0),
+        np.concatenate(zs, axis=0),
+    )  # shape (N,)
 
 
 # -----------------------------------------------------------------------------
@@ -342,10 +359,14 @@ def create_input_output_data_full(
     X = sample_inputs_lhs(n_samples, *ranges_and_maxes)
 
     # run batched MC‑PEZ
-    y, ydot = batched_mc_dubins_pez(
+    y, ydot, z = batched_mc_dubins_pez(
         X,
         batch_size=200,
     )
+    # append z to xData
+    print("X shape", X.shape)
+    # X = np.hstack((X, z[:, None]))
+    print("X shape", X.shape)
     # train_test_split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
     ydot_train, ydot_test = train_test_split(ydot, test_size=0.2)
@@ -519,38 +540,6 @@ def generate_data(
             np.savetxt(f, y, delimiter=",", newline="\n")
 
 
-# class ResBlock(nn.Module):
-#     features: int
-#     hidden: int
-#
-#     @nn.compact
-#     def __call__(self, x):
-#         residual = x
-#         x = nn.LayerNorm()(x)
-#         x = nn.Dense(self.hidden)(x)
-#         x = nn.relu(x)
-#         x = nn.Dense(self.features)(x)
-#         return x + residual
-#
-#
-# class MLP(nn.Module):
-#     num_blocks: int
-#     features: int
-#     hidden: int
-#
-#     @nn.compact
-#     def __call__(self, x):
-#         # x: (batch, d_in)
-#         x = nn.Dense(self.features)(x)
-#         for _ in range(self.num_blocks):
-#             x = ResBlock(self.features, self.hidden)(x)
-#         x = nn.LayerNorm()(x)
-#         x = nn.tanh(x)
-#         x = nn.Dense(1)(x)
-#         return nn.sigmoid(x).squeeze(-1)
-#
-
-
 def make_checkpoint_dir():
     # 1. Generate timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -585,8 +574,10 @@ def train_mlp(
     y_dot = jnp.array(y_dot_np)
 
     # 2) init model + optimizer
-    # model = mlp.SimpleMLP(hidden_sizes=hidden_sizes)
-    model = mlp.PEZResidualMLP(feat_dim=X.shape[1], hidden_dim=128, n_blocks=4)
+    width = 128
+    hidden_sizes = (width, width, width, width, width, width)
+    model = mlp.SimpleMLP(hidden_sizes=hidden_sizes)
+    # model = mlp.PEZResidualMLP(feat_dim=X.shape[1], hidden_dim=128, n_blocks=4)
     key = random.PRNGKey(seed)
     if init_params is not None:
         params = init_params
@@ -621,24 +612,34 @@ def train_mlp(
             preds = model.apply(p, X_batch)  # (B,)
             L_val = jnp.mean((preds - y_batch) ** 2)
 
-            # 2) Compute model gradients w.r.t. inputs: dy_pred[i] = ∇_x pred[i]
-            #    We vmap a per‑example grad over the batch dimension.
             def single_grad(x):
                 # returns shape (D,)
                 return grad(lambda x0: model.apply(p, x0[None, :])[0])(x)
 
             dy_pred = vmap(single_grad, in_axes=0)(X_batch)  # (B, D)
+            # create penalty for negative values
+            var_grads = jnp.stack(
+                [
+                    dy_pred[:, 0],  # pos var dim 0
+                    dy_pred[:, 1],  # pos var dim 1
+                    dy_pred[:, 2],  # pos var dim 2
+                    dy_pred[:, 4],  # heading var
+                    dy_pred[:, 6],  # turn radius var
+                    dy_pred[:, 8],  # range var
+                    dy_pred[:, 10],  # speed var
+                ],
+                axis=1,
+            )
 
-            # 3) Mask out NaNs in the true derivative
-            mask = jnp.isfinite(ydot_batch)  # (B, D)
-            sq_err = (dy_pred - jnp.nan_to_num(ydot_batch)) ** 2 * mask
+            # 2) compute “violation” = max(grad, 0) for each entry
+            violations = jnp.maximum(-var_grads, 0.0)  # shape (B, V)
 
-            # 4) Average only over the valid entries
-            total_valid = jnp.sum(mask)
-            L_grad = jnp.where(total_valid > 0, jnp.sum(sq_err) / total_valid, 0.0)
+            # 3) square & average tkatio get a scalar penalty
+            mono_var_penalty = jnp.mean(violations**2)
 
             # 5) Combined loss
-            return L_val + alpha * L_grad
+            lam = 2.5e3
+            return L_val + lam * mono_var_penalty  # + alpha * L_grad
             # value_and_grad to get both scalar loss and parameter gradients
 
         loss, grads = value_and_grad(loss_fn)(params)
@@ -794,6 +795,27 @@ def evaluate_surrogate_grid(model, params, pursuer, evader):
     def eval_pair(p, e):
         # p: (d1,), e: (d2,)
         x = jnp.concatenate([p, e])[None, :]  # shape (1, d1+d2)
+        pursuerPosition = jnp.array([0.0, 0.0])
+        pursuerHeading = p[3]
+        minimumTurnRadius = p[5]
+        pursuerRange = p[7]
+        pursuerSpeed = p[9]
+        evaderPosition = e[:2]
+        evaderHeading = e[2]
+        evaderSpeed = e[3]
+
+        # z = dubinsEZ.in_dubins_engagement_zone_single(
+        #     pursuerPosition,
+        #     pursuerHeading,
+        #     minimumTurnRadius,
+        #     0.0,
+        #     pursuerRange,
+        #     pursuerSpeed,
+        #     evaderPosition,
+        #     evaderHeading,
+        #     evaderSpeed,
+        # )
+        # x = jnp.concatenate([x, jnp.array([z])])[None, :]  # shape (1, d1+d2+1)
         y = model.apply(params, x)  # shape (1,)
         return y[0]  # scalar
 
@@ -983,11 +1005,11 @@ def plot_results(evaderHeading, evaderSpeed, model, restored_params, pursuerPara
     plt.show()
 
 
-def load_model(folder, type):
+def load_model(folder, net):
     file = os.path.join(folder, "final.msgpack")
     with open(file, "rb") as f:
         byte_data = f.read()
-    if type == "mlp":
+    if net == "mlp":
         model = mlp.SimpleMLP()
         model.load_model(folder)
     else:
@@ -1019,18 +1041,8 @@ def nueral_network_pez(
 ):
     evaderPositions -= pursuerPosition
     start = time.time()
-    file = "./checkpoints/final.msgpack"
-    # file = "./oldModels/final.msgpack"
-    numHidden = 128
-    hidden_sizes = [
-        numHidden,
-        numHidden,
-        numHidden,
-        numHidden,
-        numHidden,
-        numHidden,
-    ]
-    model, restored_params = load_model(file, hidden_sizes)
+    saveDir = "./checkpoints/20250423_145939/"
+    model, restored_params = load_model(saveDir, "mlp")
     print("load model time", time.time() - start)
     pursuerParams = create_pursuer_params(
         pursuerPositionCov,
@@ -1052,29 +1064,6 @@ def nueral_network_pez(
 
 
 def main():
-    pursuerPosition = np.array([0.0, 0.0])
-    pursuerPositionCovMax = 0.5
-
-    pursuerHeadingRange = np.array([-np.pi, np.pi])
-    pursuerHeadingVarMax = 0.5
-
-    pursuerSpeedRange = np.array([0.5, 3.0])
-    pursuerSpeedVarMax = 0.5
-
-    pursuerRangeRange = np.array([1.0, 3.0])
-    pursuerRangeVarMax = 0.5
-
-    minimumTurnRadiusRange = np.array([0.1, 1.5])
-    minimumTurnRadiusVarMax = 0.025
-    # minimumTurnRadiusVar = 0.00000000001
-
-    captureRadius = 0.0
-
-    evaderHeadingRange = np.array([-np.pi, np.pi])
-    evaderXPositionRange = np.array([-3.0, 3.0])
-    evaderYPositionRange = np.array([-3.0, 3.0])
-
-    evaderSpeedRange = np.array([0.5, 2.0])
     rng_args = (
         0.5,  # pursuerPositionCovMax
         (-np.pi, np.pi),  # pursuerHeadingRange
@@ -1096,30 +1085,6 @@ def main():
         numberOfSamples = 400000
         create_input_output_data_full(numberOfSamples, *rng_args)
 
-        # generate_data(
-        #     numberOfSamples,
-        #     pursuerPositionCovMax,
-        #     pursuerHeadingRang,
-        #     pursuerHeadingVarMax,
-        #     minimumTurnRadiusRange,
-        #     minimumTurnRadiusVarMax,
-        #     pursuerRangeRange,
-        #     pursuerRangeVarMax,
-        #     pursuerSpeedRange,
-        #     pursuerSpeedVarMax,
-        #     evaderXPositionRange,
-        #     evaderYPositionRange,
-        #     evaderHeadingRange,
-        #     evaderSpeedRange,
-        # )
-    numHidden = 128
-    hidden_sizes = [
-        numHidden,
-        numHidden,
-        numHidden,
-        numHidden,
-        numHidden,
-    ]
     trainModel = True
     if trainModel:
         X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
@@ -1138,11 +1103,6 @@ def main():
             ydot_test,
             epochs=300,
             batch_size=1024,
-            hidden_sizes=hidden_sizes,
-            # num_blocks=numBlocks,
-            # features=features,
-            # hidden=numHidden,
-            # init_params=restored_params,
         )
         fig, ax = plt.subplots()
         ax.plot(loss)
@@ -1192,9 +1152,9 @@ def main():
             pursuerSpeed,
             pursuerSpeedVar,
         )
-        # saveDir = "./checkpoints/20250422_094726/"
+        # saveDir = "./checkpoints/20250423_171138/"
         loadDir = saveDir
-        model, restored_params = load_model(loadDir, "resmlp")
+        model, restored_params = load_model(loadDir, "mlp")
         #
         plot_results(
             evaderHeading,
