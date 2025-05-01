@@ -12,6 +12,7 @@ class SimpleMLP(nn.Module):
         # x: (batch, D)
         for h in self.hidden_sizes:
             x = nn.Dense(h)(x)  # dense → hidden dimension
+            x = nn.LayerNorm()(x)  # layer norm
             # x = nn.relu(x)  # activation
             # x = nn.tanh(x)  # activation
             x = nn.silu(x)  # activation

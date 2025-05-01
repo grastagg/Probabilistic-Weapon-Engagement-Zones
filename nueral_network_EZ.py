@@ -1,4 +1,3 @@
-import enum
 import jax
 from jax._src.ad_checkpoint import saved_residuals
 import tqdm
@@ -81,19 +80,21 @@ in_dubins_engagement_zone = jax.jit(
 
 def mc_combined_input_single(X):
     pursuerPosition = jnp.array([0.0, 0.0])
-    pursuerPositionCov = jnp.array([[X[0], X[2]], [X[2], X[1]]])
-    pursuerHeading = X[3]
-    pursuerHeadingVar = X[4]
-    minimumTurnRadius = X[5]
-    minimumTurnRadiusVar = X[6]
-    pursuerRange = X[7]
-    pursuerRangeVar = X[8]
-    pursuerSpeed = X[9]
-    pursuerSpeedVar = X[10]
-    evaderPosition = X[11:13]
-    evaderHeading = X[13]
-    evaderSpeed = X[14]
+    pursuerPositionCov = jnp.array([[X[0], X[2]], [X[2], X[1]]]) + jnp.eye(2) * 1e-6
+    pursuerHeadingVar = X[3]
+    minimumTurnRadius = X[4]
+    minimumTurnRadiusVar = X[5]
+    pursuerRange = X[6]
+    pursuerRangeVar = X[7]
+    pursuerSpeed = X[8]
+    pursuerSpeedVar = X[9]
+    evaderPosition = X[10:12]
+    evaderHeading = X[12]
+    evaderSpeed = X[13]
+    pursuerHeading = 0.0
+
     p, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_Single(
+        # p, e, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_Single_differentiable(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -144,7 +145,7 @@ def mc_combined_input_single(X):
     # return jnp.log(p / (1 - p))  # logit transformation
 
 
-def mc_combined_input_single_differentiable(X):
+def mc_combined_input_single_derivative(X):
     pursuerPosition = jnp.array([0, 0])
     pursuerPositionCov = jnp.array([[X[0], X[2]], [X[2], X[1]]])
     pursuerHeading = X[3]
@@ -160,7 +161,7 @@ def mc_combined_input_single_differentiable(X):
     evaderPosition = X[11:13]
     evaderHeading = X[13]
     evaderSpeed = X[14]
-    z, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_Single_differentiable(
+    z = dubinsPEZ.mc_dubins_PEZ_Single_differentiable(
         # z, _, _ = dubinsPEZ.dubins_pez_numerical_integration_sparse(
         evaderPosition,
         evaderHeading,
@@ -185,10 +186,10 @@ def mc_combined_input_single_differentiable(X):
 
 mc_combined_input = jax.jit(jax.vmap(mc_combined_input_single, in_axes=(0,)))
 
-mc_combined_input_jac_single = jax.jit(
-    jax.grad(mc_combined_input_single_differentiable)
+mc_combined_input_derivative = jax.jit(
+    jax.vmap(mc_combined_input_single_derivative, in_axes=(0,))
 )
-mc_combined_input_jac = jax.jit(jax.vmap(mc_combined_input_jac_single, in_axes=(0,)))
+# mc_combined_input_jac = jax.jit(jax.vmap(mc_combined_input_jac_single, in_axes=(0,)))
 
 mc_combined_input_vmap = jax.jit(jax.vmap(mc_combined_input_single, in_axes=(0,)))
 
@@ -208,7 +209,6 @@ create_covariance_matrix = jax.jit(
 def sample_inputs_lhs(
     n_samples: int,
     pursuerPositionCovMax: float,
-    pursuerHeadingRange: tuple[float, float],
     pursuerHeadingVarMax: float,
     pursuerTurnRadiusRange: tuple[float, float],
     pursuerTurnRadiusVarMax: float,
@@ -231,7 +231,7 @@ def sample_inputs_lhs(
     # range, rangeVar,
     # speed, speedVar,
     # evaderX, evaderY, evaderHeading, evaderSpeed
-    d = 15  # total input dims
+    d = 14  # total input dims
     seed = np.random.randint(0, 1000000)
     sampler = qmc.LatinHypercube(d=d, seed=seed)
     unit = sampler.random(n=n_samples)  # shape (n_samples, 15)
@@ -248,8 +248,6 @@ def sample_inputs_lhs(
     # for the covariance off-diagonal we still need a symmetric range:
     maxcov = np.sqrt(pvx * pvy)
     pcov = (unit[:, col] * 2 - 1) * maxcov
-    col += 1
-    phead = m1(unit[:, col], *pursuerHeadingRange)
     col += 1
     phvar = m1(unit[:, col], 0, pursuerHeadingVarMax)
     col += 1
@@ -279,7 +277,6 @@ def sample_inputs_lhs(
             pvx,
             pvy,
             pcov,
-            phead,
             phvar,
             ptrad,
             ptvar,
@@ -335,7 +332,7 @@ def batched_mc_dubins_pez(
         j = i + batch_size
         X_batch = X[i:j]
         yb, z = mc_combined_input(jnp.array(X_batch))
-        yd = mc_combined_input_jac(jnp.array(X_batch))
+        yd = mc_combined_input_derivative(jnp.array(X_batch))
         ys.append(yb)
         ydot.append(yd)
         zs.append(z)
@@ -364,9 +361,7 @@ def create_input_output_data_full(
         batch_size=200,
     )
     # append z to xData
-    print("X shape", X.shape)
     # X = np.hstack((X, z[:, None]))
-    print("X shape", X.shape)
     # train_test_split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
     ydot_train, ydot_test = train_test_split(ydot, test_size=0.2)
@@ -389,155 +384,6 @@ def create_input_output_data_full(
         np.savetxt(f, y_test, delimiter=",", newline="\n")
     with open(ydotTestDataFile, "ab") as f:
         np.savetxt(f, ydot_test, delimiter=",", newline="\n")
-
-    # save data to csv
-    # xDataFile = "data/xData.csv"
-    # yDataFile = "data/yData.csv"
-    # ydotDataFile = "data/ydotData.csv"
-    # with open(xDataFile, "ab") as f:
-    #     np.savetxt(f, X, delimiter=",", newline="\n")
-    # with open(yDataFile, "ab") as f:
-    #     np.savetxt(f, y, delimiter=",", newline="\n")
-    # with open(ydotDataFile, "ab") as f:
-    #     np.savetxt(f, ydot, delimiter=",", newline="\n")
-
-    # return X, y
-
-
-def create_input_output_data(
-    n_samples,
-    pursuerPositionCovMax,
-    pursuerHeadingRange,
-    pursuerHeadingVarMax,
-    pursuerTurnRadiusRange,
-    pursuerTurnRadiusVarMax,
-    pursuerRangeRange,
-    pursuerRangeVarMax,
-    pursuerSpeedRange,
-    pursuerSpeedVarMax,
-    evaderXPositionRange,
-    evaderYPositionRange,
-    evaderHeadingRange,
-    evaderSpeedRange,
-):
-    pursuerPositions = np.zeros((n_samples, 2))
-    pursuerVarX = np.random.uniform(0, pursuerPositionCovMax, n_samples)
-    pursuerVarY = np.random.uniform(0, pursuerPositionCovMax, n_samples)
-    pursuerXYcov = np.random.uniform(
-        -np.sqrt(pursuerVarX * pursuerVarY),
-        np.sqrt(pursuerVarX * pursuerVarY),
-        n_samples,
-    )
-    pursuerPositionCov = create_covariance_matrix(
-        pursuerVarX, pursuerVarY, pursuerXYcov
-    )
-    pursuerHeading = np.random.uniform(
-        pursuerHeadingRange[0], pursuerHeadingRange[1], n_samples
-    )
-    pursuerHeadingVar = np.random.uniform(0, pursuerHeadingVarMax, n_samples)
-    pursuerTurnRadius = np.random.uniform(
-        pursuerTurnRadiusRange[0], pursuerTurnRadiusRange[1], n_samples
-    )
-    purserTrunRadiusVar = np.random.uniform(0, pursuerTurnRadiusVarMax, n_samples)
-    pursuerRange = np.random.uniform(
-        pursuerRangeRange[0], pursuerRangeRange[1], n_samples
-    )
-    pursuerRangeVar = np.random.uniform(0, pursuerRangeVarMax, n_samples)
-    pursuerSpeed = np.random.uniform(
-        pursuerSpeedRange[0], pursuerSpeedRange[1], n_samples
-    )
-    pursuerSpeedVar = np.random.uniform(0, pursuerSpeedVarMax, n_samples)
-    evaderXPosition = np.random.uniform(
-        evaderXPositionRange[0], evaderXPositionRange[1], n_samples
-    )
-    evaderYPosition = np.random.uniform(
-        evaderYPositionRange[0], evaderYPositionRange[1], n_samples
-    )
-    evaderHeadings = np.random.uniform(
-        evaderHeadingRange[0], evaderHeadingRange[1], n_samples
-    )
-    evaderPositions = np.stack((evaderXPosition, evaderYPosition), axis=1)
-    evaderSpeed = np.random.uniform(evaderSpeedRange[0], evaderSpeedRange[1], n_samples)
-    y, _, _, _, _, _, _ = mc_dubins_pez_vmap(
-        evaderPositions,
-        evaderHeadings,
-        evaderSpeed,
-        pursuerPositions,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        pursuerTurnRadius,
-        purserTrunRadiusVar,
-        pursuerRange,
-        pursuerRangeVar,
-        0.0,
-    )
-
-    X = np.hstack(
-        [
-            pursuerVarX[:, None],
-            pursuerVarY[:, None],
-            pursuerXYcov[:, None],
-            pursuerHeading[:, None],
-            pursuerHeadingVar[:, None],
-            pursuerTurnRadius[:, None],
-            purserTrunRadiusVar[:, None],
-            pursuerRange[:, None],
-            pursuerRangeVar[:, None],
-            pursuerSpeed[:, None],
-            pursuerSpeedVar[:, None],
-            evaderXPosition[:, None],
-            evaderYPosition[:, None],
-            evaderHeadings[:, None],
-            evaderSpeed[:, None],
-        ]
-    )
-    return X, y
-
-
-def generate_data(
-    n_samples,
-    pursuerPositionCovMax,
-    pursuerHeadingRange,
-    pursuerHeadingVarMax,
-    pursuerTurnRadiusRange,
-    pursuerTurnRadiusVarMax,
-    pursuerRangeRange,
-    pursuerRangeVarMax,
-    pursuerSpeedRange,
-    pursuerSpeedVarMax,
-    evaderXPositionRange,
-    evaderYPositionRange,
-    evaderHeadingRange,
-    evaderSpeedRange,
-):
-    maxSamplesOnGpu = 200
-    numRounds = n_samples // maxSamplesOnGpu
-    xDataFile = "data/xData.csv"
-    yDataFile = "data/yData.csv"
-    for i in tqdm.trange(numRounds):
-        X, y = create_input_output_data(
-            maxSamplesOnGpu,
-            pursuerPositionCovMax,
-            pursuerHeadingRange,
-            pursuerHeadingVarMax,
-            pursuerTurnRadiusRange,
-            pursuerTurnRadiusVarMax,
-            pursuerRangeRange,
-            pursuerRangeVarMax,
-            pursuerSpeedRange,
-            pursuerSpeedVarMax,
-            evaderXPositionRange,
-            evaderYPositionRange,
-            evaderHeadingRange,
-            evaderSpeedRange,
-        )
-        with open(xDataFile, "ab") as f:
-            np.savetxt(f, X, delimiter=",", newline="\n")
-        with open(yDataFile, "ab") as f:
-            np.savetxt(f, y, delimiter=",", newline="\n")
 
 
 def make_checkpoint_dir():
@@ -575,7 +421,8 @@ def train_mlp(
 
     # 2) init model + optimizer
     width = 128
-    hidden_sizes = (width, width, width, width, width, width)
+    hidden_sizes = (width, width, width, width, width, width, width, width)
+    hidden_sizes = (512, 512, 256, 256, 128)
     model = mlp.SimpleMLP(hidden_sizes=hidden_sizes)
     # model = mlp.PEZResidualMLP(feat_dim=X.shape[1], hidden_dim=128, n_blocks=4)
     key = random.PRNGKey(seed)
@@ -587,11 +434,11 @@ def train_mlp(
     opt_state = optimizer.init(params)
     ckpt_dir = make_checkpoint_dir()
     model.save_model(ckpt_dir)
-    save_every = 1000
+    save_every = 30
 
     # 3) define a jitted update step that *closes over* model & optimizer
     @jit
-    def update_step(params, opt_state, X_batch, y_batch, ydot_batch):
+    def update_step(params, opt_state, X_batch, y_batch, ydot_batch, epoch_num):
         """
         One optimization step that fits both values and (non‑NaN) derivatives.
 
@@ -605,7 +452,10 @@ def train_mlp(
         Returns:
         new_params, new_opt_state, loss_scalar
         """
-        alpha = 0.0
+
+        maxlam = 0.00
+        lam = epoch_num / epochs * maxlam
+        # lam = jnp.clip(epoch_num / epochs, 0, maxlam)
 
         def loss_fn(p):
             # 1) Value prediction + MSE loss
@@ -617,29 +467,25 @@ def train_mlp(
                 return grad(lambda x0: model.apply(p, x0[None, :])[0])(x)
 
             dy_pred = vmap(single_grad, in_axes=0)(X_batch)  # (B, D)
-            # create penalty for negative values
-            var_grads = jnp.stack(
+            # # create penalty for negative values
+            #
+            mu_grads = jnp.stack(
                 [
-                    dy_pred[:, 0],  # pos var dim 0
-                    dy_pred[:, 1],  # pos var dim 1
-                    dy_pred[:, 2],  # pos var dim 2
-                    dy_pred[:, 4],  # heading var
-                    dy_pred[:, 6],  # turn radius var
-                    dy_pred[:, 8],  # range var
-                    dy_pred[:, 10],  # speed var
+                    dy_pred[:, 4],  # turn radius
+                    dy_pred[:, 6],  # range
+                    dy_pred[:, 8],  # speed
                 ],
                 axis=1,
             )
-
-            # 2) compute “violation” = max(grad, 0) for each entry
-            violations = jnp.maximum(-var_grads, 0.0)  # shape (B, V)
-
-            # 3) square & average tkatio get a scalar penalty
-            mono_var_penalty = jnp.mean(violations**2)
-
-            # 5) Combined loss
-            lam = 2.5e3
-            return L_val + lam * mono_var_penalty  # + alpha * L_grad
+            mu_grads_true = jnp.stack(
+                [
+                    ydot_batch[:, 3],  # turn radius
+                    ydot_batch[:, 4],  # range
+                    ydot_batch[:, 5],  # speed
+                ]
+            ).T
+            grad_squared_error = jnp.mean((mu_grads - mu_grads_true) ** 2)
+            return L_val + lam * grad_squared_error
             # value_and_grad to get both scalar loss and parameter gradients
 
         loss, grads = value_and_grad(loss_fn)(params)
@@ -670,7 +516,9 @@ def train_mlp(
                 y[idx],
                 y_dot[idx],
             )
-            params, opt_state, loss = update_step(params, opt_state, Xb, yb, ydotb)
+            params, opt_state, loss = update_step(
+                params, opt_state, Xb, yb, ydotb, epoch
+            )
             total_loss += loss
         loss_history.append(total_loss / steps)
         # compute test loss at epoch end
@@ -727,47 +575,47 @@ def stacked_cov(
     minimumTurnRadiusVar,
     pursuerRangeVar,
 ):
-    heading_block = np.array([[pursuerHeadingVar]])
-    speed_block = np.array([[pursuerSpeedVar]])
-    radius_block = np.array([[minimumTurnRadiusVar]])
-    range_block = np.array([[pursuerRangeVar]])
+    heading_block = jnp.array([[pursuerHeadingVar]])
+    speed_block = jnp.array([[pursuerSpeedVar]])
+    radius_block = jnp.array([[minimumTurnRadiusVar]])
+    range_block = jnp.array([[pursuerRangeVar]])
 
-    # Assemble full covariance using np.block (block matrix layout)
-    full_cov = np.block(
+    # Assemble full covariance using jnp.block (block matrix layout)
+    full_cov = jnp.block(
         [
             [
                 pursuerPositionCov,
-                np.zeros((2, 1)),
-                np.zeros((2, 1)),
-                np.zeros((2, 1)),
-                np.zeros((2, 1)),
+                jnp.zeros((2, 1)),
+                jnp.zeros((2, 1)),
+                jnp.zeros((2, 1)),
+                jnp.zeros((2, 1)),
             ],
             [
-                np.zeros((1, 2)),
+                jnp.zeros((1, 2)),
                 heading_block,
-                np.zeros((1, 1)),
-                np.zeros((1, 1)),
-                np.zeros((1, 1)),
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
             ],
             [
-                np.zeros((1, 2)),
-                np.zeros((1, 1)),
+                jnp.zeros((1, 2)),
+                jnp.zeros((1, 1)),
                 speed_block,
-                np.zeros((1, 1)),
-                np.zeros((1, 1)),
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
             ],
             [
-                np.zeros((1, 2)),
-                np.zeros((1, 1)),
-                np.zeros((1, 1)),
+                jnp.zeros((1, 2)),
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
                 radius_block,
-                np.zeros((1, 1)),
+                jnp.zeros((1, 1)),
             ],
             [
-                np.zeros((1, 2)),
-                np.zeros((1, 1)),
-                np.zeros((1, 1)),
-                np.zeros((1, 1)),
+                jnp.zeros((1, 2)),
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
+                jnp.zeros((1, 1)),
                 range_block,
             ],
         ]
@@ -795,27 +643,6 @@ def evaluate_surrogate_grid(model, params, pursuer, evader):
     def eval_pair(p, e):
         # p: (d1,), e: (d2,)
         x = jnp.concatenate([p, e])[None, :]  # shape (1, d1+d2)
-        pursuerPosition = jnp.array([0.0, 0.0])
-        pursuerHeading = p[3]
-        minimumTurnRadius = p[5]
-        pursuerRange = p[7]
-        pursuerSpeed = p[9]
-        evaderPosition = e[:2]
-        evaderHeading = e[2]
-        evaderSpeed = e[3]
-
-        # z = dubinsEZ.in_dubins_engagement_zone_single(
-        #     pursuerPosition,
-        #     pursuerHeading,
-        #     minimumTurnRadius,
-        #     0.0,
-        #     pursuerRange,
-        #     pursuerSpeed,
-        #     evaderPosition,
-        #     evaderHeading,
-        #     evaderSpeed,
-        # )
-        # x = jnp.concatenate([x, jnp.array([z])])[None, :]  # shape (1, d1+d2+1)
         y = model.apply(params, x)  # shape (1,)
         return y[0]  # scalar
 
@@ -832,7 +659,6 @@ def evaluate_surrogate_grid(model, params, pursuer, evader):
 @jax.jit
 def create_pursuer_params(
     pursuerPositionCov,
-    pursuerHeading,
     pursuerHeadingVar,
     minimumTurnRadius,
     minimumTurnRadiusVar,
@@ -847,7 +673,6 @@ def create_pursuer_params(
                 pursuerPositionCov[0, 0],
                 pursuerPositionCov[1, 1],
                 pursuerPositionCov[0, 1],
-                pursuerHeading,
                 pursuerHeadingVar,
                 minimumTurnRadius,
                 minimumTurnRadiusVar,
@@ -1023,6 +848,14 @@ def load_model(folder, net):
     return model, restored_params
 
 
+start = time.time()
+saveDir = "./checkpoints/20250429_151150/"
+# saveDir = "./checkpoints/20250425_170039/"
+model, restored_params = load_model(saveDir, "mlp")
+print("load model time", time.time() - start)
+
+
+@jax.jit
 def nueral_network_pez(
     evaderPositions,
     evaderHeadings,
@@ -1040,13 +873,18 @@ def nueral_network_pez(
     captureRadius,
 ):
     evaderPositions -= pursuerPosition
-    start = time.time()
-    saveDir = "./checkpoints/20250423_145939/"
-    model, restored_params = load_model(saveDir, "mlp")
-    print("load model time", time.time() - start)
+    evaderHeadings -= pursuerHeading
+    rotation = jnp.array(
+        [
+            [jnp.cos(pursuerHeading), -jnp.sin(pursuerHeading)],
+            [jnp.sin(pursuerHeading), jnp.cos(pursuerHeading)],
+        ]
+    )
+    evaderPositions = evaderPositions @ rotation
+    pursuerPositionCov = rotation.T @ pursuerPositionCov @ rotation
+
     pursuerParams = create_pursuer_params(
         pursuerPositionCov,
-        pursuerHeading,
         pursuerHeadingVar,
         minimumTurnRadius,
         minimumTurnRadiusVar,
@@ -1060,32 +898,209 @@ def nueral_network_pez(
         [evaderPositions, evaderHeadings[:, None], evaderSpeeds[:, None]]
     )
     Z = evaluate_surrogate_grid(model, restored_params, pursuerParams, evaderParams)
-    return Z
+    return Z.squeeze(), 0, 0
+
+
+def linear_pez_from_x_single(X):
+    pursuerPosition = jnp.array([0.0, 0.0])
+    pursuerPositionCov = jnp.array([[X[0], X[2]], [X[2], X[1]]]) + jnp.eye(2) * 1e-6
+    pursuerHeadingVar = X[3]
+    minimumTurnRadius = X[4]
+    minimumTurnRadiusVar = X[5]
+    pursuerRange = X[6]
+    pursuerRangeVar = X[7]
+    pursuerSpeed = X[8]
+    pursuerSpeedVar = X[9]
+    evaderPosition = X[10:12]
+    evaderHeading = X[12]
+    evaderSpeed = X[13]
+    pursuerHeading = 0.0
+    z, _, _ = dubinsPEZ.linear_dubins_PEZ_single(
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        0.0,
+    )
+    combined_covariance = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        pursuerSpeedVar,
+        minimumTurnRadiusVar,
+        pursuerRangeVar,
+    )
+    det = jnp.linalg.det(combined_covariance)
+    trace = jnp.trace(combined_covariance)
+    return z.squeeze(), det, trace
+
+
+linear_pez_from_x = jax.jit(jax.vmap(linear_pez_from_x_single, in_axes=(0,)))
+
+
+def nueral_network_pez_from_x_single(X):
+    pursuerPosition = jnp.array([0.0, 0.0])
+    pursuerPositionCov = jnp.array([[X[0], X[2]], [X[2], X[1]]]) + jnp.eye(2) * 1e-6
+    pursuerHeadingVar = X[3]
+    minimumTurnRadius = X[4]
+    minimumTurnRadiusVar = X[5]
+    pursuerRange = X[6]
+    pursuerRangeVar = X[7]
+    pursuerSpeed = X[8]
+    pursuerSpeedVar = X[9]
+    evaderPosition = X[10:12]
+    evaderHeading = X[12]
+    evaderSpeed = X[13]
+    pursuerHeading = 0.0
+    z, _, _ = dubinsPEZ.dubins_pez_numerical_integration_sparse(
+        jnp.array([evaderPosition]),
+        jnp.array([evaderHeading]),
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        0.0,
+        dubinsPEZ.nodes,
+        dubinsPEZ.weights,
+    )
+    return z.squeeze()
+
+
+numerical_pez_from_x = jax.jit(jax.vmap(nueral_network_pez_from_x_single, in_axes=(0,)))
+
+
+def batch_numerical_pez_from_x(X):
+    batch_size = 200
+    y = []
+    for i in tqdm.tqdm(range(0, X.shape[0], batch_size)):
+        j = i + batch_size
+        if j > X.shape[0]:
+            j = X.shape[0]
+        ytemp = numerical_pez_from_x(X[i:j])
+        y.append(ytemp)
+    return np.concatenate(y, axis=0)
+
+
+def binning(abs_error, trace):
+    # binning
+    #
+    bins = np.linspace(0, 1.5, 30)
+    bin_means = []
+    for i in range(len(bins) - 1):
+        bin_mask = (trace >= bins[i]) & (trace < bins[i + 1])
+        bin_mean = jnp.mean(abs_error[bin_mask])
+        # bin_mean = jnp.max(abs_error[bin_mask])
+        print(f"Bin {i}: {bins[i]} - {bins[i + 1]}: {bin_mean}")
+        bin_means.append(bin_mean)
+    return bins, bin_means
+
+
+def compute_loss_linear_pez(
+    X_test,
+    y_test,
+):
+    saveDir = "./checkpoints/20250429_151150/"
+    model, restored_params = load_model(saveDir, "mlp")
+    y_pred_nn = model.apply(restored_params, X_test)
+    y_pred_lin, det, trace = linear_pez_from_x(X_test)
+
+    # y_pred_numerical = batch_numerical_pez_from_x(X_test)
+
+    loss_lin = jnp.mean((y_pred_lin - y_test) ** 2)
+    loss_nn = jnp.mean((y_pred_nn - y_test) ** 2)
+    # loss_numerical = jnp.mean((y_pred_numerical - y_test) ** 2)
+    print("linear loss", loss_lin)
+    print("nn loss", loss_nn)
+    # print("numerical loss", loss_numerical)
+    print("linear shape", y_pred_lin.shape)
+    print("nn shape", y_pred_nn.shape)
+    average_abs_diff_lin = jnp.mean(jnp.abs(y_pred_lin - y_test))
+    average_abs_diff_nn = jnp.mean(jnp.abs(y_pred_nn - y_test))
+    # average_abs_diff_numerical = jnp.mean(jnp.abs(y_pred_numerical - y_test))
+    print("average abs diff linear", average_abs_diff_lin)
+    print("average abs diff nn", average_abs_diff_nn)
+    # print("average abs diff numerical", average_abs_diff_numerical)
+
+    abs_error_lin = jnp.abs(y_pred_lin - y_test)
+    abs_error_nn = jnp.abs(y_pred_nn - y_test)
+    # abs_error_numerical = jnp.abs(y_pred_numerical - y_test)
+
+    # sort by trace
+    tracesortIndex = jnp.argsort(trace)
+    trace = trace[tracesortIndex]
+    abs_error_lin = abs_error_lin[tracesortIndex]
+    abs_error_nn = abs_error_nn[tracesortIndex]
+    # abs_error_numerical = abs_error_numerical[tracesortIndex]
+
+    bins, bin_means_lin = binning(abs_error_lin, trace)
+    bins, bin_means_nn = binning(abs_error_nn, trace)
+    # bins, bin_means_numerical = binning(abs_error_numerical, trace)
+
+    fig2, ax2 = plt.subplots()
+    ax2.plot(bins[:-1], bin_means_lin, label="linear PEZ")
+    ax2.plot(bins[:-1], bin_means_nn, label="NN PEZ")
+    # ax2.plot(bins[:-1], bin_means_numerical, label="numerical PEZ")
+    ax2.set_title("Average Absolute Error")
+    ax2.set_xlabel(r"Trace of $\Sigma_{\Theta_P}$")
+    ax2.set_ylabel("Average Absolute Error")
+    ax2.legend()
+
+    plt.show()
 
 
 def main():
-    rng_args = (
-        0.5,  # pursuerPositionCovMax
-        (-np.pi, np.pi),  # pursuerHeadingRange
-        0.5,  # pursuerHeadingVarMax
-        (0.1, 1.5),  # pursuerTurnRadiusRange
-        0.025,  # pursuerTurnRadiusVarMax
-        (1.0, 3.0),  # pursuerRangeRange
-        0.5,  # pursuerRangeVarMax
-        (0.5, 3),  # pursuerSpeedRange
-        0.5,  # pursuerSpeedVarMax
-        (-3, 3),  # evaderXPositionRange
-        (-3, 3),  # evaderYPositionRange
-        (-np.pi, np.pi),  # evaderHeadingRange
-        (0.5, 2),  # evaderSpeedRange
-    )
-
     generateData = False
     if generateData:
-        numberOfSamples = 400000
+        rng_args = (
+            0.5,  # pursuerPositionCovMax
+            0.5,  # pursuerHeadingVarMax
+            (0.1, 1.5),  # pursuerTurnRadiusRange
+            0.025,  # pursuerTurnRadiusVarMax
+            (1.0, 3.0),  # pursuerRangeRange
+            0.5,  # pursuerRangeVarMax
+            (0.5, 3),  # pursuerSpeedRange
+            0.5,  # pursuerSpeedVarMax
+            (-3, 3),  # evaderXPositionRange
+            (-3, 3),  # evaderYPositionRange
+            (-np.pi, np.pi),  # evaderHeadingRange
+            (0.5, 2),  # evaderSpeedRange
+        )
+        numberOfSamples = 10000000
         create_input_output_data_full(numberOfSamples, *rng_args)
+        # generate_data where all but heading var is 0
+        # rng_args = (
+        #     0.0,  # pursuerPositionCovMax
+        #     0.5,  # pursuerHeadingVarMax
+        #     (0.1, 1.5),  # pursuerTurnRadiusRange
+        #     0.0,  # pursuerTurnRadiusVarMax
+        #     (1.0, 3.0),  # pursuerRangeRange
+        #     0.0,  # pursuerRangeVarMax
+        #     (0.5, 3),  # pursuerSpeedRange
+        #     0.0,  # pursuerSpeedVarMax
+        #     (-3, 3),  # evaderXPositionRange
+        #     (-3, 3),  # evaderYPositionRange
+        #     (-np.pi, np.pi),  # evaderHeadingRange
+        #     (0.5, 2),  # evaderSpeedRange
+        # )
+        # numberOfSamples = 1
+        # create_input_output_data_full(numberOfSamples, *rng_args)
 
-    trainModel = True
+    trainModel = False
     if trainModel:
         X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
         y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
@@ -1093,6 +1108,9 @@ def main():
         X_train = np.genfromtxt("data/xTrainData.csv", delimiter=",")
         y_train = np.genfromtxt("data/yTrainData.csv", delimiter=",")
         ydot_train = np.genfromtxt("data/ydotTrainData.csv", delimiter=",")
+        print("y number of nan", np.sum(np.isnan(y_train)))
+        X_train = X_train[~np.isnan(y_train)]
+        y_train = y_train[~np.isnan(y_train)]
 
         model, params, loss, test_loss, saveDir = train_mlp(
             X_train,
@@ -1113,7 +1131,7 @@ def main():
         print("fine loss", loss[-1])
         print("fine test loss", test_loss[-1])
 
-    plotTest = True
+    plotTest = False
     if plotTest:
         pursuerPosition = np.array([0.0, 0.0])
         # pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
@@ -1163,7 +1181,14 @@ def main():
             restored_params,
             pursuerParams,
         )
+    compareLoss = True
+    if compareLoss:
+        X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
+        y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
+
+        compute_loss_linear_pez(X_test, y_test)
 
 
 if __name__ == "__main__":
     main()
+    plt.show()

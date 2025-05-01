@@ -24,6 +24,7 @@ from bspline.matrix_evaluation import (
 )
 
 import dubinsPEZ
+import nueral_network_EZ
 
 import dubins_EZ_path_planning
 
@@ -69,7 +70,7 @@ def plot_spline(
 
     pos = spline(t)
     if plotPEZ:
-        pez, _, _ = dubinsPEZ.mc_dubins_PEZ(
+        pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ(
             pos,
             agentHeadings,
             agentSpeed,
@@ -86,32 +87,32 @@ def plot_spline(
             pursuerCaptureRadius,
         )
         print("max monte carlo pez", np.max(pez))
-        linpez, _, _ = dubinsPEZ.linear_dubins_pez(
-            pos,
-            agentHeadings,
-            agentSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            pursuerTurnRadius,
-            pursuerTurnRadiusVar,
-            pursuerRange,
-            pusuerRangeVar,
-            pursuerCaptureRadius,
-        )
-        print("max linear pez", np.max(linpez))
+        # linpez, _, _ = dubinsPEZ.linear_dubins_pez(
+        #     pos,
+        #     agentHeadings,
+        #     agentSpeed,
+        #     pursuerPosition,
+        #     pursuerPositionCov,
+        #     pursuerHeading,
+        #     pursuerHeadindgVar,
+        #     pursuerSpeed,
+        #     pursuerSpeedVar,
+        #     pursuerTurnRadius,
+        #     pursuerTurnRadiusVar,
+        #     pursuerRange,
+        #     pusuerRangeVar,
+        #     pursuerCaptureRadius,
+        # )
+        # print("max linear pez", np.max(linpez))
 
-        c = ax.scatter(x, y, c=pez, s=4, cmap="inferno")
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right", size="5%", pad=0.05)
-
-        cbar = plt.colorbar(c, cax=cax)
-        cbar.ax.tick_params(labelsize=16)
-    else:
-        ax.plot(x, y, label=f"PEZ Limit: {pez_limit}", linewidth=3)
+        # c = ax.scatter(x, y, c=pez, s=4, cmap="inferno")
+        # divider = make_axes_locatable(ax)
+        # cax = divider.append_axes("right", size="5%", pad=0.05)
+        #
+        # cbar = plt.colorbar(c, cax=cax)
+        # cbar.ax.tick_params(labelsize=16)
+    # else:
+    ax.plot(x, y, label=f"PEZ Limit: {pez_limit}", linewidth=3)
 
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
@@ -150,7 +151,9 @@ def dubins_PEZ_along_spline(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    pez, _, _ = dubinsPEZ.linear_dubins_pez(
+    # pez, _, _ = dubinsPEZ.linear_dubins_pez(
+    pez, _, _ = nueral_network_EZ.nueral_network_pez(
+        # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -196,9 +199,10 @@ def compute_spline_constraints_for_dubins_PEZ(
     )
 
     curvature = turn_rate / velocity
-
     # pez, _, _ = dubinsPEZ.linear_dubins_pez(
-    pez, _, _ = dubinsPEZ.dubins_pez_numerical_integration_sparse(
+    # pez, _, _ = dubinsPEZ.dubins_pez_numerical_integration_sparse(
+    pez, _, _ = nueral_network_EZ.nueral_network_pez(
+        # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -222,8 +226,8 @@ def create_spline(knotPoints, controlPoints, order):
     return spline
 
 
-dDubinsPEZDControlPoints = jacfwd(dubins_PEZ_along_spline, argnums=0)
-dDubinsPEZDtf = jacfwd(dubins_PEZ_along_spline, argnums=1)
+dDubinsPEZDControlPoints = jax.jit(jacfwd(dubins_PEZ_along_spline, argnums=0))
+dDubinsPEZDtf = jax.jit(jacfwd(dubins_PEZ_along_spline, argnums=1))
 
 
 def optimize_spline_path(
@@ -392,29 +396,29 @@ def optimize_spline_path(
 
     optProb = Optimization("path optimization", objfunc)
 
-    tf_initial = 1.0
-    knotPoints = spline_opt_tools.create_unclamped_knot_points(
-        0, tf_initial, num_cont_points, 3
-    )
-    #
-    x0 = np.linspace(p0, pf, num_cont_points).flatten()
-    x0 = spline_opt_tools.move_first_control_point_so_spline_passes_through_start(
-        x0, knotPoints, p0, v0
-    )
-    x0 = x0.flatten()
-    x0 = spline_opt_tools.move_last_control_point_so_spline_passes_through_end(
-        x0, knotPoints, pf, v0
-    )
-    x0 = x0.flatten()
+    # tf_initial = 1.0
+    # knotPoints = spline_opt_tools.create_unclamped_knot_points(
+    #     0, tf_initial, num_cont_points, 3
+    # )
+    # #
+    # x0 = np.linspace(p0, pf, num_cont_points).flatten()
+    # x0 = spline_opt_tools.move_first_control_point_so_spline_passes_through_start(
+    #     x0, knotPoints, p0, v0
+    # )
+    # x0 = x0.flatten()
+    # x0 = spline_opt_tools.move_last_control_point_so_spline_passes_through_end(
+    #     x0, knotPoints, pf, v0
+    # )
+    # x0 = x0.flatten()
 
-    tf = spline_opt_tools.assure_velocity_constraint(
-        x0,
-        knotPoints,
-        num_cont_points,
-        agentSpeed,
-        velocity_constraints,
-        numSamplesPerInterval,
-    )
+    # tf = spline_opt_tools.assure_velocity_constraint(
+    #     x0,
+    #     knotPoints,
+    #     num_cont_points,
+    #     agentSpeed,
+    #     velocity_constraints,
+    #     numSamplesPerInterval,
+    # )
 
     tempVelocityContstraints = spline_opt_tools.get_spline_velocity(
         x0, 1, 3, numSamplesPerInterval
@@ -447,7 +451,7 @@ def optimize_spline_path(
         upper=curvature_constraints[1],
         scale=1.0 / curvature_constraints[1],
     )
-    optProb.addConGroup("pez", num_constraint_samples, lower=0.0, upper=pez_limit)
+    optProb.addConGroup("pez", num_constraint_samples, lower=None, upper=pez_limit)
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
     optProb.addConGroup("end", 2, lower=pf, upper=pf)
 
@@ -455,13 +459,13 @@ def optimize_spline_path(
 
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
-    opt.options["max_iter"] = 500
+    opt.options["max_iter"] = 200
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
-    opt.options["derivative_test"] = "first-order"
+    # opt.options["derivative_test"] = "first-order"
 
     sol = opt(optProb, sens=sens)
     # sol = opt(optProb, sens="FD")
@@ -510,6 +514,7 @@ def compare_pez_limits(
 
     fig, ax = plt.subplots()
     for i, pez_limit in enumerate(pez_limits):
+        start = time.time()
         splineDubins = optimize_spline_path(
             p0,
             pf,
@@ -536,6 +541,7 @@ def compare_pez_limits(
             x0,
             tf,
         )
+        print("time to plan spline", time.time() - start)
         plot_spline(
             splineDubins,
             pursuerPosition,
@@ -551,7 +557,7 @@ def compare_pez_limits(
             pursuerTurnRadiusVar,
             agentSpeed,
             ax,
-            plotPEZ=False,
+            plotPEZ=True,
             pez_limit=pez_limit,
         )
     ax.legend(fontsize=20)
@@ -565,7 +571,7 @@ def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
     pursuerHeading = 0 * np.pi / 2
-    pursuerHeadingVar = 0.1
+    pursuerHeadingVar = 0.3
 
     startingLocation = np.array([-4.0, -4.0])
     endingLocation = np.array([4.0, 4.0])
@@ -632,6 +638,7 @@ def main():
     print("time to plan deterministic spline", time.time() - start)
 
     pez_limits = [0.01, 0.05, 0.25, 0.5]
+    # pez_limits = [0.01]
     compare_pez_limits(
         startingLocation,
         endingLocation,
