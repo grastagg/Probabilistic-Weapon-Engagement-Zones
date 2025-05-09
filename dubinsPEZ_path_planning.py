@@ -71,6 +71,7 @@ def plot_spline(
     pos = spline(t)
     if plotPEZ:
         pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ(
+            # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
             pos,
             agentHeadings,
             agentSpeed,
@@ -87,6 +88,24 @@ def plot_spline(
             pursuerCaptureRadius,
         )
         print("max monte carlo pez", np.max(pez))
+        # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
+        #     pos,
+        #     agentHeadings,
+        #     agentSpeed,
+        #     pursuerPosition,
+        #     pursuerPositionCov,
+        #     pursuerHeading,
+        #     pursuerHeadindgVar,
+        #     pursuerSpeed,
+        #     pursuerSpeedVar,
+        #     pursuerTurnRadius,
+        #     pursuerTurnRadiusVar,
+        #     pursuerRange,
+        #     pusuerRangeVar,
+        #     pursuerCaptureRadius,
+        # )
+        # print("max monte smoothed carlo pez", np.max(pez))
+        maxMCpez = np.max(pez)
         # linpez, _, _ = dubinsPEZ.linear_dubins_pez(
         #     pos,
         #     agentHeadings,
@@ -112,7 +131,7 @@ def plot_spline(
         # cbar = plt.colorbar(c, cax=cax)
         # cbar.ax.tick_params(labelsize=16)
     # else:
-    ax.plot(x, y, label=f"PEZ Limit: {pez_limit}", linewidth=3)
+    ax.plot(x, y, label=f"PEZ Limit: {pez_limit}, Max MCPEZ: {maxMCpez}", linewidth=3)
 
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
@@ -152,8 +171,9 @@ def dubins_PEZ_along_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
     # pez, _, _ = dubinsPEZ.linear_dubins_pez(
+    # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
+    # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
     pez, _, _ = nueral_network_EZ.nueral_network_pez(
-        # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -201,8 +221,9 @@ def compute_spline_constraints_for_dubins_PEZ(
     curvature = turn_rate / velocity
     # pez, _, _ = dubinsPEZ.linear_dubins_pez(
     # pez, _, _ = dubinsPEZ.dubins_pez_numerical_integration_sparse(
+    # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
+    # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
     pez, _, _ = nueral_network_EZ.nueral_network_pez(
-        # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -469,7 +490,6 @@ def optimize_spline_path(
 
     sol = opt(optProb, sens=sens)
     # sol = opt(optProb, sens="FD")
-    # print(sol)
     if sol.optInform["value"] != 0:
         print("Optimization failed")
 
@@ -561,7 +581,7 @@ def compare_pez_limits(
             pez_limit=pez_limit,
         )
     ax.legend(fontsize=20)
-    ax.set_title("Linear Dubins PEZ", fontsize=30)
+    ax.set_title("Nueral Network Dubins PEZ", fontsize=30)
     fast_pursuer.plotMahalanobisDistance(
         pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True
     )

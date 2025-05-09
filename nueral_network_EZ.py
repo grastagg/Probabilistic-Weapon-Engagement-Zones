@@ -1,5 +1,6 @@
 import jax
 from jax._src.ad_checkpoint import saved_residuals
+from scipy.sparse import dia
 import tqdm
 import os
 import time
@@ -145,50 +146,9 @@ def mc_combined_input_single(X):
     # return jnp.log(p / (1 - p))  # logit transformation
 
 
-def mc_combined_input_single_derivative(X):
-    pursuerPosition = jnp.array([0, 0])
-    pursuerPositionCov = jnp.array([[X[0], X[2]], [X[2], X[1]]])
-    pursuerHeading = X[3]
-    pursuerHeadingVar = X[4]
-    minimumTurnRadius = X[5]
-    minimumTurnRadiusVar = X[6]
-    pursuerRange = X[7]
-    pursuerRangeVar = X[8]
-    pursuerSpeed = X[9]
-    pursuerSpeedVar = X[10]
-    # evaderPosition = jnp.array([X[11:13]])
-    # evaderHeading = jnp.array([X[13]])
-    evaderPosition = X[11:13]
-    evaderHeading = X[13]
-    evaderSpeed = X[14]
-    z = dubinsPEZ.mc_dubins_PEZ_Single_differentiable(
-        # z, _, _ = dubinsPEZ.dubins_pez_numerical_integration_sparse(
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        pursuerRange,
-        pursuerRangeVar,
-        0.0,
-        # dubinsPEZ.nodes,
-        # dubinsPEZ.weights,
-    )
-
-    return z.squeeze()
-
-
 mc_combined_input = jax.jit(jax.vmap(mc_combined_input_single, in_axes=(0,)))
 
-mc_combined_input_derivative = jax.jit(
-    jax.vmap(mc_combined_input_single_derivative, in_axes=(0,))
-)
+
 # mc_combined_input_jac = jax.jit(jax.vmap(mc_combined_input_jac_single, in_axes=(0,)))
 
 mc_combined_input_vmap = jax.jit(jax.vmap(mc_combined_input_single, in_axes=(0,)))
@@ -326,20 +286,16 @@ def batched_mc_dubins_pez(
 ):
     N = X.shape[0]
     ys = []
-    ydot = []
     zs = []
     for i in tqdm.tqdm(range(0, N, batch_size)):
         j = i + batch_size
         X_batch = X[i:j]
         yb, z = mc_combined_input(jnp.array(X_batch))
-        yd = mc_combined_input_derivative(jnp.array(X_batch))
         ys.append(yb)
-        ydot.append(yd)
         zs.append(z)
 
     return (
         np.concatenate(ys, axis=0),
-        np.concatenate(ydot, axis=0),
         np.concatenate(zs, axis=0),
     )  # shape (N,)
 
@@ -356,7 +312,7 @@ def create_input_output_data_full(
     X = sample_inputs_lhs(n_samples, *ranges_and_maxes)
 
     # run batched MC‑PEZ
-    y, ydot, z = batched_mc_dubins_pez(
+    y, z = batched_mc_dubins_pez(
         X,
         batch_size=200,
     )
@@ -364,7 +320,6 @@ def create_input_output_data_full(
     # X = np.hstack((X, z[:, None]))
     # train_test_split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-    ydot_train, ydot_test = train_test_split(ydot, test_size=0.2)
     # save train and test data
     xTrainDataFile = "data/xTrainData.csv"
     yTrainDataFile = "data/yTrainData.csv"
@@ -376,14 +331,263 @@ def create_input_output_data_full(
         np.savetxt(f, X_train, delimiter=",", newline="\n")
     with open(yTrainDataFile, "ab") as f:
         np.savetxt(f, y_train, delimiter=",", newline="\n")
-    with open(ydotTrainDataFile, "ab") as f:
-        np.savetxt(f, ydot_train, delimiter=",", newline="\n")
     with open(xTestDataFile, "ab") as f:
         np.savetxt(f, X_test, delimiter=",", newline="\n")
     with open(yTestDataFile, "ab") as f:
         np.savetxt(f, y_test, delimiter=",", newline="\n")
-    with open(ydotTestDataFile, "ab") as f:
-        np.savetxt(f, ydot_test, delimiter=",", newline="\n")
+
+
+def random_vector_sum_dirichlet(n, total):
+    """
+    Returns an n-dimensional random vector whose entries are >= 0
+    and sum to `total`, by sampling from Dirichlet(1,...,1).
+    """
+    # alpha=1 gives uniform on the simplex
+    proportions = np.random.dirichlet(alpha=np.ones(n))
+    return total * proportions
+
+
+def random_bounded_simplex(key, max_vals: jnp.ndarray, total: float) -> jnp.ndarray:
+    """
+    Draw x of shape (n,) with  0 ≤ x[i] ≤ max_vals[i],  sum(x)=total.
+    Requires total ≤ sum(max_vals).
+    """
+    n = max_vals.shape[0]
+
+    # Precompute prefix sums so we can get `sum(max_vals[i+1:])` cheaply
+    prefix = jnp.concatenate([jnp.array([0.0]), jnp.cumsum(max_vals)])
+    total_max = prefix[-1]
+    # assert total <= total_max, "total > sum(max_vals)"
+
+    # Split into n independent subkeys
+    keys = jax.random.split(key, n)
+
+    def body(i, carry):
+        x, r = carry
+        rem_max = total_max - prefix[i + 1]  # = sum(max_vals[i+1:])
+        low = jnp.maximum(0.0, r - rem_max)  # can't starve the tail
+        high = jnp.minimum(max_vals[i], r)  # can't exceed own cap
+        xi = jax.random.uniform(keys[i], (), minval=low, maxval=high)
+        return x.at[i].set(xi), r - xi
+
+    x0 = jnp.zeros_like(max_vals)
+    # run i = 0,1,...,n-1
+    x_final, _ = jax.lax.fori_loop(0, n, body, (x0, total))
+    # jax.debug.print("total {x_final}", x_final=total)
+    # jax.debug.print("x_final {x_final}", x_final=x_final)
+    # jax.debug.print("x_final sum {x_final}", x_final=jnp.sum(x_final))
+    return x_final
+
+
+def random_bounded_simplex_sym(key, max_vals: jnp.ndarray, total: float) -> jnp.ndarray:
+    """
+    Like random_bounded_simplex, but randomly permutes the coordinates
+    so no one slot always gets sampled first.
+    """
+    n = max_vals.shape[0]
+    # split off a key for the permutation
+    key, key_perm, key_sampler = jax.random.split(key, 3)
+
+    # 1) sample a random permutation of 0..n-1
+    perm = jax.random.permutation(key_perm, n)
+
+    # 2) permute max_vals, sample in permuted order
+    mxp = max_vals[perm]
+    x_perm = random_bounded_simplex(key_sampler, mxp, total)
+
+    # 3) invert the permutation so we return to original ordering
+    inv = jnp.argsort(perm)
+    return x_perm[inv]
+
+
+def create_plot_data_x_single(
+    key,
+    total,
+    turnRadiusRange: tuple[float, float],
+    pursuerRangeRange: tuple[float, float],
+    pursuerSpeedRange: tuple[float, float],
+    evaderXPositionRange: tuple[float, float],
+    evaderYPositionRange: tuple[float, float],
+    evaderHeadingRange: tuple[float, float],
+    evaderSpeedRange: tuple[float, float],
+    maxVars,
+) -> jnp.ndarray:
+    # Split key into 8 independent subkeys
+    keys = jax.random.split(key, 8)
+
+    # draw 6 iid Gamma(1,1) samples
+    # # normalize to sum to 1, then scale up to `total`
+    # gamma_samples = jax.random.gamma(keys[0], 1.0, (6,))
+    # diag = total * gamma_samples / jnp.sum(gamma_samples)
+    diag = random_bounded_simplex_sym(keys[0], maxVars, total)
+    # diag = jnp.zeros((5,))
+    #
+    # subkeys = jax.random.split(keys[0], 5)
+    #
+    # x1 = jax.random.uniform(subkeys[0], (), minval=0, maxval=maxVars[0])
+    # x2 = jax.random.uniform(subkeys[1], (), minval=0, maxval=maxVars[1])
+    # x3 = jax.random.uniform(subkeys[2], (), minval=0, maxval=maxVars[2])
+    # x4 = jax.random.uniform(subkeys[3], (), minval=0, maxval=maxVars[3])
+    # x5 = jax.random.uniform(subkeys[4], (), minval=0, maxval=maxVars[4])
+    # diag = diag.at[0].set(x1)
+    # diag = diag.at[1].set(x2)
+    # diag = diag.at[2].set(x3)
+    # diag = diag.at[3].set(x4)
+    # diag = diag.at[4].set(x5)
+    # jax.debug.print("diag {diag}", diag=diag)
+
+    maxcov = jnp.sqrt(diag[0] * diag[1])
+    xy_cov = jax.random.uniform(keys[0], (), minval=-maxcov, maxval=maxcov)
+    # 2) init a zeroed 14‑vector
+    X = jnp.zeros(14)
+
+    # 3) fill in exactly as you had it
+    X = X.at[0].set(diag[0])
+    X = X.at[1].set(diag[1])
+    X = X.at[2].set(xy_cov)
+    X = X.at[3].set(diag[2])
+
+    X = X.at[4].set(
+        jax.random.uniform(
+            keys[1], (), minval=turnRadiusRange[0], maxval=turnRadiusRange[1]
+        )
+    )
+
+    X = X.at[5].set(diag[3])
+    X = X.at[6].set(
+        jax.random.uniform(
+            keys[2], (), minval=pursuerRangeRange[0], maxval=pursuerRangeRange[1]
+        )
+    )
+    X = X.at[7].set(diag[4])
+    X = X.at[8].set(
+        jax.random.uniform(
+            keys[3], (), minval=pursuerSpeedRange[0], maxval=pursuerSpeedRange[1]
+        )
+    )
+    X = X.at[9].set(diag[5])
+
+    X = X.at[10].set(
+        jax.random.uniform(
+            keys[4], (), minval=evaderXPositionRange[0], maxval=evaderXPositionRange[1]
+        )
+    )
+    X = X.at[11].set(
+        jax.random.uniform(
+            keys[5], (), minval=evaderYPositionRange[0], maxval=evaderYPositionRange[1]
+        )
+    )
+    X = X.at[12].set(
+        jax.random.uniform(
+            keys[6], (), minval=evaderHeadingRange[0], maxval=evaderHeadingRange[1]
+        )
+    )
+    X = X.at[13].set(
+        jax.random.uniform(
+            keys[7], (), minval=evaderSpeedRange[0], maxval=evaderSpeedRange[1]
+        )
+    )
+
+    return X
+
+
+def create_plot_data_x_batch(
+    key,
+    traceRange,
+    num_samples: int,
+    turnRadiusRange: tuple[float, float],
+    pursuerRangeRange: tuple[float, float],
+    pursuerSpeedRange: tuple[float, float],
+    evaderXPositionRange: tuple[float, float],
+    evaderYPositionRange: tuple[float, float],
+    evaderHeadingRange: tuple[float, float],
+    evaderSpeedRange: tuple[float, float],
+    maxVars,
+) -> jnp.ndarray:
+    # 1) split the key into `num_samples` independent sub‑keys
+    keys = jax.random.split(key, num_samples)
+    traces = jnp.linspace(0.01, traceRange, num_samples)
+
+    # 2) vmap your single‑sample routine over the first arg (the key)
+    X = jax.vmap(
+        create_plot_data_x_single,
+        in_axes=(
+            0,  # map over the key
+            0,
+            None,  # all the ranges are constant
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )(
+        keys,
+        traces,
+        turnRadiusRange,
+        pursuerRangeRange,
+        pursuerSpeedRange,
+        evaderXPositionRange,
+        evaderYPositionRange,
+        evaderHeadingRange,
+        evaderSpeedRange,
+        maxVars,
+    )
+    return X
+
+
+def create_plot_data(
+    num_samples: int,
+    traceRange: float,
+    pursuerPositionCovMax: float,
+    pursuerHeadingVarMax: float,
+    pursuerTurnRadiusRange: tuple[float, float],
+    pursuerTurnRadiusVarMax: float,
+    pursuerRangeRange: tuple[float, float],
+    pursuerRangeVarMax: float,
+    pursuerSpeedRange: tuple[float, float],
+    pursuerSpeedVarMax: float,
+    evaderXPositionRange: tuple[float, float],
+    evaderYPositionRange: tuple[float, float],
+    evaderHeadingRange: tuple[float, float],
+    evaderSpeedRange: tuple[float, float],
+):
+    key = jax.random.PRNGKey(0)
+    # 2) call the batch version of your single‑sample routine
+    maxVars = jnp.array(
+        [
+            pursuerPositionCovMax,
+            pursuerPositionCovMax,
+            pursuerHeadingVarMax,
+            pursuerTurnRadiusVarMax,
+            pursuerRangeVarMax,
+            pursuerSpeedVarMax,
+        ]
+    )
+    print("maxVars", maxVars)
+    X = create_plot_data_x_batch(
+        key,
+        traceRange,
+        num_samples,
+        pursuerTurnRadiusRange,
+        pursuerRangeRange,
+        pursuerSpeedRange,
+        evaderXPositionRange,
+        evaderYPositionRange,
+        evaderHeadingRange,
+        evaderSpeedRange,
+        maxVars,
+    )
+    print(X.shape)
+
+    y, z = batched_mc_dubins_pez(
+        X,
+        batch_size=200,
+    )
+    np.savetxt("data/plot/xTrainData.csv", X, delimiter=",", newline="\n")
+    np.savetxt("data/plot/yTrainData.csv", y, delimiter=",", newline="\n")
 
 
 def make_checkpoint_dir():
@@ -999,15 +1203,47 @@ def batch_numerical_pez_from_x(X):
 def binning(abs_error, trace):
     # binning
     #
-    bins = np.linspace(0, 1.5, 30)
+    bins = np.linspace(0, jnp.max(trace), 30)
     bin_means = []
     for i in range(len(bins) - 1):
         bin_mask = (trace >= bins[i]) & (trace < bins[i + 1])
         bin_mean = jnp.mean(abs_error[bin_mask])
         # bin_mean = jnp.max(abs_error[bin_mask])
-        print(f"Bin {i}: {bins[i]} - {bins[i + 1]}: {bin_mean}")
+        print(f"Bin {i}: {bins[i]} - {bins[i + 1]}: {jnp.count_nonzero(bin_mask)}")
         bin_means.append(bin_mean)
     return bins, bin_means
+
+
+def plot_all_histograms(X, bins=50):
+    """
+    Plot a histogram of each of the 14 dimensions in X.
+
+    Parameters
+    ----------
+    X : array-like, shape (N,14)
+        Your data matrix, N samples by 14 features.
+    bins : int
+        Number of bins for each histogram.
+    """
+    X = np.asarray(X)
+    assert X.shape[1] == 14, "Expected X to have 14 columns"
+
+    # make a 7×2 grid of subplots
+    fig, axes = plt.subplots(7, 2, figsize=(12, 18))
+    axes = axes.ravel()
+
+    for i in range(14):
+        ax = axes[i]
+        ax.hist(X[:, i], bins=bins, edgecolor="black", alpha=0.7)
+        ax.set_title(f"Dimension {i+1}")
+        ax.set_xlabel("Value")
+        ax.set_ylabel("Count")
+
+    # hide any unused axes (if you change the grid shape)
+    for j in range(14, len(axes)):
+        axes[j].axis("off")
+
+    plt.tight_layout()
 
 
 def compute_loss_linear_pez(
@@ -1018,6 +1254,8 @@ def compute_loss_linear_pez(
     model, restored_params = load_model(saveDir, "mlp")
     y_pred_nn = model.apply(restored_params, X_test)
     y_pred_lin, det, trace = linear_pez_from_x(X_test)
+    print("max trace", jnp.max(trace))
+    print("min trace", jnp.min(trace))
 
     # y_pred_numerical = batch_numerical_pez_from_x(X_test)
 
@@ -1035,17 +1273,22 @@ def compute_loss_linear_pez(
     print("average abs diff linear", average_abs_diff_lin)
     print("average abs diff nn", average_abs_diff_nn)
     # print("average abs diff numerical", average_abs_diff_numerical)
+    max_abs_diff_lin = jnp.max(jnp.abs(y_pred_lin - y_test))
+    max_abs_diff_nn = jnp.max(jnp.abs(y_pred_nn - y_test))
+    print("max abs diff linear", max_abs_diff_lin)
+    print("max abs diff nn", max_abs_diff_nn)
 
     abs_error_lin = jnp.abs(y_pred_lin - y_test)
     abs_error_nn = jnp.abs(y_pred_nn - y_test)
     # abs_error_numerical = jnp.abs(y_pred_numerical - y_test)
 
     # sort by trace
-    tracesortIndex = jnp.argsort(trace)
-    trace = trace[tracesortIndex]
-    abs_error_lin = abs_error_lin[tracesortIndex]
-    abs_error_nn = abs_error_nn[tracesortIndex]
+    # tracesortIndex = jnp.argsort(trace)
+    # trace = trace[tracesortIndex]
+    # abs_error_lin = abs_error_lin[tracesortIndex]
+    # abs_error_nn = abs_error_nn[tracesortIndex]
     # abs_error_numerical = abs_error_numerical[tracesortIndex]
+    # print("trace", trace[tracesortIndex])
 
     bins, bin_means_lin = binning(abs_error_lin, trace)
     bins, bin_means_nn = binning(abs_error_nn, trace)
@@ -1059,6 +1302,12 @@ def compute_loss_linear_pez(
     ax2.set_xlabel(r"Trace of $\Sigma_{\Theta_P}$")
     ax2.set_ylabel("Average Absolute Error")
     ax2.legend()
+
+    # plot histogram of pursuer position covariance
+    plot_all_histograms(X_test)
+    fig3, ax3 = plt.subplots()
+    # plot histogram of y_pred_lin
+    ax3.hist(y_test, bins=50, edgecolor="black", alpha=0.7)
 
     plt.show()
 
@@ -1190,5 +1439,27 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-    plt.show()
+    rng_args = (
+        0.5,  # pursuerPositionCovMax
+        0.5,  # pursuerHeadingVarMax
+        (0.1, 1.5),  # pursuerTurnRadiusRange
+        0.025,  # pursuerTurnRadiusVarMax
+        (1.0, 3.0),  # pursuerRangeRange
+        0.5,  # pursuerRangeVarMax
+        (0.5, 3),  # pursuerSpeedRange
+        0.5,  # pursuerSpeedVarMax
+        (-3, 3),  # evaderXPositionRange
+        (-3, 3),  # evaderYPositionRange
+        (-np.pi, np.pi),  # evaderHeadingRange
+        (0.5, 2),  # evaderSpeedRange
+    )
+    numberOfSamples = 500000
+    maxTrace = 1
+    create_plot_data(numberOfSamples, maxTrace, *rng_args)
+    X_test = np.genfromtxt("data/plot/xTrainData.csv", delimiter=",")
+    y_test = np.genfromtxt("data/plot/yTrainData.csv", delimiter=",")
+    # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")[:numberOfSamples, :]
+    # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")[:numberOfSamples]
+    compute_loss_linear_pez(X_test, y_test)
+    # main()
+    # plt.show()

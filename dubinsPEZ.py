@@ -143,6 +143,42 @@ def mc_dubins_pez_single(
     )
 
 
+def mc_dubins_pez_single_differentiable(
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
+    captureRadius,
+    numSamples,
+):
+    ez = in_dubins_engagement_zone(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+    )
+    epsilon = 0.1
+    Zsmooth = jax.nn.sigmoid(-ez / epsilon)
+    return (
+        jnp.sum(Zsmooth) / numSamples,
+        ez,
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
+    )
+
+
 def mc_dubins_PEZ_single_mu_derivative(
     evaderPosition,
     evaderHeading,
@@ -201,6 +237,12 @@ def mc_dubins_PEZ_single_mu_derivative(
 mc_dubins_pez = jax.jit(
     jax.vmap(
         mc_dubins_pez_single,
+        in_axes=(0, 0, None, None, None, None, None, None, None, None),
+    )
+)
+mc_dubins_pez_differentiable = jax.jit(
+    jax.vmap(
+        mc_dubins_pez_single_differentiable,
         in_axes=(0, 0, None, None, None, None, None, None, None, None),
     )
 )
@@ -340,7 +382,7 @@ def mc_dubins_PEZ_Single(
     )
 
 
-def mc_dubins_PEZ_Single_differentiable(
+def mc_dubins_PEZ_differentiable(
     evaderPositions,
     evaderHeadings,
     evaderSpeed,
@@ -389,24 +431,8 @@ def mc_dubins_PEZ_Single_differentiable(
     pursuerRangeSamples = pursuerRange + jnp.sqrt(pursuerRangeVar) * jax.random.normal(
         subkey, shape=(numSamples,)
     )
-    pursuerParams = jnp.concatenate(
-        [
-            pursuerPosition,  # (2,)
-            jnp.array([pursuerHeading]),  # (1,)
-            jnp.array([pursuerSpeed]),  # (1,)
-            jnp.array([minimumTurnRadius]),  # (1,)
-            jnp.array([pursuerRange]),  # (1,)
-        ]
-    )
-    combinedCov = stacked_cov(
-        pursuerPositionCov,
-        pursuerHeadingVar,
-        pursuerSpeedVar,
-        minimumTurnRadiusVar,
-        pursuerRangeVar,
-    )
 
-    return mc_dubins_PEZ_single_mu_derivative(
+    return mc_dubins_pez_differentiable(
         evaderPositions,
         evaderHeadings,
         evaderSpeed,
@@ -417,8 +443,6 @@ def mc_dubins_PEZ_Single_differentiable(
         pursuerRangeSamples,
         captureRadius,
         numSamples,
-        pursuerParams,
-        combinedCov,
     )
 
 
@@ -1860,6 +1884,7 @@ def dubins_pez_numerical_integration_sparse(
     )
 
     # epsilon = 1e-3
+    #
     # Zsmooth = jax.nn.sigmoid(-Z / epsilon)
     Zsmooth = jnp.where(Z < 0, 1.0, 0.0)
     probs = jnp.sum(weights * Zsmooth, axis=1)
@@ -2686,7 +2711,7 @@ def plot_dubins_PEZ(
         ax.set_title("Numerical Integration Dubins PEZ", fontsize=20)
     elif useNueralNetwork:
         start = time.time()
-        ZTrue = nueral_network_EZ.nueral_network_pez(
+        ZTrue, _, _ = nueral_network_EZ.nueral_network_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
             evaderSpeed,
@@ -2897,7 +2922,7 @@ def plot_dubins_PEZ_diff(
         ax.set_title("Numerical Dubins PEZ", fontsize=20)
     elif useNueralNetwork:
         print("Neural Network")
-        ZTrue = nueral_network_EZ.nueral_network_pez(
+        ZTrue, _, _ = nueral_network_EZ.nueral_network_pez(
             points,
             evaderHeadings,
             evaderSpeed,
@@ -2932,7 +2957,7 @@ def plot_dubins_PEZ_diff(
             pursuerRangeVar,
             captureRadius,
         )
-        ZNueralNetwork = nueral_network_EZ.nueral_network_pez(
+        ZNueralNetwork, _, _ = nueral_network_EZ.nueral_network_pez(
             points,
             evaderHeadings,
             evaderSpeed,
