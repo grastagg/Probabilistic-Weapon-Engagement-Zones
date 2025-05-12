@@ -1,4 +1,6 @@
 import numpy as np
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
 from jax import jacfwd, value_and_grad
@@ -80,7 +82,7 @@ def inEngagementZone(
 
 
 def plotMahalanobisDistance(
-    pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True
+    pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True,cax=None
 ):
     # Define the grid
     x = np.linspace(-2, 2, 100)
@@ -116,12 +118,21 @@ def plotMahalanobisDistance(
 
     # Add a color bar and increase font size
     if plotColorbar:
-        l, b, w, h = ax.get_position().bounds
-        cax = fig.add_axes([l + w + 0.02, b, 0.02, h])
-        cbar = fig.colorbar(c, ax=cax, cax=cax, ticks=[0, 1, 2, 3], shrink=0.5)
-        # cbar = plt.colorbar(c, ax=cax, ticks=[0, 1, 2, 3])
+        divider = make_axes_locatable(ax)  # ax_nn is the last subplot axis
+        # cax = divider.append_axes("right", size="5%", pad=0.05)
+        # fig.colorbar(c, cax=cax)
+        # l, b, w, h = ax.get_position().bounds
+        # cax = fig.add_axes([l + w + 0.02, b, 0.02, h])  # new colorbar axis
+        cbar = fig.colorbar(c, cax=cax, ticks=[0, 1, 2, 3])
         cbar.set_label("Pursuer Std Dev", fontsize=26)
-        cbar.ax.tick_params(labelsize=26)
+        cbar.ax.tick_params(labelsize=22)
+    # if plotColorbar:
+    #     l, b, w, h = ax.get_position().bounds
+    #     cax = fig.add_axes([l + w + 0.02, b, 0.02, h])
+    #     # cbar = fig.colorbar(c, ax=cax, cax=cax, ticks=[0, 1, 2, 3], shrink=0.5)
+    #     cbar = plt.colorbar(c, ax=cax, ticks=[0, 1, 2, 3])
+    #     cbar.set_label("Pursuer Std Dev", fontsize=26)
+    #     cbar.ax.tick_params(labelsize=26)
 
 
 def plotEngagementZone(

@@ -22,6 +22,11 @@ import dubinsEZ
 import dubinsPEZ
 import mlp
 
+#turn off type 3 fonts
+import matplotlib as mpl
+mpl.rcParams['pdf.fonttype'] = 42  # Use TrueType fonts (safe for most publishers)
+mpl.rcParams['ps.fonttype'] = 42   # For EPS output
+
 in_dubins_engagement_zone_ev = jax.jit(
     jax.vmap(
         dubinsEZ.in_dubins_engagement_zone_single,
@@ -506,7 +511,7 @@ def create_plot_data_x_batch(
 ) -> jnp.ndarray:
     # 1) split the key into `num_samples` independent sub‑keys
     keys = jax.random.split(key, num_samples)
-    traces = jnp.linspace(0.01, traceRange, num_samples)
+    traces = jnp.linspace(0.1, traceRange, num_samples)
 
     # 2) vmap your single‑sample routine over the first arg (the key)
     X = jax.vmap(
@@ -1149,6 +1154,50 @@ def linear_pez_from_x_single(X):
 
 linear_pez_from_x = jax.jit(jax.vmap(linear_pez_from_x_single, in_axes=(0,)))
 
+def quadratic_pez_from_x_single(X):
+    pursuerPosition = jnp.array([0.0, 0.0])
+    pursuerPositionCov = jnp.array([[X[0], X[2]], [X[2], X[1]]]) + jnp.eye(2) * 1e-6
+    pursuerHeadingVar = X[3]
+    minimumTurnRadius = X[4]
+    minimumTurnRadiusVar = X[5]
+    pursuerRange = X[6]
+    pursuerRangeVar = X[7]
+    pursuerSpeed = X[8]
+    pursuerSpeedVar = X[9]
+    evaderPosition = X[10:12]
+    evaderHeading = X[12]
+    evaderSpeed = X[13]
+    pursuerHeading = 0.0
+    z, _, _ = dubinsPEZ.quadratic_dubins_PEZ_single(
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        pursuerRange,
+        pursuerRangeVar,
+        0.0,
+    )
+    combined_covariance = stacked_cov(
+        pursuerPositionCov,
+        pursuerHeadingVar,
+        pursuerSpeedVar,
+        minimumTurnRadiusVar,
+        pursuerRangeVar,
+    )
+    det = jnp.linalg.det(combined_covariance)
+    trace = jnp.trace(combined_covariance)
+    return z.squeeze(), det, trace
+
+
+quadratic_pez_from_x = jax.jit(jax.vmap(quadratic_pez_from_x_single, in_axes=(0,)))
+
 
 def nueral_network_pez_from_x_single(X):
     pursuerPosition = jnp.array([0.0, 0.0])
@@ -1203,7 +1252,7 @@ def batch_numerical_pez_from_x(X):
 def binning(abs_error, trace):
     # binning
     #
-    bins = np.linspace(0, jnp.max(trace), 30)
+    bins = np.linspace(0, jnp.max(trace), 50)
     bin_means = []
     for i in range(len(bins) - 1):
         bin_mask = (trace >= bins[i]) & (trace < bins[i + 1])
@@ -1249,11 +1298,16 @@ def plot_all_histograms(X, bins=50):
 def compute_loss_linear_pez(
     X_test,
     y_test,
+    saveFig=False,
 ):
     saveDir = "./checkpoints/20250429_151150/"
     model, restored_params = load_model(saveDir, "mlp")
     y_pred_nn = model.apply(restored_params, X_test)
     y_pred_lin, det, trace = linear_pez_from_x(X_test)
+    y_pred_quad, det, trace = quadratic_pez_from_x(X_test)
+
+
+
     print("max trace", jnp.max(trace))
     print("min trace", jnp.min(trace))
 
@@ -1261,53 +1315,105 @@ def compute_loss_linear_pez(
 
     loss_lin = jnp.mean((y_pred_lin - y_test) ** 2)
     loss_nn = jnp.mean((y_pred_nn - y_test) ** 2)
+    loss_quad = jnp.mean((y_pred_quad - y_test) ** 2)
     # loss_numerical = jnp.mean((y_pred_numerical - y_test) ** 2)
     print("linear loss", loss_lin)
     print("nn loss", loss_nn)
+    print("quadratic loss", loss_quad)
     # print("numerical loss", loss_numerical)
     print("linear shape", y_pred_lin.shape)
     print("nn shape", y_pred_nn.shape)
     average_abs_diff_lin = jnp.mean(jnp.abs(y_pred_lin - y_test))
     average_abs_diff_nn = jnp.mean(jnp.abs(y_pred_nn - y_test))
-    # average_abs_diff_numerical = jnp.mean(jnp.abs(y_pred_numerical - y_test))
+    average_abs_diff_quad = jnp.mean(jnp.abs(y_pred_quad - y_test))
+
     print("average abs diff linear", average_abs_diff_lin)
     print("average abs diff nn", average_abs_diff_nn)
+    print("average abs diff quad", average_abs_diff_quad)
     # print("average abs diff numerical", average_abs_diff_numerical)
     max_abs_diff_lin = jnp.max(jnp.abs(y_pred_lin - y_test))
     max_abs_diff_nn = jnp.max(jnp.abs(y_pred_nn - y_test))
+    max_abs_diff_quad = jnp.max(jnp.abs(y_pred_quad - y_test))
     print("max abs diff linear", max_abs_diff_lin)
     print("max abs diff nn", max_abs_diff_nn)
+    print("max abs diff quad", max_abs_diff_quad)
 
     abs_error_lin = jnp.abs(y_pred_lin - y_test)
     abs_error_nn = jnp.abs(y_pred_nn - y_test)
+    abs_error_quad = jnp.abs(y_pred_quad - y_test)
     # abs_error_numerical = jnp.abs(y_pred_numerical - y_test)
 
-    # sort by trace
-    # tracesortIndex = jnp.argsort(trace)
-    # trace = trace[tracesortIndex]
-    # abs_error_lin = abs_error_lin[tracesortIndex]
-    # abs_error_nn = abs_error_nn[tracesortIndex]
-    # abs_error_numerical = abs_error_numerical[tracesortIndex]
-    # print("trace", trace[tracesortIndex])
-
+    #bin data
     bins, bin_means_lin = binning(abs_error_lin, trace)
     bins, bin_means_nn = binning(abs_error_nn, trace)
+    bins, bin_means_quad = binning(abs_error_quad, trace)
     # bins, bin_means_numerical = binning(abs_error_numerical, trace)
 
-    fig2, ax2 = plt.subplots()
-    ax2.plot(bins[:-1], bin_means_lin, label="linear PEZ")
-    ax2.plot(bins[:-1], bin_means_nn, label="NN PEZ")
-    # ax2.plot(bins[:-1], bin_means_numerical, label="numerical PEZ")
-    ax2.set_title("Average Absolute Error")
-    ax2.set_xlabel(r"Trace of $\Sigma_{\Theta_P}$")
-    ax2.set_ylabel("Average Absolute Error")
-    ax2.legend()
+
+    save_dir = os.path.expanduser("~/Desktop/cspez_plot")
+    # Create figure and axis
+    fig2, ax2 = plt.subplots(figsize=(10, 6))
+
+    # Plot data
+    ax2.plot(bins[:-1], bin_means_lin, label="LCSPEZ", linewidth=2)
+    ax2.plot(bins[:-1], bin_means_nn, label="NNCSPEZ", linewidth=2)
+    ax2.plot(bins[:-1], bin_means_quad, label="QCSPEZ", linewidth=2)
+
+    # Axis labels and title
+    ax2.set_title("Average Absolute Error", fontsize=24)
+    ax2.set_xlabel(r"Trace of $\Sigma_{\Theta_P}$", fontsize=22)
+    ax2.set_ylabel("Average Absolute Error", fontsize=22)
+    ax2.tick_params(axis='both', which='major', labelsize=20)
+
+    # Legend
+    ax2.legend(fontsize=18)
+    fig_path = os.path.join(save_dir, "avg_abs_error_vs_trace.pdf")
+
+    fig2.tight_layout()
+    fig2.savefig(fig_path, format="pdf", bbox_inches="tight")
+
+
+
+
 
     # plot histogram of pursuer position covariance
     plot_all_histograms(X_test)
     fig3, ax3 = plt.subplots()
     # plot histogram of y_pred_lin
     ax3.hist(y_test, bins=50, edgecolor="black", alpha=0.7)
+    
+
+
+
+
+
+
+
+
+    # Create figure
+    fig4, ax4 = plt.subplots(figsize=(10, 6))  # adjust size as needed
+    fig4, ax4 = plt.subplots()
+
+    # Boxplot
+    ax4.boxplot(
+        [abs_error_lin, abs_error_quad, abs_error_nn],
+        labels=["LCSPEZ", "QCSPEZ", "NNCSPEZ"],
+        patch_artist=True
+    )
+
+    # Titles and labels
+    ax4.set_title("Absolute Error", fontsize=24)
+    ax4.set_xlabel("Model", fontsize=22)
+    ax4.set_ylabel("Absolute Error", fontsize=22)
+    ax4.tick_params(axis='both', which='major', labelsize=20)
+
+    # Save figure
+    if saveFig:
+        fig_path = os.path.join(save_dir, "abs_error_boxplot.pdf")
+        fig4.tight_layout()
+        fig4.savefig(fig_path, format="pdf", bbox_inches="tight")
+
+
 
     plt.show()
 
@@ -1460,6 +1566,8 @@ if __name__ == "__main__":
     y_test = np.genfromtxt("data/plot/yTrainData.csv", delimiter=",")
     # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")[:numberOfSamples, :]
     # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")[:numberOfSamples]
-    compute_loss_linear_pez(X_test, y_test)
+    # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
+    # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
+    compute_loss_linear_pez(X_test, y_test,saveFig=False)
     # main()
     # plt.show()

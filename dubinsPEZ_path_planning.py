@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyoptsparse import Optimization, OPT, IPOPT
 from scipy.interpolate import BSpline
@@ -131,7 +132,8 @@ def plot_spline(
         # cbar = plt.colorbar(c, cax=cax)
         # cbar.ax.tick_params(labelsize=16)
     # else:
-    ax.plot(x, y, label=f"PEZ Limit: {pez_limit}, Max MCPEZ: {maxMCpez}", linewidth=3)
+    # ax.plot(x, y, label=f"CSPEZ Limit: {pez_limit}, Max MCCSPEZ: {maxMCpez}", linewidth=3)
+    ax.plot(x, y, label=f"CSPEZ Limit: {pez_limit}", linewidth=3)
 
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
@@ -143,7 +145,7 @@ def plot_spline(
     # limit to 3 decimal places
 
 
-def dubins_PEZ_along_spline(
+def dubins_PEZ_along_spline_nn(
     controlPoints,
     tf,
     pursuerPosition,
@@ -190,9 +192,100 @@ def dubins_PEZ_along_spline(
         pursuerCaptureRadius,
     )
     return pez
+def dubins_PEZ_along_spline_linear(
+    controlPoints,
+    tf,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadindgVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    pursuerRange,
+    pusuerRangeVar,
+    pursuerCaptureRadius,
+    pursuerTurnRadius,
+    pursuerTurnRadiusVar,
+    agentSpeed,
+):
+    numControlPoints = int(len(controlPoints) / 2)
+    knotPoints = spline_opt_tools.create_unclamped_knot_points(
+        0, tf, numControlPoints, 3
+    )
+    agentHeadings = spline_opt_tools.get_spline_heading(
+        controlPoints, tf, 3, numSamplesPerInterval
+    )
+    controlPoints = controlPoints.reshape((numControlPoints, 2))
+    pos = spline_opt_tools.evaluate_spline(
+        controlPoints, knotPoints, numSamplesPerInterval
+    )
+    pez, _, _ = dubinsPEZ.linear_dubins_pez(
+    # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
+    # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
+    # pez, _, _ = nueral_network_EZ.nueral_network_pez(
+        pos,
+        agentHeadings,
+        agentSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadindgVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        pursuerTurnRadius,
+        pursuerTurnRadiusVar,
+        pursuerRange,
+        pusuerRangeVar,
+        pursuerCaptureRadius,
+    )
+    return pez
 
+def dubins_PEZ_along_spline_quadratic(
+    controlPoints,
+    tf,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadindgVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    pursuerRange,
+    pusuerRangeVar,
+    pursuerCaptureRadius,
+    pursuerTurnRadius,
+    pursuerTurnRadiusVar,
+    agentSpeed,
+):
+    numControlPoints = int(len(controlPoints) / 2)
+    knotPoints = spline_opt_tools.create_unclamped_knot_points(
+        0, tf, numControlPoints, 3
+    )
+    agentHeadings = spline_opt_tools.get_spline_heading(
+        controlPoints, tf, 3, numSamplesPerInterval
+    )
+    controlPoints = controlPoints.reshape((numControlPoints, 2))
+    pos = spline_opt_tools.evaluate_spline(
+        controlPoints, knotPoints, numSamplesPerInterval
+    )
+    pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
+        pos,
+        agentHeadings,
+        agentSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadindgVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        pursuerTurnRadius,
+        pursuerTurnRadiusVar,
+        pursuerRange,
+        pusuerRangeVar,
+        pursuerCaptureRadius,
+    )
+    return pez
 
-def compute_spline_constraints_for_dubins_PEZ(
+def compute_spline_constraints_for_dubins_PEZ_nn(
     controlPoints,
     knotPoints,
     pursuerPosition,
@@ -219,10 +312,6 @@ def compute_spline_constraints_for_dubins_PEZ(
     )
 
     curvature = turn_rate / velocity
-    # pez, _, _ = dubinsPEZ.linear_dubins_pez(
-    # pez, _, _ = dubinsPEZ.dubins_pez_numerical_integration_sparse(
-    # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
-    # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
     pez, _, _ = nueral_network_EZ.nueral_network_pez(
         pos,
         agentHeadings,
@@ -241,14 +330,111 @@ def compute_spline_constraints_for_dubins_PEZ(
     )
     return velocity, turn_rate, curvature, pez, pos
 
+def compute_spline_constraints_for_dubins_PEZ_linear(
+    controlPoints,
+    knotPoints,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadindgVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    pursuerCaptureRadius,
+    pursuerRange,
+    pusuerRangeVar,
+    pursuerTurnRadius,
+    pursuerTurnRadiusVar,
+    agentSpeed,
+):
+    pos = spline_opt_tools.evaluate_spline(
+        controlPoints, knotPoints, numSamplesPerInterval
+    )
+
+    turn_rate, velocity, agentHeadings = (
+        spline_opt_tools.get_turn_rate_velocity_and_headings(
+            controlPoints, knotPoints, numSamplesPerInterval
+        )
+    )
+
+    curvature = turn_rate / velocity
+    pez, _, _ = dubinsPEZ.linear_dubins_pez(
+        pos,
+        agentHeadings,
+        agentSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadindgVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        pursuerTurnRadius,
+        pursuerTurnRadiusVar,
+        pursuerRange,
+        pusuerRangeVar,
+        pursuerCaptureRadius,
+    )
+    return velocity, turn_rate, curvature, pez, pos
+
+def compute_spline_constraints_for_dubins_PEZ_quadratic(
+    controlPoints,
+    knotPoints,
+    pursuerPosition,
+    pursuerPositionCov,
+    pursuerHeading,
+    pursuerHeadindgVar,
+    pursuerSpeed,
+    pursuerSpeedVar,
+    pursuerCaptureRadius,
+    pursuerRange,
+    pusuerRangeVar,
+    pursuerTurnRadius,
+    pursuerTurnRadiusVar,
+    agentSpeed,
+):
+    pos = spline_opt_tools.evaluate_spline(
+        controlPoints, knotPoints, numSamplesPerInterval
+    )
+
+    turn_rate, velocity, agentHeadings = (
+        spline_opt_tools.get_turn_rate_velocity_and_headings(
+            controlPoints, knotPoints, numSamplesPerInterval
+        )
+    )
+
+    curvature = turn_rate / velocity
+    pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
+        pos,
+        agentHeadings,
+        agentSpeed,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadindgVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        pursuerTurnRadius,
+        pursuerTurnRadiusVar,
+        pursuerRange,
+        pusuerRangeVar,
+        pursuerCaptureRadius,
+    )
+    return velocity, turn_rate, curvature, pez, pos
+
+
 
 def create_spline(knotPoints, controlPoints, order):
     spline = BSpline(knotPoints, controlPoints, order)
     return spline
 
 
-dDubinsPEZDControlPoints = jax.jit(jacfwd(dubins_PEZ_along_spline, argnums=0))
-dDubinsPEZDtf = jax.jit(jacfwd(dubins_PEZ_along_spline, argnums=1))
+dDubinsPEZDControlPoints_nn = jax.jit(jacfwd(dubins_PEZ_along_spline_nn, argnums=0))
+dDubinsPEZDtf_nn = jax.jit(jacfwd(dubins_PEZ_along_spline_nn, argnums=1))
+
+dDubinsPEZDControlPoints_linear = jax.jit(jacfwd(dubins_PEZ_along_spline_linear, argnums=0))
+dDubinsPEZDtf_linear = jax.jit(jacfwd(dubins_PEZ_along_spline_linear, argnums=1))
+
+dDubinsPEZDControlPoints_quadratic = jax.jit(jacfwd(dubins_PEZ_along_spline_quadratic, argnums=0))
+dDubinsPEZDtf_quadratic = jax.jit(jacfwd(dubins_PEZ_along_spline_quadratic, argnums=1))
 
 
 def optimize_spline_path(
@@ -276,8 +462,23 @@ def optimize_spline_path(
     agentSpeed,
     x0,
     tf,
+    linearPez=True,
+    quadraticPez=False,
+    neuralNetworkPez=False,
 ):
-    # Compute Jacobian of engagement zone function
+    if linearPez:
+        compute_spline_constraints_for_dubins_PEZ = compute_spline_constraints_for_dubins_PEZ_linear
+        dDubinsPEZDControlPoints = dDubinsPEZDControlPoints_linear
+        dDubinsPEZDtf = dDubinsPEZDtf_linear
+    elif quadraticPez:
+        compute_spline_constraints_for_dubins_PEZ = compute_spline_constraints_for_dubins_PEZ_quadratic
+        dDubinsPEZDControlPoints = dDubinsPEZDControlPoints_quadratic
+        dDubinsPEZDtf = dDubinsPEZDtf_quadratic
+    elif neuralNetworkPez:
+        compute_spline_constraints_for_dubins_PEZ = compute_spline_constraints_for_dubins_PEZ_nn
+        dDubinsPEZDControlPoints = dDubinsPEZDControlPoints_nn
+        dDubinsPEZDtf = dDubinsPEZDtf_nn
+
 
     def objfunc(xDict):
         tf = xDict["tf"]
@@ -488,12 +689,14 @@ def optimize_spline_path(
     opt.options["linear_solver"] = "ma97"
     # opt.options["derivative_test"] = "first-order"
 
+    start = time.time()
     sol = opt(optProb, sens=sens)
     # sol = opt(optProb, sens="FD")
+    print("time to plan spline", time.time() - start)
     if sol.optInform["value"] != 0:
         print("Optimization failed")
 
-    print("time", sol.xStar["tf"])
+    print("path time", sol.xStar["tf"])
 
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, sol.xStar["tf"][0], num_cont_points, 3
@@ -527,14 +730,19 @@ def compare_pez_limits(
     agentSpeed,
     x0,
     tf,
+    ax,
+    fig=None,
+    linearPez=False,
+    quadraticPez=False,
+    neuralNetworkPez=False,
+    cax=None
 ):
     # numFigures = len(pez_limits)
     # # two rows
     # fig, axs = plt.subplots(2, numFigures // 2, layout="tight")
 
-    fig, ax = plt.subplots()
     for i, pez_limit in enumerate(pez_limits):
-        start = time.time()
+        print("pez limit", pez_limit)
         splineDubins = optimize_spline_path(
             p0,
             pf,
@@ -560,8 +768,10 @@ def compare_pez_limits(
             agentSpeed,
             x0,
             tf,
+            linearPez=linearPez,
+            quadraticPez=quadraticPez,
+            neuralNetworkPez=neuralNetworkPez,
         )
-        print("time to plan spline", time.time() - start)
         plot_spline(
             splineDubins,
             pursuerPosition,
@@ -580,18 +790,32 @@ def compare_pez_limits(
             plotPEZ=True,
             pez_limit=pez_limit,
         )
-    ax.legend(fontsize=20)
-    ax.set_title("Nueral Network Dubins PEZ", fontsize=30)
-    fast_pursuer.plotMahalanobisDistance(
-        pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True
-    )
+    if linearPez:
+        ax.set_title("LCSPEZ", fontsize=30)
+        fast_pursuer.plotMahalanobisDistance(
+            pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=False
+        )
+    elif quadraticPez:
+        ax.set_title("QCSPEZ", fontsize=30)
+        fast_pursuer.plotMahalanobisDistance(
+            pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=False
+        )
+    elif neuralNetworkPez:
+        ax.set_title("NNCSPEZ", fontsize=30)
+        ax.legend(fontsize=15)
+        fast_pursuer.plotMahalanobisDistance(
+            pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True,cax=cax
+        )
 
 
 def main():
     pursuerPosition = np.array([0.0, 0.0])
-    pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
-    pursuerHeading = 0 * np.pi / 2
-    pursuerHeadingVar = 0.3
+    # pursuerPositionCov = np.array([[0.05, -0.04], [-0.04, 0.4]])
+    pursuerPositionCov = np.array([[0.025, 0.04], [0.04, 0.1]])
+    # pursuerHeading = 0 * np.pi / 2
+    pursuerHeading = (10.0 / 20.0) * np.pi
+    # pursuerHeadingVar = 0.3
+    pursuerHeadingVar = 0.2
 
     startingLocation = np.array([-4.0, -4.0])
     endingLocation = np.array([4.0, 4.0])
@@ -600,15 +824,17 @@ def main():
 
     numControlPoints = 8
     splineOrder = 3
-    turn_rate_constraints = (-50.0, 50.0)
-    curvature_constraints = (-10.0, 10.0)
+    turn_rate_constraints = (-1.0, 1.0)
+    curvature_constraints = (-0.2, 0.2)
     num_constraint_samples = 50
 
     pursuerRange = 1.0
+    # pursuerRangeVar = 0.1
     pursuerRangeVar = 0.1
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
-    pursuerSpeedVar = 0.1
+    # pursuerSpeedVar = 0.1
+    pursuerSpeedVar = 0.3
     pursuerTurnRadius = 0.2
     pursuerTurnRadiusVar = 0.005
     agentSpeed = 1
@@ -657,8 +883,16 @@ def main():
     )
     print("time to plan deterministic spline", time.time() - start)
 
-    pez_limits = [0.01, 0.05, 0.25, 0.5]
+    fig = plt.figure(figsize=(14, 5))
+    gs = gridspec.GridSpec(1, 4, width_ratios=[1, 1, 1, 0.05], wspace=0.3)
+    pez_limits = [0.01,0.01, 0.05, 0.25, 0.5]
+    # Create 3 subplots and 1 for the colorbar
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax3 = fig.add_subplot(gs[0, 2])
+    cax = fig.add_subplot(gs[0, 3])  # reserved space for colorbar
     # pez_limits = [0.01]
+    print("LIENAR")
     compare_pez_limits(
         startingLocation,
         endingLocation,
@@ -684,6 +918,70 @@ def main():
         agentSpeed,
         detSpline.c.flatten(),
         detSpline.t[-detSpline.k - 1],
+        ax1,
+        linearPez=True,
+        fig=fig,
+    )
+    print('QUADRATIC')
+    compare_pez_limits(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        pez_limits,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerRange,
+        pursuerRangeVar,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        pursuerTurnRadius,
+        pursuerTurnRadiusVar,
+        agentSpeed,
+        detSpline.c.flatten(),
+        detSpline.t[-detSpline.k - 1],
+        ax2,
+        quadraticPez=True,
+        fig=fig,
+    )
+    print('NEURAL NETWORK')
+    compare_pez_limits(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        pez_limits,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerRange,
+        pursuerRangeVar,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        pursuerTurnRadius,
+        pursuerTurnRadiusVar,
+        agentSpeed,
+        detSpline.c.flatten(),
+        detSpline.t[-detSpline.k - 1],
+        ax3,
+        neuralNetworkPez=True,
+        fig=fig,
+        cax=cax,
     )
 
     # pez_limit = 0.2
@@ -743,6 +1041,7 @@ def main():
     # )
     # print("time to plan probabilistic spline", time.time() - start)
 
+    fig.tight_layout()
     plt.show()
 
 
