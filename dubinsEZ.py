@@ -9,7 +9,6 @@ from matplotlib import patches
 # from fast_pursuer import plotEngagementZone, inEngagementZone, inEngagementZoneJax
 import jax
 import jax.numpy as jnp
-plt.rcParams['text.usetex'] = True  # Requires LaTeX installed
 
 
 
@@ -839,10 +838,10 @@ def plot_theta_and_vectors_left_turn(
     legend_proxies = []
 
 
-    legend_proxies.append(add_arrow(ax, C, F, color="cyan", label=r"$\boldsymbol{v}_1$", annotationFontSize=annotationFontSize))
-    legend_proxies.append(add_arrow(ax, G, F, color="m", label="v2", annotationFontSize=annotationFontSize))
-    legend_proxies.append(add_arrow(ax, C, G, color="r", label="v3", annotationFontSize=annotationFontSize))
-    legend_proxies.append(add_arrow(ax, C, P, color="b", label="v4", annotationFontSize=annotationFontSize))
+    legend_proxies.append(add_arrow(ax, C, F, color="cyan", label=r"$v_1$", annotationFontSize=annotationFontSize))
+    legend_proxies.append(add_arrow(ax, G, F, color="m", label="$v_2$", annotationFontSize=annotationFontSize))
+    legend_proxies.append(add_arrow(ax, C, G, color="r", label="$v_3$", annotationFontSize=annotationFontSize))
+    legend_proxies.append(add_arrow(ax, C, P, color="b", label="$v_4$", annotationFontSize=annotationFontSize))
     legend_proxies.append(add_arrow(ax, T, F, color="orange", label="Evader Path", annotationFontSize=annotationFontSize))
 
 
@@ -858,7 +857,7 @@ def plot_theta_and_vectors_left_turn(
     ax.text(
         C[0]+.04, 
         C[1]-.01, 
-        r"$\theta$",
+        r"$\theta_\ell$",
         fontsize=annotationFontSize,
         va='center',
     )
