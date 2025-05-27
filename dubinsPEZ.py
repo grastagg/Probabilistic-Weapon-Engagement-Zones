@@ -2798,17 +2798,17 @@ def plot_dubins_PEZ(
     ax.scatter(*pursuerPosition, c="r")
     ax.set_aspect("equal", "box")
     ax.set_aspect("equal", "box")
-    # dubinsEZ.plot_dubins_EZ(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     pursuerSpeed,
-    #     minimumTurnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     ax,
-    # )
+    dubinsEZ.plot_dubins_EZ(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        evaderHeading,
+        evaderSpeed,
+        ax,
+    )
     fast_pursuer.plotMahalanobisDistance(
         pursuerPosition, pursuerPositionCov, ax, None, plotColorbar=False
     )
