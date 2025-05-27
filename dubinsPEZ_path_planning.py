@@ -60,6 +60,9 @@ def plot_spline(
     ax.set_ylabel("Y", fontsize=26)
     ax.tick_params(axis="x", labelsize=26)
     ax.tick_params(axis="y", labelsize=26)
+    # set tick values
+    ax.set_xticks(np.arange(-4, 4, 1))
+    ax.set_yticks(np.arange(-4, 4, 1))
 
     pos = spline(t)
     x = pos[:, 0]
@@ -192,6 +195,8 @@ def dubins_PEZ_along_spline_nn(
         pursuerCaptureRadius,
     )
     return pez
+
+
 def dubins_PEZ_along_spline_linear(
     controlPoints,
     tf,
@@ -220,9 +225,9 @@ def dubins_PEZ_along_spline_linear(
         controlPoints, knotPoints, numSamplesPerInterval
     )
     pez, _, _ = dubinsPEZ.linear_dubins_pez(
-    # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
-    # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
-    # pez, _, _ = nueral_network_EZ.nueral_network_pez(
+        # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
+        # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
+        # pez, _, _ = nueral_network_EZ.nueral_network_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -239,6 +244,7 @@ def dubins_PEZ_along_spline_linear(
         pursuerCaptureRadius,
     )
     return pez
+
 
 def dubins_PEZ_along_spline_quadratic(
     controlPoints,
@@ -285,6 +291,7 @@ def dubins_PEZ_along_spline_quadratic(
     )
     return pez
 
+
 def compute_spline_constraints_for_dubins_PEZ_nn(
     controlPoints,
     knotPoints,
@@ -330,6 +337,7 @@ def compute_spline_constraints_for_dubins_PEZ_nn(
     )
     return velocity, turn_rate, curvature, pez, pos
 
+
 def compute_spline_constraints_for_dubins_PEZ_linear(
     controlPoints,
     knotPoints,
@@ -374,6 +382,7 @@ def compute_spline_constraints_for_dubins_PEZ_linear(
         pursuerCaptureRadius,
     )
     return velocity, turn_rate, curvature, pez, pos
+
 
 def compute_spline_constraints_for_dubins_PEZ_quadratic(
     controlPoints,
@@ -421,7 +430,6 @@ def compute_spline_constraints_for_dubins_PEZ_quadratic(
     return velocity, turn_rate, curvature, pez, pos
 
 
-
 def create_spline(knotPoints, controlPoints, order):
     spline = BSpline(knotPoints, controlPoints, order)
     return spline
@@ -430,10 +438,14 @@ def create_spline(knotPoints, controlPoints, order):
 dDubinsPEZDControlPoints_nn = jax.jit(jacfwd(dubins_PEZ_along_spline_nn, argnums=0))
 dDubinsPEZDtf_nn = jax.jit(jacfwd(dubins_PEZ_along_spline_nn, argnums=1))
 
-dDubinsPEZDControlPoints_linear = jax.jit(jacfwd(dubins_PEZ_along_spline_linear, argnums=0))
+dDubinsPEZDControlPoints_linear = jax.jit(
+    jacfwd(dubins_PEZ_along_spline_linear, argnums=0)
+)
 dDubinsPEZDtf_linear = jax.jit(jacfwd(dubins_PEZ_along_spline_linear, argnums=1))
 
-dDubinsPEZDControlPoints_quadratic = jax.jit(jacfwd(dubins_PEZ_along_spline_quadratic, argnums=0))
+dDubinsPEZDControlPoints_quadratic = jax.jit(
+    jacfwd(dubins_PEZ_along_spline_quadratic, argnums=0)
+)
 dDubinsPEZDtf_quadratic = jax.jit(jacfwd(dubins_PEZ_along_spline_quadratic, argnums=1))
 
 
@@ -467,18 +479,23 @@ def optimize_spline_path(
     neuralNetworkPez=False,
 ):
     if linearPez:
-        compute_spline_constraints_for_dubins_PEZ = compute_spline_constraints_for_dubins_PEZ_linear
+        compute_spline_constraints_for_dubins_PEZ = (
+            compute_spline_constraints_for_dubins_PEZ_linear
+        )
         dDubinsPEZDControlPoints = dDubinsPEZDControlPoints_linear
         dDubinsPEZDtf = dDubinsPEZDtf_linear
     elif quadraticPez:
-        compute_spline_constraints_for_dubins_PEZ = compute_spline_constraints_for_dubins_PEZ_quadratic
+        compute_spline_constraints_for_dubins_PEZ = (
+            compute_spline_constraints_for_dubins_PEZ_quadratic
+        )
         dDubinsPEZDControlPoints = dDubinsPEZDControlPoints_quadratic
         dDubinsPEZDtf = dDubinsPEZDtf_quadratic
     elif neuralNetworkPez:
-        compute_spline_constraints_for_dubins_PEZ = compute_spline_constraints_for_dubins_PEZ_nn
+        compute_spline_constraints_for_dubins_PEZ = (
+            compute_spline_constraints_for_dubins_PEZ_nn
+        )
         dDubinsPEZDControlPoints = dDubinsPEZDControlPoints_nn
         dDubinsPEZDtf = dDubinsPEZDtf_nn
-
 
     def objfunc(xDict):
         tf = xDict["tf"]
@@ -735,7 +752,7 @@ def compare_pez_limits(
     linearPez=False,
     quadraticPez=False,
     neuralNetworkPez=False,
-    cax=None
+    cax=None,
 ):
     # numFigures = len(pez_limits)
     # # two rows
@@ -804,7 +821,7 @@ def compare_pez_limits(
         ax.set_title("NNCSPEZ", fontsize=30)
         ax.legend(fontsize=15)
         fast_pursuer.plotMahalanobisDistance(
-            pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True,cax=cax
+            pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True, cax=cax
         )
 
 
@@ -841,7 +858,7 @@ def main():
 
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
 
-    velocity_constraints = (agentSpeed - 0.01, agentSpeed + 0.01)
+    velocity_constraints = (agentSpeed - 0.001, agentSpeed + 0.001)
     detSpline = dubins_EZ_path_planning.optimize_spline_path(
         startingLocation,
         endingLocation,
@@ -862,7 +879,7 @@ def main():
         agentSpeed,
     )
     start = time.time()
-    detSplineT = dubins_EZ_path_planning.optimize_spline_path(
+    detSpline = dubins_EZ_path_planning.optimize_spline_path(
         startingLocation,
         endingLocation,
         initialVelocity,
@@ -885,7 +902,7 @@ def main():
 
     fig = plt.figure(figsize=(14, 5))
     gs = gridspec.GridSpec(1, 4, width_ratios=[1, 1, 1, 0.05], wspace=0.3)
-    pez_limits = [0.01,0.01, 0.05, 0.25, 0.5]
+    pez_limits = [0.01, 0.05, 0.25, 0.5]
     # Create 3 subplots and 1 for the colorbar
     ax1 = fig.add_subplot(gs[0, 0])
     ax2 = fig.add_subplot(gs[0, 1])
@@ -922,7 +939,7 @@ def main():
         linearPez=True,
         fig=fig,
     )
-    print('QUADRATIC')
+    print("QUADRATIC")
     compare_pez_limits(
         startingLocation,
         endingLocation,
@@ -952,7 +969,7 @@ def main():
         quadraticPez=True,
         fig=fig,
     )
-    print('NEURAL NETWORK')
+    print("NEURAL NETWORK")
     compare_pez_limits(
         startingLocation,
         endingLocation,

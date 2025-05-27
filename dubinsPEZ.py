@@ -15,13 +15,13 @@ from scipy.stats import zmap
 
 
 import dubinsEZ
-import polynomial_EZ
+import fast_pursuer
 import nueral_network_EZ
 
 
 jax.config.update("jax_enable_x64", True)
 
-numPoints = 10
+numPoints = 100
 # Vectorized function using vmap
 in_dubins_engagement_zone = jax.jit(
     jax.vmap(
@@ -2798,6 +2798,20 @@ def plot_dubins_PEZ(
     ax.scatter(*pursuerPosition, c="r")
     ax.set_aspect("equal", "box")
     ax.set_aspect("equal", "box")
+    # dubinsEZ.plot_dubins_EZ(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     pursuerSpeed,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     ax,
+    # )
+    fast_pursuer.plotMahalanobisDistance(
+        pursuerPosition, pursuerPositionCov, ax, None, plotColorbar=False
+    )
     return ZTrue.flatten()
 
 
@@ -3514,7 +3528,7 @@ def compare_PEZ(
     evaderHeading,
     evaderSpeed,
 ):
-    fig, axes = plt.subplots(2, 2, tight_layout=True,figsize=(10, 10))
+    fig, axes = plt.subplots(2, 2, tight_layout=True, figsize=(10, 10))
     linEZ = plot_dubins_PEZ(
         pursuerPosition,
         pursuerPositionCov,
@@ -3609,13 +3623,15 @@ def compare_PEZ(
     # print("quadratic rmse", np.sqrt(np.mean((quadEZ - mcEZ) ** 2)))
     # fig = plt.gcf()
     # fig.colorbar(c)
-    #tight layout
+    # tight layout
     # fig.tight_layout()
     if False:
         save_dir = os.path.expanduser("~/Desktop/cspez_plot")
         fig_path = os.path.join(save_dir, "pez_example.pdf")
         fig.tight_layout()
         fig.savefig(fig_path, format="pdf", bbox_inches="tight")
+
+
 2
 
 
@@ -3635,7 +3651,7 @@ def plot_all_error(
     evaderSpeed,
 ):
     evaderHeading = jnp.array([(0 / 20) * np.pi])
-    fig, axes = plt.subplots(1, 3, constrained_layout=True,figsize=(10, 6))
+    fig, axes = plt.subplots(1, 3, constrained_layout=True, figsize=(10, 6))
     linEZ = plot_dubins_PEZ_diff(
         pursuerPosition,
         pursuerPositionCov,
@@ -3718,7 +3734,7 @@ def main():
     # pursuerPositionCov = np.array([[0.5, 0.0], [0.0, 0.25]])
     # pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
 
-    pursuerHeading = (10.0 / 20.0) * np.pi
+    pursuerHeading = (5.0 / 20.0) * np.pi
     evaderHeading = jnp.array([(0.0 / 20.0) * np.pi])
 
     # create rotation matrix that rotates pursuerheading to zero

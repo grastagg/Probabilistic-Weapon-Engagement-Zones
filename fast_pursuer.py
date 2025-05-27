@@ -82,7 +82,7 @@ def inEngagementZone(
 
 
 def plotMahalanobisDistance(
-    pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True,cax=None
+    pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True, cax=None
 ):
     # Define the grid
     x = np.linspace(-2, 2, 100)
@@ -123,7 +123,7 @@ def plotMahalanobisDistance(
         # fig.colorbar(c, cax=cax)
         # l, b, w, h = ax.get_position().bounds
         # cax = fig.add_axes([l + w + 0.02, b, 0.02, h])  # new colorbar axis
-        cbar = fig.colorbar(c, cax=cax, ticks=[0, 1, 2, 3])
+        cbar = ax.colorbar(c, cax=cax, ticks=[0, 1, 2, 3])
         cbar.set_label("Pursuer Std Dev", fontsize=26)
         cbar.ax.tick_params(labelsize=22)
     # if plotColorbar:

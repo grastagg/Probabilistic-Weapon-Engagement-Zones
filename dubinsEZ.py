@@ -11,8 +11,6 @@ import jax
 import jax.numpy as jnp
 
 
-
-
 # import dubinsReachable
 # import testDubins
 
@@ -548,10 +546,11 @@ def plot_dubins_EZ(
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
     colors = ["green"]
+    colors = ["red"]
     ax.contour(X, Y, ZTrue, levels=[0], colors=colors, zorder=10000)
-    contour_proxy = plt.plot([0], [0], color=colors[0], linestyle='-', label='CSBEZ')
-    #add label so it can be added to legend
-    
+    contour_proxy = plt.plot([0], [0], color=colors[0], linestyle="-", label="CSBEZ")
+    # add label so it can be added to legend
+
     # # ax.contour(X, Y, ZGeometric, cmap="summer")
     # # ax.scatter(*pursuerPosition, c="r")
     # ax.set_aspect("equal", "box")
@@ -618,9 +617,11 @@ def plot_dubins_reachable_set(
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
 
-    colors = ['brown']
-    ax.contour(X, Y, Z,colors=colors, levels=[0], zorder=10000)
-    contour_proxy =plt.plot([0], [0], color=colors[0], linestyle='-', label='Reachable Set')
+    colors = ["brown"]
+    ax.contour(X, Y, Z, colors=colors, levels=[0], zorder=10000)
+    contour_proxy = plt.plot(
+        [0], [0], color=colors[0], linestyle="-", label="Reachable Set"
+    )
     ax.set_aspect("equal", "box")
     return ax
 
@@ -759,6 +760,7 @@ def plot_test_grad(
     # ax.scatter(*goalPosition, c="r")
     ax.plot(xl, yl, "b")
 
+
 def add_arrow(ax, start, end, color, label, annotationFontSize):
     # Draw arrow on plot
     # arrow = FancyArrowPatch(start, end, arrowstyle="->", color=color, lw=2)
@@ -772,14 +774,15 @@ def add_arrow(ax, start, end, color, label, annotationFontSize):
         transform=ax.transData,  # Use data coordinates
     )
     ax.add_patch(arrow)
-    
+
     # Midpoint text label
     # mid = np.mean([start, end], axis=0)
     # ax.text(mid[0], mid[1], label, fontsize=annotationFontSize)
 
     # Create proxy for legend
-    proxy = plt.plot([0], [0], color=color,  lw=2,label=label)
+    proxy = plt.plot([0], [0], color=color, lw=2, label=label)
     return proxy
+
 
 def plot_theta_and_vectors_left_turn(
     pursuerPosition,
@@ -810,7 +813,7 @@ def plot_theta_and_vectors_left_turn(
     leftCircleX = C[0] + minimumTurnRadius * np.cos(circleTheta)
     leftCircleY = C[1] + minimumTurnRadius * np.sin(circleTheta)
 
-    annotationFontSize=17
+    annotationFontSize = 17
 
     ax.scatter(*T, c="k")
     ax.scatter(*F, c="k")
@@ -819,17 +822,19 @@ def plot_theta_and_vectors_left_turn(
     ax.scatter(*P, c="k")
     # put labels on points
     ax.text(
-    T[0] - 0.001,  # shift left
-    T[1] + 0.001,  # shift up
-    "E",
-    fontsize=annotationFontSize,
-    ha="right",
-    va="bottom"
-)
-    ax.text(F[0], F[1]+.02, "F", fontsize=annotationFontSize)
-    ax.text(C[0], C[1], r"$C_\ell$", fontsize=annotationFontSize,ha="right",va="top")
-    ax.text(G[0]+.01, G[1]+.01, r"$G_\ell$", fontsize=annotationFontSize)
-    ax.text(P[0]-.01, P[1]-.01, "P", fontsize=annotationFontSize,ha="right",va="top")
+        T[0] - 0.001,  # shift left
+        T[1] + 0.001,  # shift up
+        "E",
+        fontsize=annotationFontSize,
+        ha="right",
+        va="bottom",
+    )
+    ax.text(F[0], F[1] + 0.02, "F", fontsize=annotationFontSize)
+    ax.text(C[0], C[1], r"$C_\ell$", fontsize=annotationFontSize, ha="right", va="top")
+    ax.text(G[0] + 0.01, G[1] + 0.01, r"$G_\ell$", fontsize=annotationFontSize)
+    ax.text(
+        P[0] - 0.01, P[1] - 0.01, "P", fontsize=annotationFontSize, ha="right", va="top"
+    )
 
     # plot circles
     # ax.plot(leftCircleX, leftCircleY, c="b")
@@ -837,13 +842,41 @@ def plot_theta_and_vectors_left_turn(
 
     legend_proxies = []
 
-
-    legend_proxies.append(add_arrow(ax, C, F, color="cyan", label=r"$v_1$", annotationFontSize=annotationFontSize))
-    legend_proxies.append(add_arrow(ax, G, F, color="m", label="$v_2$", annotationFontSize=annotationFontSize))
-    legend_proxies.append(add_arrow(ax, C, G, color="r", label="$v_3$", annotationFontSize=annotationFontSize))
-    legend_proxies.append(add_arrow(ax, C, P, color="b", label="$v_4$", annotationFontSize=annotationFontSize))
-    legend_proxies.append(add_arrow(ax, T, F, color="orange", label="Evader Path", annotationFontSize=annotationFontSize))
-
+    legend_proxies.append(
+        add_arrow(
+            ax,
+            C,
+            F,
+            color="cyan",
+            label=r"$v_1$",
+            annotationFontSize=annotationFontSize,
+        )
+    )
+    legend_proxies.append(
+        add_arrow(
+            ax, G, F, color="m", label="$v_2$", annotationFontSize=annotationFontSize
+        )
+    )
+    legend_proxies.append(
+        add_arrow(
+            ax, C, G, color="r", label="$v_3$", annotationFontSize=annotationFontSize
+        )
+    )
+    legend_proxies.append(
+        add_arrow(
+            ax, C, P, color="b", label="$v_4$", annotationFontSize=annotationFontSize
+        )
+    )
+    legend_proxies.append(
+        add_arrow(
+            ax,
+            T,
+            F,
+            color="orange",
+            label="Evader Path",
+            annotationFontSize=annotationFontSize,
+        )
+    )
 
     v3 = G - C
     v4 = P - C
@@ -855,11 +888,11 @@ def plot_theta_and_vectors_left_turn(
     # label theta
     vmean = np.mean([v3, v4], axis=0)
     ax.text(
-        C[0]+.04, 
-        C[1]-.01, 
+        C[0] + 0.04,
+        C[1] - 0.01,
         r"$\theta_\ell$",
         fontsize=annotationFontSize,
-        va='center',
+        va="center",
     )
 
 
@@ -874,7 +907,7 @@ def main_EZ():
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 0.5
-    evaderPosition = np.array([-.8858, .8512])
+    evaderPosition = np.array([-0.8858, 0.8512])
     startTime = time.time()
 
     # length, tangentPoint = find_dubins_path_length_right_strait(
@@ -926,11 +959,13 @@ def main_EZ():
         evaderSpeed,
         ax,
     )
-    plt.xlabel("X",fontsize=20)
-    plt.ylabel("Y",fontsize=20)
-    #set tick fonhtsize
+    plt.xlabel("X", fontsize=20)
+    plt.ylabel("Y", fontsize=20)
+    # set tick fonhtsize
     ax.tick_params(axis="both", which="major", labelsize=18)
-    ax.legend(loc='upper left', bbox_to_anchor=(1.05, 1.0), borderaxespad=0.,fontsize=18)
+    ax.legend(
+        loc="upper left", bbox_to_anchor=(1.05, 1.0), borderaxespad=0.0, fontsize=18
+    )
     plt.show()
 
 
