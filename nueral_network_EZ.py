@@ -22,10 +22,11 @@ import dubinsEZ
 import dubinsPEZ
 import mlp
 
-#turn off type 3 fonts
+# turn off type 3 fonts
 import matplotlib as mpl
-mpl.rcParams['pdf.fonttype'] = 42  # Use TrueType fonts (safe for most publishers)
-mpl.rcParams['ps.fonttype'] = 42   # For EPS output
+
+mpl.rcParams["pdf.fonttype"] = 42  # Use TrueType fonts (safe for most publishers)
+mpl.rcParams["ps.fonttype"] = 42  # For EPS output
 
 in_dubins_engagement_zone_ev = jax.jit(
     jax.vmap(
@@ -1154,6 +1155,7 @@ def linear_pez_from_x_single(X):
 
 linear_pez_from_x = jax.jit(jax.vmap(linear_pez_from_x_single, in_axes=(0,)))
 
+
 def quadratic_pez_from_x_single(X):
     pursuerPosition = jnp.array([0.0, 0.0])
     pursuerPositionCov = jnp.array([[X[0], X[2]], [X[2], X[1]]]) + jnp.eye(2) * 1e-6
@@ -1306,8 +1308,6 @@ def compute_loss_linear_pez(
     y_pred_lin, det, trace = linear_pez_from_x(X_test)
     y_pred_quad, det, trace = quadratic_pez_from_x(X_test)
 
-
-
     print("max trace", jnp.max(trace))
     print("min trace", jnp.min(trace))
 
@@ -1343,12 +1343,11 @@ def compute_loss_linear_pez(
     abs_error_quad = jnp.abs(y_pred_quad - y_test)
     # abs_error_numerical = jnp.abs(y_pred_numerical - y_test)
 
-    #bin data
+    # bin data
     bins, bin_means_lin = binning(abs_error_lin, trace)
     bins, bin_means_nn = binning(abs_error_nn, trace)
     bins, bin_means_quad = binning(abs_error_quad, trace)
     # bins, bin_means_numerical = binning(abs_error_numerical, trace)
-
 
     save_dir = os.path.expanduser("~/Desktop/cspez_plot")
     # Create figure and axis
@@ -1363,7 +1362,7 @@ def compute_loss_linear_pez(
     ax2.set_title("Average Absolute Error", fontsize=24)
     ax2.set_xlabel(r"Trace of $\Sigma_{\Theta_P}$", fontsize=22)
     ax2.set_ylabel("Average Absolute Error", fontsize=22)
-    ax2.tick_params(axis='both', which='major', labelsize=20)
+    ax2.tick_params(axis="both", which="major", labelsize=20)
 
     # Legend
     ax2.legend(fontsize=18)
@@ -1372,23 +1371,11 @@ def compute_loss_linear_pez(
     fig2.tight_layout()
     fig2.savefig(fig_path, format="pdf", bbox_inches="tight")
 
-
-
-
-
     # plot histogram of pursuer position covariance
     plot_all_histograms(X_test)
     fig3, ax3 = plt.subplots()
     # plot histogram of y_pred_lin
     ax3.hist(y_test, bins=50, edgecolor="black", alpha=0.7)
-    
-
-
-
-
-
-
-
 
     # Create figure
     fig4, ax4 = plt.subplots(figsize=(10, 6))  # adjust size as needed
@@ -1398,22 +1385,20 @@ def compute_loss_linear_pez(
     ax4.boxplot(
         [abs_error_lin, abs_error_quad, abs_error_nn],
         labels=["LCSPEZ", "QCSPEZ", "NNCSPEZ"],
-        patch_artist=True
+        patch_artist=True,
     )
 
     # Titles and labels
     ax4.set_title("Absolute Error", fontsize=24)
     ax4.set_xlabel("Model", fontsize=22)
     ax4.set_ylabel("Absolute Error", fontsize=22)
-    ax4.tick_params(axis='both', which='major', labelsize=20)
+    ax4.tick_params(axis="both", which="major", labelsize=20)
 
     # Save figure
     if saveFig:
         fig_path = os.path.join(save_dir, "abs_error_boxplot.pdf")
         fig4.tight_layout()
         fig4.savefig(fig_path, format="pdf", bbox_inches="tight")
-
-
 
     plt.show()
 
@@ -1568,6 +1553,6 @@ if __name__ == "__main__":
     # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")[:numberOfSamples]
     # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
     # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
-    compute_loss_linear_pez(X_test, y_test,saveFig=False)
+    compute_loss_linear_pez(X_test, y_test, saveFig=False)
     # main()
     # plt.show()

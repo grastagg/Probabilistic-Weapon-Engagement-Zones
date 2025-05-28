@@ -15,7 +15,7 @@ import jax.numpy as jnp
 # import testDubins
 
 
-jax.config.update("jax_enable_x64", False)
+jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_platform_name", "gpu")
 
 print(jax.devices())

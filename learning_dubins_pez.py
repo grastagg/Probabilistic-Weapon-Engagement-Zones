@@ -34,6 +34,53 @@ def plot_low_priority_paths(
             ax.plot(pathHistory[:, 0][pathMask], pathHistory[:, 1][pathMask], c="g")
 
 
+def plot_low_priority_paths_with_prob(
+    headings,
+    speeds,
+    startPositions,
+    interceptedList,
+    endPoints,
+    pathHistories,
+    pathMasks,
+    pursuerX,
+    ax,
+):
+    ax.set_aspect("equal", adjustable="box")
+    for i in range(len(startPositions)):
+        print("intercepted", interceptedList[i])
+        pathHistory = pathHistories[i]
+
+        heading = headings[i]
+        pez = nueral_network_PEZ(
+            pursuerX, pathHistory, heading * np.ones(len(pathHistory)), speeds[i]
+        )
+        print("max pez", jnp.max(pez))
+        pathMask = pathMasks[i]
+        if interceptedList[i]:
+            ax.scatter(
+                endPoints[i][0],
+                endPoints[i][1],
+                color="red",
+                marker="x",
+            )
+            c = ax.scatter(
+                pathHistory[:, 0][pathMask],
+                pathHistory[:, 1][pathMask],
+                c=pez[pathMask],
+                vmin=0.0,
+                vmax=1.0,
+            )
+        else:
+            c = ax.scatter(
+                pathHistory[:, 0][pathMask],
+                pathHistory[:, 1][pathMask],
+                c=pez[pathMask],
+                vmin=0.0,
+                vmax=1.0,
+            )
+    ax.scatter(pursuerX[0], pursuerX[1], color="blue", marker="o")
+
+
 def is_inside_region(point, xbound, ybounds):
     return xbound[0] <= point[0] <= xbound[1] and ybounds[0] <= point[1] <= ybounds[1]
 
@@ -208,6 +255,7 @@ def nueral_network_PEZ(X, evaderPositions, evaderHeadings, evaderSpeed):
 
 
 #### pez learning code ####
+@jax.jit
 def learning_loss_function_single(
     pursuerX,
     heading,
@@ -218,23 +266,35 @@ def learning_loss_function_single(
     epsilon=1e-6,
 ):
     headings = heading * jnp.ones(pathHistory.shape[0])
-    p_t = nueral_network_PEZ(pursuerX, pathHistory, headings, speed)  # (T,)
-    p_t = jnp.clip(p_t, 1e-4, 1.0 - 1e-4)  # prevent numerical issues
+    pez = nueral_network_PEZ(pursuerX, pathHistory, headings, speed)  # (T,)
+    pez = jnp.clip(pez, 1e-4, 1.0 - 1e-4)  # prevent numerical issues
 
-    p_t = jnp.where(pathMask, p_t, 0.0)
+    pez = jnp.where(pathMask, pez, 0.0)
 
-    def intercepted_condition():
-        log_escape = jnp.log1p(-p_t)
-        log_escape = log_escape * pathMask
-        log_prob_escape = jnp.sum(log_escape)
-        prob_intercept = 1.0 - jnp.exp(log_prob_escape)
-        return -jnp.log(prob_intercept + epsilon)
+    def loss_if_intercepted():
+        mean_p = jnp.mean(pez)
+        return -jnp.log(mean_p)
 
-    def not_intercepted_condition():
-        log_escape = jnp.log1p(-p_t)
-        return -jnp.sum(log_escape * pathMask)
+    def loss_if_survived():
+        log_escape = jnp.log1p(-pez)
+        return -jnp.sum(log_escape)
 
-    return jax.lax.cond(intercepted, intercepted_condition, not_intercepted_condition)
+    # def loss_if_intercepted():
+    #     # Encourage at least one high PEZ prob
+    #     # Using mean is more stable than product or max
+    #     # return -2.0 * jnp.log(jnp.mean(p_t) + epsilon)
+    #     # clipped_pez = jnp.clip(pez, 0.0, 0.95)
+    #     one_minus_p = 1.0 - pez + epsilon
+    #     prob_escape = jnp.prod(jnp.where(pathMask, one_minus_p, 1.0))
+    #     prob_hit = 1.0 - prob_escape
+    #     return -jnp.log(prob_hit + epsilon)
+    #
+    # def loss_if_survived():
+    #     # Encourage all probs to be near zero
+    #     log_escape = jnp.log1p(-pez)
+    #     return -jnp.sum(log_escape * pathMask)
+
+    return jax.lax.cond(intercepted, loss_if_intercepted, loss_if_survived)
 
 
 batched_loss = jax.jit(
@@ -242,6 +302,7 @@ batched_loss = jax.jit(
 )
 
 
+@jax.jit
 def total_learning_loss(
     pursuerX,
     headings,
@@ -261,7 +322,7 @@ def total_learning_loss(
     )
 
     # total loss = sum over agents
-    return jnp.sum(losses)
+    return jnp.sum(losses) / len(losses)
 
 
 dTotalLossDX = jax.jit(jax.grad(total_learning_loss, argnums=0))
@@ -290,7 +351,10 @@ def learn_pez(
     lowerLimit = jnp.array(
         [-2.0, -2.0, 0.0, -1.0, 0.00, -jnp.pi, 0.0, 0.0, 0.0, 0.0, 0.00, 0.0, 0.00]
     )
-    upperLimit = 10 * jnp.ones_like(lowerLimit)
+    upperLimit = jnp.array(
+        [2.0, 2.0, 2.0, 1.0, 2.00, jnp.pi, 5.0, 5.0, 5.0, 5.0, 5.00, 5.0, 5.00]
+    )
+    # upperLimit = 10 * jnp.ones_like(lowerLimit)
     headings = jnp.array(headings)
     total_loss = total_learning_loss(
         pursuerX,
@@ -301,57 +365,68 @@ def learn_pez(
         pathMasks,
     )
     print("Total loss for all agents:", total_loss)
+    pursuerX = (lowerLimit + upperLimit) / 2.0
     # pursuerX = np.random.uniform(lowerLimit, upperLimit)
+    num_random_starts = 5
+    best_sol = None
+    best_loss = np.inf
+    for i in range(num_random_starts):
+        print("Random start", i + 1, "of", num_random_starts)
+        pursuerX = np.random.uniform(lowerLimit, upperLimit)
 
-    def objfunc(xDict):
-        pursuerX = xDict["pursuerX"]
-        loss = total_learning_loss(
-            pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks
+        def objfunc(xDict):
+            pursuerX = xDict["pursuerX"]
+            loss = total_learning_loss(
+                pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks
+            )
+            funcs = {}
+            funcs["loss"] = loss
+            return funcs, False
+
+        def sens(xDict, funcs):
+            dX = dTotalLossDX(
+                xDict["pursuerX"],
+                headings,
+                speeds,
+                interceptedList,
+                pathHistories,
+                pathMasks,
+            )
+            funcsSens = {}
+            funcsSens["loss"] = {
+                "pursuerX": dX,
+            }
+            return funcsSens, False
+
+        optProb = Optimization("path optimization", objfunc)
+        optProb.addVarGroup(
+            name="pursuerX",
+            nVars=13,
+            varType="c",
+            value=pursuerX,
+            lower=lowerLimit,
+            upper=upperLimit,
         )
-        funcs = {}
-        funcs["loss"] = loss
-        return funcs, False
-
-    def sens(xDict, funcs):
-        dX = dTotalLossDX(
-            xDict["pursuerX"],
-            headings,
-            speeds,
-            interceptedList,
-            pathHistories,
-            pathMasks,
+        optProb.addObj("loss")
+        opt = OPT("ipopt")
+        opt.options["print_level"] = 0
+        opt.options["max_iter"] = 1000
+        username = getpass.getuser()
+        opt.options["hsllib"] = (
+            "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
         )
-        funcsSens = {}
-        funcsSens["loss"] = {
-            "pursuerX": dX,
-        }
-        return funcsSens, False
+        opt.options["linear_solver"] = "ma97"
+        opt.options["derivative_test"] = "first-order"
 
-    optProb = Optimization("path optimization", objfunc)
-    optProb.addVarGroup(
-        name="pursuerX",
-        nVars=13,
-        varType="c",
-        value=pursuerX,
-        lower=lowerLimit,
-        upper=upperLimit,
-    )
-    optProb.addObj("loss")
-    opt = OPT("ipopt")
-    opt.options["print_level"] = 5
-    opt.options["max_iter"] = 200
-    username = getpass.getuser()
-    opt.options["hsllib"] = (
-        "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
-    )
-    opt.options["linear_solver"] = "ma97"
-    opt.options["derivative_test"] = "first-order"
+        sol = opt(optProb, sens=sens)
+        if sol.fStar < best_loss:
+            print("New best solution found with loss:", sol.fStar)
+            best_loss = sol.fStar
+            best_sol = sol
+    print(best_sol.xStar)
+    print("Objective function value:", best_sol.fStar)
 
-    sol = opt(optProb, sens=sens)
-    print(sol.xStar)
-    print("Objective function value:", sol.fStar)
-
-    pursuerX = sol.xStar["pursuerX"]
+    pursuerX = best_sol.xStar["pursuerX"]
     (
         pursuerPosition,
         pursuerPositionCov,
@@ -365,6 +440,7 @@ def learn_pez(
         pursuerRangeVar,
     ) = pursuerX_to_params(pursuerX)
     return (
+        pursuerX,
         pursuerPosition,
         pursuerPositionCov,
         pursuerHeading,
@@ -380,7 +456,7 @@ def learn_pez(
 
 def main():
     pursuerPosition = np.array([0.0, 0.0])
-    pursuerHeading = (10.0 / 20.0) * np.pi
+    pursuerHeading = (0.0 / 20.0) * np.pi
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
@@ -388,8 +464,7 @@ def main():
     agentSpeed = 1
     xbounds = (-2.0, 2.0)
     ybounds = (-2.0, 2.0)
-    dt = 0.01
-
+    dt = 0.1
     tmax = (
         np.sqrt((xbounds[1] - xbounds[0]) ** 2 + (ybounds[1] - ybounds[0]) ** 2)
         / agentSpeed
@@ -398,9 +473,9 @@ def main():
 
     numPoints = int(tmax / dt) + 1
 
+    interceptedList = []
     numLowPriorityAgents = 20
 
-    interceptedList = []
     endPoints = []
     endTimes = []
     pathHistories = []
@@ -451,24 +526,82 @@ def main():
 
     print("LEARNIGN")
     (
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        pursuerRange,
-        pursuerRangeVar,
+        pursuerX,
+        pursuerPositionLearned,
+        pursuerPositionCovLearned,
+        pursuerHeadingLearned,
+        pursuerHeadingVarLearned,
+        pursuerSpeedLearned,
+        pursuerSpeedVarLearned,
+        minimumTurnRadiusLearned,
+        minimumTurnRadiusVarLearned,
+        pursuerRangeLearned,
+        pursuerRangeVarLearned,
     ) = learn_pez(
         headings, speeds, interceptedList, pathHistories, pathMasks, endPoints, endTimes
     )
     print("Pursuer position:", pursuerPosition)
     print("Pursuer heading:", pursuerHeading)
     print("Pursuer speed:", pursuerSpeed)
-    print("Pursuer turn radius:", minimumTurnRadius)
+    print("Pursuer turn radius:", pursuerTurnRadius)
     print("Pursuer range:", pursuerRange)
+    print("Learned pursuer position:", pursuerPositionLearned)
+    print("Learned pursuer heading:", pursuerHeadingLearned)
+    print("Learned pursuer speed:", pursuerSpeedLearned)
+    print("Learned pursuer turn radius:", minimumTurnRadiusLearned)
+    print("Learned pursuer range:", pursuerRangeLearned)
+
+    fig, ax = plt.subplots()
+    plot_low_priority_paths_with_prob(
+        headings,
+        speeds,
+        startPositions,
+        interceptedList,
+        endPoints,
+        pathHistories,
+        pathMasks,
+        pursuerX,
+        ax,
+    )
+    # plot true pursuer position and heading
+    ax.scatter(
+        pursuerPosition[0],
+        pursuerPosition[1],
+        color="blue",
+        marker="o",
+        label="True Pursuer Position",
+    )
+    ax.quiver(
+        pursuerPosition[0],
+        pursuerPosition[1],
+        np.cos(pursuerHeading),
+        np.sin(pursuerHeading),
+        color="blue",
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        label="True Pursuer Heading",
+    )
+    # plot learned pursuer position and heading
+    ax.scatter(
+        pursuerPositionLearned[0],
+        pursuerPositionLearned[1],
+        color="orange",
+        marker="o",
+        label="Learned Pursuer Position",
+    )
+    ax.quiver(
+        pursuerPositionLearned[0],
+        pursuerPositionLearned[1],
+        np.cos(pursuerHeadingLearned),
+        np.sin(pursuerHeadingLearned),
+        color="orange",
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        label="Learned Pursuer Heading",
+    )
+    plt.legend()
 
 
 if __name__ == "__main__":
