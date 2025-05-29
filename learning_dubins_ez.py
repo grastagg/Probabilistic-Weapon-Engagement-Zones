@@ -48,7 +48,6 @@ def plot_low_priority_paths_with_ez(
 ):
     ax.set_aspect("equal", adjustable="box")
     for i in range(len(startPositions)):
-        print("intercepted", interceptedList[i])
         pathHistory = pathHistories[i]
 
         heading = headings[i]
@@ -59,7 +58,6 @@ def plot_low_priority_paths_with_ez(
             < 0
         )
 
-        print("in ez", jnp.any(ez))
         pathMask = pathMasks[i]
         if interceptedList[i]:
             ax.scatter(
@@ -248,7 +246,7 @@ def learning_loss_function_single(
     headings = heading * jnp.ones(pathHistory.shape[0])
     ez = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed)  # (T,)
 
-    ez = jnp.where(pathMask, ez, jnp.inf)
+    # ez = jnp.where(pathMask, ez, jnp.inf)
     rsEnd = dubins_reachable_set_from_pursuerX(pursuerX, jnp.array([interceptedPoint]))[
         0
     ]
@@ -300,25 +298,127 @@ def total_learning_loss(
 dTotalLossDX = jax.jit(jax.grad(total_learning_loss, argnums=0))
 
 
+def centroid_and_principal_axis(points):
+    points = np.asarray(points)
+    centroid = np.mean(points, axis=0)
+    centered = points - centroid
+    cov = (centered.T @ centered) / len(points)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    principal_axis = eigvecs[:, np.argmin(eigvals)]  # largest eigenvalue
+
+    return centroid, principal_axis
+
+
+def find_initial_position_and_heading(interceptedList, endPoints):
+    interceptedPoints = endPoints[interceptedList]
+    centroid, principal_axis = centroid_and_principal_axis(interceptedPoints)
+    heading = np.arctan2(principal_axis[1], principal_axis[0])
+    negHeading = np.arctan2(-principal_axis[1], -principal_axis[0])
+    return centroid, heading, negHeading
+
+
+def run_optimization(
+    headings,
+    speeds,
+    interceptedList,
+    pathHistories,
+    pathMasks,
+    endPoints,
+    endTimes,
+    initialPursuerX,
+    lowerLimit,
+    upperLimit,
+):
+    def objfunc(xDict):
+        pursuerX = xDict["pursuerX"]
+        loss = total_learning_loss(
+            pursuerX,
+            headings,
+            speeds,
+            interceptedList,
+            pathHistories,
+            pathMasks,
+            endPoints,
+        )
+        funcs = {}
+        funcs["loss"] = loss
+        return funcs, False
+
+    def sens(xDict, funcs):
+        dX = dTotalLossDX(
+            xDict["pursuerX"],
+            headings,
+            speeds,
+            interceptedList,
+            pathHistories,
+            pathMasks,
+        )
+        print("Gradient of loss:", dX)
+        funcsSens = {}
+        funcsSens["loss"] = {
+            "pursuerX": dX,
+        }
+        return funcsSens, False
+
+    optProb = Optimization("path optimization", objfunc)
+    optProb.addVarGroup(
+        name="pursuerX",
+        nVars=6,
+        varType="c",
+        value=initialPursuerX,
+        lower=lowerLimit,
+        upper=upperLimit,
+    )
+    optProb.addObj("loss")
+    opt = OPT("ipopt")
+    opt.options["print_level"] = 0
+    opt.options["max_iter"] = 1000
+    username = getpass.getuser()
+    opt.options["hsllib"] = (
+        "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
+    )
+    opt.options["linear_solver"] = "ma97"
+    opt.options["derivative_test"] = "first-order"
+
+    sol = opt(optProb, sens="FD")
+    return sol
+
+
 def learn_ez(
     headings, speeds, interceptedList, pathHistories, pathMasks, endPoints, endTimes
 ):
-    pursuerX = jnp.array(
-        [
-            0.0,
-            0.0,
-            0.0 / 20.0 * jnp.pi,
-            2.0,
-            0.2,
-            1.0,
-        ]
-    )
     lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.00])
     upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 5.0, 5.00])
-    # upperLimit = 10 * jnp.ones_like(lowerLimit)
-    headings = jnp.array(headings)
-    total_loss = total_learning_loss(
-        pursuerX,
+
+    startPosition, startHeading1, startHeading2 = find_initial_position_and_heading(
+        interceptedList, endPoints
+    )
+    print("pursuer position initial guess:", startPosition)
+    print("pursuer heading initial guess:", startHeading1, startHeading2)
+
+    middlePursuerX = (lowerLimit + upperLimit) / 2.0
+    intialPursuerX1 = jnp.array(
+        [
+            startPosition[0],
+            startPosition[1],
+            startHeading1,
+            middlePursuerX[3],
+            middlePursuerX[4],
+            middlePursuerX[5],
+        ]
+    )
+    intialPursuerX2 = jnp.array(
+        [
+            startPosition[0],
+            startPosition[1],
+            startHeading2,
+            middlePursuerX[3],
+            middlePursuerX[4],
+            middlePursuerX[5],
+        ]
+    )
+    loss1 = total_learning_loss(
+        intialPursuerX1,
         headings,
         speeds,
         interceptedList,
@@ -326,93 +426,53 @@ def learn_ez(
         pathMasks,
         endPoints,
     )
-    print("Total loss for all agents:", total_loss)
-    pursuerX = (lowerLimit + upperLimit) / 2.0
-    pursuerX = np.random.uniform(lowerLimit, upperLimit)
-    total_loss = total_learning_loss(
-        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks, endPoints
+    gradLoss1 = dTotalLossDX(
+        intialPursuerX1,
+        headings,
+        speeds,
+        interceptedList,
+        pathHistories,
+        pathMasks,
+        endPoints,
     )
-    total_loss_grad = dTotalLossDX(
-        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks, endPoints
+    print("Initial loss 1:", loss1)
+    print("Initial gradient loss 1:", gradLoss1)
+    sol1 = run_optimization(
+        headings,
+        speeds,
+        interceptedList,
+        pathHistories,
+        pathMasks,
+        endPoints,
+        endTimes,
+        intialPursuerX1,
+        lowerLimit,
+        upperLimit,
     )
-    print("starting loss", total_loss)
-    print("Gradient of total loss:", total_loss_grad)
-    num_random_starts = 1
-    best_sol = None
-    best_loss = np.inf
-    for i in range(num_random_starts):
-        print("Random start", i + 1, "of", num_random_starts)
-        pursuerX = np.random.uniform(lowerLimit, upperLimit)
-
-        def objfunc(xDict):
-            pursuerX = xDict["pursuerX"]
-            loss = total_learning_loss(
-                pursuerX,
-                headings,
-                speeds,
-                interceptedList,
-                pathHistories,
-                pathMasks,
-                endPoints,
-            )
-            funcs = {}
-            funcs["loss"] = loss
-            return funcs, False
-
-        def sens(xDict, funcs):
-            dX = dTotalLossDX(
-                xDict["pursuerX"],
-                headings,
-                speeds,
-                interceptedList,
-                pathHistories,
-                pathMasks,
-            )
-            print("Gradient of loss:", dX)
-            funcsSens = {}
-            funcsSens["loss"] = {
-                "pursuerX": dX,
-            }
-            return funcsSens, False
-
-        optProb = Optimization("path optimization", objfunc)
-        optProb.addVarGroup(
-            name="pursuerX",
-            nVars=6,
-            varType="c",
-            value=pursuerX,
-            lower=lowerLimit,
-            upper=upperLimit,
-        )
-        optProb.addObj("loss")
-        opt = OPT("ipopt")
-        opt.options["print_level"] = 0
-        opt.options["max_iter"] = 1000
-        username = getpass.getuser()
-        opt.options["hsllib"] = (
-            "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
-        )
-        opt.options["linear_solver"] = "ma97"
-        opt.options["derivative_test"] = "first-order"
-
-        sol = opt(optProb, sens="FD")
-        # sol = opt(optProb, sens=sens)
-        if sol.fStar < best_loss:
-            print("New best solution found with loss:", sol.fStar)
-            best_loss = sol.fStar
-            best_sol = sol
-    print(best_sol.xStar)
-    print("Objective function value:", best_sol.fStar)
-    best_loss = total_learning_loss(
-        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks, endPoints
+    sol2 = run_optimization(
+        headings,
+        speeds,
+        interceptedList,
+        pathHistories,
+        pathMasks,
+        endPoints,
+        endTimes,
+        intialPursuerX2,
+        lowerLimit,
+        upperLimit,
     )
+    pursuerX1 = sol1.xStar["pursuerX"]
+    pursuerX2 = sol2.xStar["pursuerX"]
+    print("Pursuer X1:", pursuerX1)
+    print("Pursuer X2:", pursuerX2)
 
-    lossHessian = jax.hessian(total_learning_loss, argnums=0)(
-        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks, endPoints
-    )
-    print("Loss Hessian:\n", lossHessian)
-    cov = jnp.linalg.inv(lossHessian)
-    pursuerX = best_sol.xStar["pursuerX"]
+    # lossHessian = jax.hessian(total_learning_loss, argnums=0)(
+    #     pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks, endPoints
+    # )
+    # print("Loss Hessian:\n", lossHessian)
+    # cov = jnp.linalg.inv(lossHessian)
+    cov = None
+    pursuerX = sol2.xStar["pursuerX"]
     (
         pursuerPosition,
         pursuerHeading,
@@ -472,7 +532,7 @@ def evenly_spaced_entry_points_with_heading_noise(
 
 def main():
     pursuerPosition = np.array([0.0, 0.0])
-    pursuerHeading = (5.0 / 20.0) * np.pi
+    pursuerHeading = (0.0 / 20.0) * np.pi
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
