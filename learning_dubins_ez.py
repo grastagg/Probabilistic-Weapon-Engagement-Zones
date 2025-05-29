@@ -182,7 +182,7 @@ def sample_entry_point_and_heading(xBounds, yBounds):
         x = np.random.uniform(xmin, xmax)
         y = ymax
 
-    start_pos = np.array([x, y], dtype=np.float32)
+    start_pos = np.array([x, y], dtype=np.float64)
 
     # Compute angle toward origin
     direction_to_center = -start_pos  # vector from point to (0,0)
@@ -249,28 +249,26 @@ def learning_loss_function_single(
     ez = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed)  # (T,)
 
     ez = jnp.where(pathMask, ez, jnp.inf)
-    rs = dubins_reachable_set_from_pursuerX(pursuerX, interceptedPoint)
+    rsEnd = dubins_reachable_set_from_pursuerX(pursuerX, jnp.array([interceptedPoint]))[
+        0
+    ]
+    # rsAll = dubins_reachable_set_from_pursuerX(pursuerX, pathHistory)
 
     interceptedLossEZ = jax.nn.relu(jnp.min(ez))  # loss if intercepted
     survivedLossEZ = jax.nn.relu(-jnp.min(ez))  # loss if survived
     lossEZ = jax.lax.cond(
         intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
     )
-    interceptedLoss
-
-    return loss
-
-    def loss_if_intercepted():
-        return jax.nn.relu(jnp.min(ez))
-
-    def loss_if_survived():
-        return jax.nn.relu(-jnp.min(ez))
-
-    return jax.lax.cond(intercepted, loss_if_intercepted, loss_if_survived)
+    interceptedLossRS = jax.nn.relu(rsEnd)  # loss if intercepted in RS
+    survivedLossRS = 0.0  # loss if survived in RS
+    lossRS = jax.lax.cond(
+        intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
+    )
+    return lossEZ + lossRS
 
 
 batched_loss = jax.jit(
-    jax.vmap(learning_loss_function_single, in_axes=(None, 0, 0, 0, 0, 0))
+    jax.vmap(learning_loss_function_single, in_axes=(None, 0, 0, 0, 0, 0, 0))
 )
 
 
@@ -282,6 +280,7 @@ def total_learning_loss(
     intercepted_flags,
     pathHistories,
     pathMasks,
+    interceptedPoints,
 ):
     # shape (N,)
     losses = batched_loss(
@@ -291,6 +290,7 @@ def total_learning_loss(
         intercepted_flags,
         pathHistories,
         pathMasks,
+        interceptedPoints,
     )
 
     # total loss = sum over agents
@@ -324,15 +324,16 @@ def learn_ez(
         interceptedList,
         pathHistories,
         pathMasks,
+        endPoints,
     )
     print("Total loss for all agents:", total_loss)
-    # pursuerX = (lowerLimit + upperLimit) / 2.0
+    pursuerX = (lowerLimit + upperLimit) / 2.0
     pursuerX = np.random.uniform(lowerLimit, upperLimit)
     total_loss = total_learning_loss(
-        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks
+        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks, endPoints
     )
     total_loss_grad = dTotalLossDX(
-        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks
+        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks, endPoints
     )
     print("starting loss", total_loss)
     print("Gradient of total loss:", total_loss_grad)
@@ -346,7 +347,13 @@ def learn_ez(
         def objfunc(xDict):
             pursuerX = xDict["pursuerX"]
             loss = total_learning_loss(
-                pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks
+                pursuerX,
+                headings,
+                speeds,
+                interceptedList,
+                pathHistories,
+                pathMasks,
+                endPoints,
             )
             funcs = {}
             funcs["loss"] = loss
@@ -397,11 +404,11 @@ def learn_ez(
     print(best_sol.xStar)
     print("Objective function value:", best_sol.fStar)
     best_loss = total_learning_loss(
-        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks
+        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks, endPoints
     )
 
     lossHessian = jax.hessian(total_learning_loss, argnums=0)(
-        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks
+        pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks, endPoints
     )
     print("Loss Hessian:\n", lossHessian)
     cov = jnp.linalg.inv(lossHessian)
@@ -465,14 +472,14 @@ def evenly_spaced_entry_points_with_heading_noise(
 
 def main():
     pursuerPosition = np.array([0.0, 0.0])
-    pursuerHeading = (0.0 / 20.0) * np.pi
+    pursuerHeading = (5.0 / 20.0) * np.pi
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
     pursuerTurnRadius = 0.2
     agentSpeed = 1.0
-    xbounds = (-2.0, 2.0)
-    ybounds = (-2.0, 2.0)
+    xbounds = (-3.0, 3.0)
+    ybounds = (-3.0, 3.0)
     dt = 0.1
     tmax = (
         np.sqrt((xbounds[1] - xbounds[0]) ** 2 + (ybounds[1] - ybounds[0]) ** 2)
@@ -493,12 +500,12 @@ def main():
     headings = []
     speeds = []
 
-    agents = evenly_spaced_entry_points_with_heading_noise(
-        xbounds, ybounds, num_points_per_side=5
-    )
-    # for _ in range(numLowPriorityAgents):
-    for startPosition, heading in agents:
-        # startPosition, heading = sample_entry_point_and_heading(xbounds, ybounds)
+    # agents = evenly_spaced_entry_points_with_heading_noise(
+    #     xbounds, ybounds, num_points_per_side=5
+    # )
+    for _ in range(numLowPriorityAgents):
+        # for startPosition, heading in agents:
+        startPosition, heading = sample_entry_point_and_heading(xbounds, ybounds)
         startPositions.append(startPosition)
         headings.append(heading)
         speeds.append(agentSpeed)
@@ -573,44 +580,44 @@ def main():
         pursuerX,
         ax,
     )
-    # # plot true pursuer position and heading
-    # ax.scatter(
-    #     pursuerPosition[0],
-    #     pursuerPosition[1],
-    #     color="blue",
-    #     marker="o",
-    #     label="True Pursuer Position",
-    # )
-    # ax.quiver(
-    #     pursuerPosition[0],
-    #     pursuerPosition[1],
-    #     np.cos(pursuerHeading),
-    #     np.sin(pursuerHeading),
-    #     color="blue",
-    #     angles="xy",
-    #     scale_units="xy",
-    #     scale=1,
-    #     label="True Pursuer Heading",
-    # )
-    # # plot learned pursuer position and heading
-    # ax.scatter(
-    #     pursuerPositionLearned[0],
-    #     pursuerPositionLearned[1],
-    #     color="orange",
-    #     marker="o",
-    #     label="Learned Pursuer Position",
-    # )
-    # ax.quiver(
-    #     pursuerPositionLearned[0],
-    #     pursuerPositionLearned[1],
-    #     np.cos(pursuerHeadingLearned),
-    #     np.sin(pursuerHeadingLearned),
-    #     color="orange",
-    #     angles="xy",
-    #     scale_units="xy",
-    #     scale=1,
-    #     label="Learned Pursuer Heading",
-    # )
+    # plot true pursuer position and heading
+    ax.scatter(
+        pursuerPosition[0],
+        pursuerPosition[1],
+        color="blue",
+        marker="o",
+        label="True Pursuer Position",
+    )
+    ax.quiver(
+        pursuerPosition[0],
+        pursuerPosition[1],
+        np.cos(pursuerHeading),
+        np.sin(pursuerHeading),
+        color="blue",
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        label="True Pursuer Heading",
+    )
+    # plot learned pursuer position and heading
+    ax.scatter(
+        pursuerPositionLearned[0],
+        pursuerPositionLearned[1],
+        color="orange",
+        marker="o",
+        label="Learned Pursuer Position",
+    )
+    ax.quiver(
+        pursuerPositionLearned[0],
+        pursuerPositionLearned[1],
+        np.cos(pursuerHeadingLearned),
+        np.sin(pursuerHeadingLearned),
+        color="orange",
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        label="Learned Pursuer Heading",
+    )
     dubinsEZ.plot_dubins_reachable_set(
         pursuerPosition, pursuerHeading, pursuerRange, pursuerTurnRadius, ax
     )
