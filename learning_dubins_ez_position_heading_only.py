@@ -5,21 +5,23 @@ from pyoptsparse import Optimization, OPT, IPOPT
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.sparse import bsr_array
 
 import dubinsEZ
-import nueral_network_EZ
 
 
 def plot_low_priority_paths(
-    startPositions,
-    interceptedList,
-    endPoints,
-    pathHistories,
-    pathMasks,
+    startPositions, interceptedList, endPoints, pathHistories, pathMasks, ax
 ):
-    fig, ax = plt.subplots()
     ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("X", fontsize=24)
+    ax.set_ylabel("Y", fontsize=24)
+    ax.tick_params(labelsize=18)
+    # set x and y limits
+    ax.set_xlim(-3.0, 3.0)
+    ax.set_ylim(-3.0, 3.0)
+
+    interceptedCounter = 0
+    survivedCounter = 0
     for i in range(len(startPositions)):
         pathHistory = pathHistories[i]
         pathMask = pathMasks[i]
@@ -30,9 +32,35 @@ def plot_low_priority_paths(
                 color="red",
                 marker="x",
             )
-            ax.plot(pathHistory[:, 0][pathMask], pathHistory[:, 1][pathMask], c="r")
+            if interceptedCounter == 0:
+                ax.plot(
+                    pathHistory[:, 0][pathMask],
+                    pathHistory[:, 1][pathMask],
+                    c="r",
+                    label="Intercepted",
+                )
+            else:
+                ax.plot(
+                    pathHistory[:, 0][pathMask],
+                    pathHistory[:, 1][pathMask],
+                    c="r",
+                )
+            interceptedCounter += 1
         else:
-            ax.plot(pathHistory[:, 0][pathMask], pathHistory[:, 1][pathMask], c="g")
+            if survivedCounter == 0:
+                ax.plot(
+                    pathHistory[:, 0][pathMask],
+                    pathHistory[:, 1][pathMask],
+                    c="g",
+                    label="Survived",
+                )
+            else:
+                ax.plot(
+                    pathHistory[:, 0][pathMask],
+                    pathHistory[:, 1][pathMask],
+                    c="g",
+                )
+            survivedCounter += 1
 
 
 def plot_low_priority_paths_with_ez(
@@ -44,6 +72,9 @@ def plot_low_priority_paths_with_ez(
     pathHistories,
     pathMasks,
     pursuerX,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
     ax,
 ):
     ax.set_aspect("equal", adjustable="box")
@@ -53,7 +84,13 @@ def plot_low_priority_paths_with_ez(
         heading = headings[i]
         ez = (
             dubinsEZ_from_pursuerX(
-                pursuerX, pathHistory, heading * np.ones(len(pathHistory)), speeds[i]
+                pursuerX,
+                pathHistory,
+                heading * np.ones(len(pathHistory)),
+                speeds[i],
+                pursuerSpeed,
+                minimumTurnRadius,
+                pursuerRange,
             )
             < 0
         )
@@ -167,6 +204,7 @@ def sample_entry_point_and_heading(xBounds, yBounds):
 
     edge = np.random.choice(["left", "right", "top", "bottom"])
 
+    edge = "left"
     if edge == "left":
         x = xmin
         y = np.random.uniform(ymin, ymax)
@@ -196,22 +234,22 @@ def sample_entry_point_and_heading(xBounds, yBounds):
 def pursuerX_to_params(X):
     pursuerPosition = X[0:2]
     pursuerHeading = X[2]
-    pursuerSpeed = X[3]
-    minimumTurnRadius = X[4]
-    pursuerRange = X[5]
     return (
         pursuerPosition,
         pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        pursuerRange,
     )
 
 
-def dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed):
-    pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange = (
-        pursuerX_to_params(pursuerX)
-    )
+def dubinsEZ_from_pursuerX(
+    pursuerX,
+    pathHistory,
+    headings,
+    speed,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
+):
+    pursuerPosition, pursuerHeading = pursuerX_to_params(pursuerX)
     ez = dubinsEZ.in_dubins_engagement_zone(
         pursuerPosition,
         pursuerHeading,
@@ -228,65 +266,48 @@ def dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed):
     return ez
 
 
-def dubins_reachable_set_from_pursuerX(pursuerX, goalPosition):
-    pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange = (
-        pursuerX_to_params(pursuerX)
-    )
+def dubins_reachable_set_from_pursuerX(
+    pursuerX, goalPosition, pursuerSpeed, minimumTurnRadius, pursuerRange
+):
+    pursuerPosition, pursuerHeading = pursuerX_to_params(pursuerX)
     rs = dubinsEZ.in_dubins_reachable_set(
         pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, goalPosition
     )
     return rs
 
 
-def smooth_min(vals, tau=10.0):
-    """
-    Smooth minimum function.
-    """
-    return -jnp.log(jnp.sum(jnp.exp(-tau * vals))) / tau
-
-
-#### pez learning code ####
-# @jax.jit
-# def learning_loss_function_single(
-#     pursuerX, heading, speed, intercepted, pathHistory, pathMask, interceptedPoint
-# ):
-#     headings = heading * jnp.ones(pathHistory.shape[0])
-#     ez = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed)  # (T,)
-#
-#     # Smooth min over PEZ values
-#     smooth_min_ez = smooth_min(ez, tau=10.0)
-#
-#     # Replace relu with softplus for differentiability
-#     interceptedLossEZ = jax.nn.softplus(smooth_min_ez)
-#     survivedLossEZ = jax.nn.softplus(-smooth_min_ez)
-#     lossEZ = jax.lax.cond(
-#         intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
-#     )
-#
-#     # Reachable set loss
-#     rsEnd = dubins_reachable_set_from_pursuerX(pursuerX, jnp.array([interceptedPoint]))[
-#         0
-#     ]
-#     interceptedLossRS = jax.nn.softplus(rsEnd)
-#     survivedLossRS = 0.0
-#     lossRS = jax.lax.cond(
-#         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
-#     )
-#
-#     return lossEZ + lossRS
-
-
 @jax.jit
 def learning_loss_function_single(
-    pursuerX, heading, speed, intercepted, pathHistory, pathMask, interceptedPoint
+    pursuerX,
+    heading,
+    speed,
+    intercepted,
+    pathHistory,
+    pathMask,
+    interceptedPoint,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
 ):
     headings = heading * jnp.ones(pathHistory.shape[0])
-    ez = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed)  # (T,)
+    ez = dubinsEZ_from_pursuerX(
+        pursuerX,
+        pathHistory,
+        headings,
+        speed,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
+    )  # (T,)
 
     # ez = jnp.where(pathMask, ez, jnp.inf)
-    rsEnd = dubins_reachable_set_from_pursuerX(pursuerX, jnp.array([interceptedPoint]))[
-        0
-    ]
+    rsEnd = dubins_reachable_set_from_pursuerX(
+        pursuerX,
+        jnp.array([interceptedPoint]),
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
+    )[0]
     # rsAll = dubins_reachable_set_from_pursuerX(pursuerX, pathHistory)
 
     interceptedLossEZ = jax.nn.relu(jnp.min(ez))  # loss if intercepted
@@ -303,7 +324,10 @@ def learning_loss_function_single(
 
 
 batched_loss = jax.jit(
-    jax.vmap(learning_loss_function_single, in_axes=(None, 0, 0, 0, 0, 0, 0))
+    jax.vmap(
+        learning_loss_function_single,
+        in_axes=(None, 0, 0, 0, 0, 0, 0, None, None, None),
+    )
 )
 
 
@@ -316,6 +340,9 @@ def total_learning_loss(
     pathHistories,
     pathMasks,
     interceptedPoints,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
 ):
     # shape (N,)
     losses = batched_loss(
@@ -326,6 +353,9 @@ def total_learning_loss(
         pathHistories,
         pathMasks,
         interceptedPoints,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
     )
 
     # total loss = sum over agents
@@ -365,6 +395,9 @@ def run_optimization(
     initialPursuerX,
     lowerLimit,
     upperLimit,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
 ):
     def objfunc(xDict):
         pursuerX = xDict["pursuerX"]
@@ -376,6 +409,9 @@ def run_optimization(
             pathHistories,
             pathMasks,
             endPoints,
+            pursuerSpeed,
+            minimumTurnRadius,
+            pursuerRange,
         )
         funcs = {}
         funcs["loss"] = loss
@@ -389,6 +425,9 @@ def run_optimization(
             interceptedList,
             pathHistories,
             pathMasks,
+            pursuerSpeed,
+            minimumTurnRadius,
+            pursuerRange,
         )
         print("Gradient of loss:", dX)
         funcsSens = {}
@@ -400,7 +439,7 @@ def run_optimization(
     optProb = Optimization("path optimization", objfunc)
     optProb.addVarGroup(
         name="pursuerX",
-        nVars=6,
+        nVars=3,
         varType="c",
         value=initialPursuerX,
         lower=lowerLimit,
@@ -422,10 +461,19 @@ def run_optimization(
 
 
 def learn_ez(
-    headings, speeds, interceptedList, pathHistories, pathMasks, endPoints, endTimes
+    headings,
+    speeds,
+    interceptedList,
+    pathHistories,
+    pathMasks,
+    endPoints,
+    endTimes,
+    pursuerSpeed,
+    minimumTurnRadius,
+    pursuerRange,
 ):
-    lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.00])
-    upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 5.0, 5.00])
+    lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi])
+    upperLimit = jnp.array([2.0, 2.0, jnp.pi])
 
     startPosition, startHeading1, startHeading2 = find_initial_position_and_heading(
         interceptedList, endPoints
@@ -433,15 +481,11 @@ def learn_ez(
     print("pursuer position initial guess:", startPosition)
     print("pursuer heading initial guess:", startHeading1, startHeading2)
 
-    middlePursuerX = (lowerLimit + upperLimit) / 2.0
     intialPursuerX1 = jnp.array(
         [
             startPosition[0],
             startPosition[1],
             startHeading1,
-            middlePursuerX[3],
-            middlePursuerX[4],
-            middlePursuerX[5],
         ]
     )
     intialPursuerX2 = jnp.array(
@@ -449,9 +493,6 @@ def learn_ez(
             startPosition[0],
             startPosition[1],
             startHeading2,
-            middlePursuerX[3],
-            middlePursuerX[4],
-            middlePursuerX[5],
         ]
     )
     loss1 = total_learning_loss(
@@ -462,6 +503,9 @@ def learn_ez(
         pathHistories,
         pathMasks,
         endPoints,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
     )
     gradLoss1 = dTotalLossDX(
         intialPursuerX1,
@@ -471,6 +515,9 @@ def learn_ez(
         pathHistories,
         pathMasks,
         endPoints,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
     )
     print("Initial loss 1:", loss1)
     print("Initial gradient loss 1:", gradLoss1)
@@ -485,6 +532,9 @@ def learn_ez(
         intialPursuerX1,
         lowerLimit,
         upperLimit,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
     )
     sol2 = run_optimization(
         headings,
@@ -497,6 +547,9 @@ def learn_ez(
         intialPursuerX2,
         lowerLimit,
         upperLimit,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
     )
     pursuerX1 = sol1.xStar["pursuerX"]
     pursuerX2 = sol2.xStar["pursuerX"]
@@ -511,20 +564,17 @@ def learn_ez(
     cov = None
     pursuerX = sol2.xStar["pursuerX"]
     (
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        pursuerRange,
-    ) = pursuerX_to_params(pursuerX)
+        pursuerPosition1,
+        pursuerHeading1,
+    ) = pursuerX_to_params(pursuerX1)
+    pursuerPosition2, pursuerHeading2 = pursuerX_to_params(pursuerX2)
     return (
         pursuerX,
         cov,
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        pursuerRange,
+        pursuerPosition1,
+        pursuerHeading1,
+        pursuerPosition2,
+        pursuerHeading2,
     )
 
 
@@ -567,6 +617,49 @@ def evenly_spaced_entry_points_with_heading_noise(
     return results
 
 
+def plot_true_and_learned_pursuer(
+    pursuerPosition, pursuerHeading, pursuerPositionLearned, pursuerHeadingLearned, ax
+):
+    # plot true pursuer position and heading
+    ax.scatter(
+        pursuerPosition[0],
+        pursuerPosition[1],
+        color="blue",
+        marker="o",
+        label="True Pursuer Position",
+    )
+    ax.quiver(
+        pursuerPosition[0],
+        pursuerPosition[1],
+        np.cos(pursuerHeading),
+        np.sin(pursuerHeading),
+        color="blue",
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        label="True Pursuer Heading",
+    )
+    # plot learned pursuer position and heading
+    ax.scatter(
+        pursuerPositionLearned[0],
+        pursuerPositionLearned[1],
+        color="orange",
+        marker="o",
+        label="Learned Pursuer Position",
+    )
+    ax.quiver(
+        pursuerPositionLearned[0],
+        pursuerPositionLearned[1],
+        np.cos(pursuerHeadingLearned),
+        np.sin(pursuerHeadingLearned),
+        color="orange",
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        label="Learned Pursuer Heading",
+    )
+
+
 def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerHeading = (0.0 / 20.0) * np.pi
@@ -587,7 +680,7 @@ def main():
     numPoints = int(tmax / dt) + 1
 
     interceptedList = []
-    numLowPriorityAgents = 20
+    numLowPriorityAgents = 10
 
     endPoints = []
     endTimes = []
@@ -633,37 +726,46 @@ def main():
     headings = jnp.array(headings)
     speeds = jnp.array(speeds)
 
+    fig, ax = plt.subplots()
     plot_low_priority_paths(
-        startPositions,
-        interceptedList,
-        endPoints,
-        pathHistories,
-        pathMasks,
+        startPositions, interceptedList, endPoints, pathHistories, pathMasks, ax
     )
+    dubinsEZ.plot_dubins_reachable_set(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerRange,
+        pursuerTurnRadius,
+        ax,
+        colors=["magenta"],
+    )
+    plt.legend(fontsize=18)
 
-    print("LEARNIGN")
+    print("LEARNING")
     (
         pursuerX,
         pursuerCov,
-        pursuerPositionLearned,
-        pursuerHeadingLearned,
-        pursuerSpeedLearned,
-        minimumTurnRadiusLearned,
-        pursuerRangeLearned,
+        pursuerPositionLearned1,
+        pursuerHeadingLearned1,
+        pursuerPositionLearned2,
+        pursuerHeadingLearned2,
     ) = learn_ez(
-        headings, speeds, interceptedList, pathHistories, pathMasks, endPoints, endTimes
+        headings,
+        speeds,
+        interceptedList,
+        pathHistories,
+        pathMasks,
+        endPoints,
+        endTimes,
+        pursuerSpeed,
+        pursuerTurnRadius,
+        pursuerRange,
     )
     print("Pursuer position:", pursuerPosition)
     print("Pursuer heading:", pursuerHeading)
-    print("Pursuer speed:", pursuerSpeed)
-    print("Pursuer turn radius:", pursuerTurnRadius)
-    print("Pursuer range:", pursuerRange)
-    print("Learned pursuer position:", pursuerPositionLearned)
-    print("Learned pursuer heading:", pursuerHeadingLearned)
-    print("Learned pursuer speed:", pursuerSpeedLearned)
-    print("Learned pursuer turn radius:", minimumTurnRadiusLearned)
-    print("Learned pursuer range:", pursuerRangeLearned)
-    print("Pursuer covariance matrix:\n", pursuerCov)
+    print("Learned pursuer position 1:", pursuerPositionLearned1)
+    print("Learned pursuer heading 1:", pursuerHeadingLearned1)
+    print("Learned pursuer position 2:", pursuerPositionLearned2)
+    print("Learned pursuer heading 2:", pursuerHeadingLearned2)
 
     fig, ax = plt.subplots()
     plot_low_priority_paths_with_ez(
@@ -675,56 +777,73 @@ def main():
         pathHistories,
         pathMasks,
         pursuerX,
+        pursuerSpeed,
+        pursuerTurnRadius,
+        pursuerRange,
         ax,
     )
-    # plot true pursuer position and heading
-    ax.scatter(
-        pursuerPosition[0],
-        pursuerPosition[1],
-        color="blue",
-        marker="o",
-        label="True Pursuer Position",
-    )
-    ax.quiver(
-        pursuerPosition[0],
-        pursuerPosition[1],
-        np.cos(pursuerHeading),
-        np.sin(pursuerHeading),
-        color="blue",
-        angles="xy",
-        scale_units="xy",
-        scale=1,
-        label="True Pursuer Heading",
-    )
-    # plot learned pursuer position and heading
-    ax.scatter(
-        pursuerPositionLearned[0],
-        pursuerPositionLearned[1],
-        color="orange",
-        marker="o",
-        label="Learned Pursuer Position",
-    )
-    ax.quiver(
-        pursuerPositionLearned[0],
-        pursuerPositionLearned[1],
-        np.cos(pursuerHeadingLearned),
-        np.sin(pursuerHeadingLearned),
-        color="orange",
-        angles="xy",
-        scale_units="xy",
-        scale=1,
-        label="Learned Pursuer Heading",
-    )
     dubinsEZ.plot_dubins_reachable_set(
-        pursuerPosition, pursuerHeading, pursuerRange, pursuerTurnRadius, ax
-    )
-    dubinsEZ.plot_dubins_reachable_set(
-        pursuerPositionLearned,
-        pursuerHeadingLearned,
-        pursuerRangeLearned,
-        minimumTurnRadiusLearned,
+        pursuerPosition,
+        pursuerHeading,
+        pursuerRange,
+        pursuerTurnRadius,
         ax,
         colors=["green"],
+    )
+    dubinsEZ.plot_dubins_reachable_set(
+        pursuerPositionLearned1,
+        pursuerHeadingLearned1,
+        pursuerRange,
+        pursuerTurnRadius,
+        ax,
+        colors=["red"],
+    )
+    plot_true_and_learned_pursuer(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerPositionLearned1,
+        pursuerHeadingLearned1,
+        ax,
+    )
+    plt.legend()
+
+    fig1, ax1 = plt.subplots()
+    plot_low_priority_paths_with_ez(
+        headings,
+        speeds,
+        startPositions,
+        interceptedList,
+        endPoints,
+        pathHistories,
+        pathMasks,
+        pursuerX,
+        pursuerSpeed,
+        pursuerTurnRadius,
+        pursuerRange,
+        ax1,
+    )
+    dubinsEZ.plot_dubins_reachable_set(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerRange,
+        pursuerTurnRadius,
+        ax1,
+        colors=["green"],
+    )
+    dubinsEZ.plot_dubins_reachable_set(
+        pursuerPositionLearned2,
+        pursuerHeadingLearned2,
+        pursuerRange,
+        pursuerTurnRadius,
+        ax1,
+        colors=["red"],
+    )
+    plot_true_and_learned_pursuer(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerPositionLearned2,
+        pursuerHeadingLearned2,
+        ax1,
     )
     plt.legend()
 
