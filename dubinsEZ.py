@@ -397,6 +397,27 @@ def in_dubins_engagement_zone_soft_min_single(
 
 
 @jax.jit
+def in_dubins_reachable_set_single(
+    startPosition,
+    startHeading,
+    turnRadius,
+    pursuerRange,
+    goalPosition,
+):
+    dubinsPathLengths = find_shortest_dubins_path(
+        startPosition, startHeading, goalPosition, turnRadius
+    )
+
+    rs = dubinsPathLengths - pursuerRange
+    return rs
+
+
+in_dubins_reachable_set = jax.jit(
+    jax.vmap(in_dubins_reachable_set_single, in_axes=(None, None, None, None, 0))
+)
+
+
+@jax.jit
 def in_dubins_engagement_zone_single(
     startPosition,
     startHeading,
@@ -597,10 +618,10 @@ def plot_dubins_path(
 
 
 def plot_dubins_reachable_set(
-    pursuerPosition, pursuerHeading, pursuerRange, radius, ax
+    pursuerPosition, pursuerHeading, pursuerRange, radius, ax, colors=["brown"]
 ):
     numPoints = 1000
-    rangeX = 1.1
+    rangeX = 2.1
     x = np.linspace(-rangeX, rangeX, numPoints)
     y = np.linspace(-rangeX, rangeX, numPoints)
     [X, Y] = np.meshgrid(x, y)
@@ -617,7 +638,6 @@ def plot_dubins_reachable_set(
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
 
-    colors = ["brown"]
     ax.contour(X, Y, Z, colors=colors, levels=[0], zorder=10000)
     contour_proxy = plt.plot(
         [0], [0], color=colors[0], linestyle="-", label="Reachable Set"
