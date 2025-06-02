@@ -204,7 +204,6 @@ def sample_entry_point_and_heading(xBounds, yBounds):
 
     edge = np.random.choice(["left", "right", "top", "bottom"])
 
-    edge = "left"
     if edge == "left":
         x = xmin
         y = np.random.uniform(ymin, ymax)
@@ -690,12 +689,12 @@ def main():
     headings = []
     speeds = []
 
-    # agents = evenly_spaced_entry_points_with_heading_noise(
-    #     xbounds, ybounds, num_points_per_side=5
-    # )
-    for _ in range(numLowPriorityAgents):
-        # for startPosition, heading in agents:
-        startPosition, heading = sample_entry_point_and_heading(xbounds, ybounds)
+    agents = evenly_spaced_entry_points_with_heading_noise(
+        xbounds, ybounds, num_points_per_side=5
+    )
+    # for _ in range(numLowPriorityAgents):
+    for startPosition, heading in agents:
+        # startPosition, heading = sample_entry_point_and_heading(xbounds, ybounds)
         startPositions.append(startPosition)
         headings.append(heading)
         speeds.append(agentSpeed)

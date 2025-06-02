@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 from scipy.sparse import bsr_array
 
 import dubinsEZ
-import nueral_network_EZ
 
 
 def plot_low_priority_paths(
