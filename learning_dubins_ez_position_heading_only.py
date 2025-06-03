@@ -160,8 +160,8 @@ def send_low_priority_agent(
     numPoints,
 ):
     # currentPosition = jnp.array(startPosition)
-    # t = jnp.linspace(0.0, tmax, numPoints)  # shape (T,)
-    # direction = jnp.array([jnp.cos(heading), jnp.sin(heading)])  # shape (2,)
+    t = jnp.linspace(0.0, tmax, numPoints)  # shape (T,)
+    direction = jnp.array([jnp.cos(heading), jnp.sin(heading)])  # shape (2,)
     # displacement = t[:, None] * speed * direction  # shape (T, 2)
     # pathHistory = currentPosition + displacement  # shape (T, 2)
     # headings = heading * jnp.ones(numPoints)  # shape (T,)
@@ -713,6 +713,8 @@ def optimize_next_low_priority_path(
     num_angles=32,
     num_headings=32,
     speed=1.0,  # assumed fixed speed for all candidates
+    tmax=10.0,  # assumed fixed time for all candidates
+    num_points=100,  # number of points in trajectory simulation
 ):
     # Generate candidate start positions (around circle)
     angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
@@ -726,7 +728,9 @@ def optimize_next_low_priority_path(
         start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
         # pathHistory =
         # headings=
-        pathHistory, headings_path = simulate_trajectory_fn(start_pos, heading)
+        pathHistory, headings_path = simulate_trajectory_fn(
+            start_pos, heading, speed, tmax, num_points
+        )
 
         # Evaluate PEZ probability at current theta
         def prob_fn(theta):
