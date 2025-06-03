@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 import dubinsEZ
 
-positionAndHeadingOnly = False
+positionAndHeadingOnly = True
 
 
 def plot_low_priority_paths(
