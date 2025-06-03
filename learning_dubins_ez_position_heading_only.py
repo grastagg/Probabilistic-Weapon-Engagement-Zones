@@ -11,6 +11,8 @@ import dubinsEZ
 
 positionAndHeadingOnly = True
 
+np.random.seed(42)  # for reproducibility
+
 
 def plot_low_priority_paths(
     startPositions, interceptedList, endPoints, pathHistories, pathMasks, ax
@@ -229,6 +231,7 @@ def sample_entry_point_and_heading(xBounds, yBounds):
     return start_pos, heading
 
 
+@jax.jit
 def pursuerX_to_params_position_and_heading(X, trueParams):
     pursuerPosition = X[0:2]
     pursuerHeading = X[2]
@@ -286,8 +289,6 @@ def dubinsEZ_from_pursuerX(
         headings,
         speed,
     )
-    # temp = 10.0
-    # return jax.nn.sigmoid(-ez / temp)  # scale to [0, 1] range
     return ez
 
 
@@ -299,6 +300,63 @@ def dubins_reachable_set_from_pursuerX(pursuerX, goalPosition, trueParams):
         pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, goalPosition
     )
     return rs
+
+
+def smooth_min(x, alpha=10.0):
+    return -jnp.log(jnp.sum(jnp.exp(-alpha * x))) / alpha
+
+
+# @jax.jit
+# def learning_loss_function_single(
+#     pursuerX,
+#     heading,
+#     speed,
+#     intercepted,
+#     pathHistory,
+#     pathMask,
+#     interceptedPoint,
+#     trueParams,
+# ):
+#     headings = heading * jnp.ones(pathHistory.shape[0])
+#     # pathHistory = jnp.ones_like(pathHistory)
+#
+#     ez = dubinsEZ_from_pursuerX(
+#         pursuerX,
+#         pathHistory,
+#         headings,
+#         speed,
+#         trueParams,
+#     )  # shape (T,)
+#
+#     rsEnd = dubins_reachable_set_from_pursuerX(
+#         pursuerX,
+#         jnp.array([interceptedPoint]),
+#         trueParams,
+#     )[0]
+#     # rsEnd = dubinsEZ_from_pursuerX(
+#     #     pursuerX,
+#     #     jnp.array([interceptedPoint]),
+#     #     jnp.array([heading]),
+#     #     speed,
+#     #     trueParams,
+#     # )[0]
+#
+#     interceptedLossEZ = jax.nn.relu(smooth_min(ez))
+#     survivedLossEZ = jax.nn.relu(-smooth_min(ez))
+#
+#     lossEZ = jax.lax.cond(
+#         intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
+#     )
+#
+#     interceptedLossRS = jax.nn.relu(rsEnd)
+#     survivedLossRS = 0.0
+#
+#     lossRS = jax.lax.cond(
+#         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
+#     )
+#     # return lossRS
+#
+#     return lossEZ + lossRS
 
 
 @jax.jit
@@ -313,6 +371,8 @@ def learning_loss_function_single(
     trueParams,
 ):
     headings = heading * jnp.ones(pathHistory.shape[0])
+    # pathHistory = jnp.where(pathMask[:, None], pathHistory, 10000)
+    # jax.debug.print("Path history shape: {}", pathHistory)
     ez = dubinsEZ_from_pursuerX(
         pursuerX,
         pathHistory,
@@ -339,6 +399,7 @@ def learning_loss_function_single(
     lossRS = jax.lax.cond(
         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
     )
+    # return lossRS
     return lossEZ + lossRS
 
 
@@ -540,6 +601,7 @@ def learn_ez(
         endPoints,
         trueParams,
     )
+    print("TEST", intialPursuerX1)
     gradLoss1 = dTotalLossDX(
         intialPursuerX1,
         headings,
@@ -596,40 +658,37 @@ def learn_ez(
     )
 
 
-def evenly_spaced_entry_points_with_heading_noise(
-    xBounds, yBounds, num_points_per_side=10, heading_noise_std=0.5
+def uniform_circular_entry_points_with_heading_noise(
+    center, radius, num_agents, heading_noise_std=0.5
 ):
     """
-    Evenly place entry points around the boundary of a rectangular region.
-    Each point gets a heading pointing approximately toward the origin (0,0),
-    with added Gaussian noise.
+    Uniformly sample agent entry points around a circle, with headings toward the center plus noise.
 
     Args:
-        xBounds: tuple of (xmin, xmax)
-        yBounds: tuple of (ymin, ymax)
-        num_points_per_side: how many points per side of the rectangle
-        heading_noise_std: standard deviation of heading noise
+        center: tuple (x, y) — center of the circle
+        radius: float — radius of the circle
+        num_agents: int — number of agents to generate
+        heading_noise_std: float — stddev of heading noise (in radians)
 
     Returns:
-        List of tuples: (start_pos: np.array of shape (2,), heading: float)
+        List of tuples: (start_pos: np.array shape (2,), heading: float)
     """
-    xmin, xmax = xBounds
-    ymin, ymax = yBounds
-
-    # Generate evenly spaced points on each side
-    left = [(xmin, y) for y in np.linspace(ymin, ymax, num_points_per_side)]
-    right = [(xmax, y) for y in np.linspace(ymin, ymax, num_points_per_side)]
-    bottom = [(x, ymin) for x in np.linspace(xmin, xmax, num_points_per_side)]
-    top = [(x, ymax) for x in np.linspace(xmin, xmax, num_points_per_side)]
-
-    all_points = left + right + bottom + top
-
+    angles = np.linspace(0, 2 * np.pi, num_agents, endpoint=False)
     results = []
-    for point in all_points:
-        start_pos = np.array(point, dtype=np.float32)
-        direction_to_center = -start_pos
+
+    for theta in angles:
+        # Position on the circle
+        x = center[0] + radius * np.cos(theta)
+        y = center[1] + radius * np.sin(theta)
+        start_pos = np.array([x, y], dtype=np.float64)
+
+        # Heading toward center
+        direction_to_center = np.array(center) - start_pos
         heading = np.arctan2(direction_to_center[1], direction_to_center[0])
+
+        # Add Gaussian noise
         heading += np.random.normal(0.0, heading_noise_std)
+
         results.append((start_pos, heading))
 
     return results
@@ -680,7 +739,7 @@ def plot_true_and_learned_pursuer(
 
 def main():
     pursuerPosition = np.array([0.0, 0.0])
-    pursuerHeading = (0.0 / 20.0) * np.pi
+    pursuerHeading = (5.0 / 20.0) * np.pi
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
@@ -689,10 +748,9 @@ def main():
     xbounds = (-3.0, 3.0)
     ybounds = (-3.0, 3.0)
     dt = 0.1
-    tmax = (
-        np.sqrt((xbounds[1] - xbounds[0]) ** 2 + (ybounds[1] - ybounds[0]) ** 2)
-        / agentSpeed
-    )
+    searchCircleCenter = [0, 0]
+    searchCircleRadius = 3.0
+    tmax = (2 * searchCircleRadius) / agentSpeed
     print("tmax", tmax)
     trueParams = jnp.array(
         [
@@ -718,8 +776,11 @@ def main():
     headings = []
     speeds = []
 
-    agents = evenly_spaced_entry_points_with_heading_noise(
-        xbounds, ybounds, num_points_per_side=5
+    agents = uniform_circular_entry_points_with_heading_noise(
+        searchCircleCenter,
+        searchCircleRadius,
+        numLowPriorityAgents,
+        heading_noise_std=0.5,
     )
     # for _ in range(numLowPriorityAgents):
     for startPosition, heading in agents:

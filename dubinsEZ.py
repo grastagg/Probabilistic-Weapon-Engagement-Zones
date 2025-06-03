@@ -57,43 +57,6 @@ def find_counter_clockwise_tangent_point(p1, c, r):
 
 
 @jax.jit
-def find_counter_clockwise_tangent_point_smooth(
-    p1: jnp.ndarray, c: jnp.ndarray, r: float
-) -> jnp.ndarray:
-    """
-    Smooth counterclockwise tangent point computation.
-    Uses an internal smooth ReLU (C1) to clamp the discriminant.
-    Matches the variable names of the original version.
-    """
-    gamma = 50.0  # smoothing sharpness
-
-    # Original variables
-    v1 = p1 - c
-    normV1 = jnp.linalg.norm(v1)
-
-    # Parallel component
-    v3Perallel = (r**2) / (normV1**2) * v1
-
-    # Perpendicular direction (90° clockwise rotation)
-    vPerpendicularNormalized = jnp.array([v1[1], -v1[0]]) / normV1
-
-    # Smooth discriminant: Delta = r^2 - r^4 / normV1^2
-    Delta = r**2 - (r**4) / (normV1**2)
-    # smooth ReLU: approx max(Delta,0)
-    Delta_pos = jnp.logaddexp(Delta, 0.0) / gamma
-
-    # Perpendicular component magnitude
-    v3Perpendicular = jnp.sqrt(Delta_pos) * vPerpendicularNormalized
-
-    # Combined tangent vector
-    v3 = v3Perallel + v3Perpendicular
-
-    # Tangent point
-    pt = c + v3
-    return pt
-
-
-@jax.jit
 def find_clockwise_tangent_point(p1, c, r):
     v1 = p1 - c
     normV1 = jnp.linalg.norm(v1)
@@ -102,41 +65,6 @@ def find_clockwise_tangent_point(p1, c, r):
     v3Perpendicular = jnp.sqrt(r**2 - r**4 / normV1**2) * vPerpendicularNormalized
 
     v3 = v3Perallel + v3Perpendicular
-    pt = c + v3
-    return pt
-
-
-@jax.jit
-def find_clockwise_tangent_point_smooth(
-    p1: jnp.ndarray, c: jnp.ndarray, r: float, gamma: float = 50.0
-) -> jnp.ndarray:
-    """
-    Smooth clockwise tangent point computation.
-    Uses an internal smooth ReLU (C1) to clamp the discriminant,
-    matching the variable names of the original function.
-    """
-    # Vector from circle center to point
-    v1 = p1 - c
-    normV1 = jnp.linalg.norm(v1)
-
-    # Parallel component
-    v3Perallel = (r**2) / (normV1**2) * v1
-
-    # Perpendicular direction (90° counterclockwise rotation)
-    vPerpendicularNormalized = jnp.array([-v1[1], v1[0]]) / normV1
-
-    # Smooth discriminant: Delta = r^2 - r^4 / normV1^2
-    Delta = r**2 - (r**4) / (normV1**2)
-    # C1‐smooth clamp to zero
-    Delta_pos = jnp.logaddexp(Delta, 0.0) / gamma
-
-    # Perpendicular component magnitude
-    v3Perpendicular = jnp.sqrt(Delta_pos) * vPerpendicularNormalized
-
-    # Combined tangent vector
-    v3 = v3Perallel + v3Perpendicular
-
-    # Tangent point
     pt = c + v3
     return pt
 
@@ -212,34 +140,7 @@ def find_dubins_path_length_right_strait(
     straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
     arcLength = radius * theta
     totalLength = arcLength + straightLineLength
-
-    return totalLength, tangentPoint
-
-
-@jax.jit
-def find_dubins_path_length_right_strait_smooth(
-    startPosition, startHeading, goalPosition, radius
-):
-    centerPoint = jnp.array(
-        [
-            startPosition[0] + radius * jnp.sin(startHeading),
-            startPosition[1] - radius * jnp.cos(startHeading),
-        ]
-    )
-    tangentPoint = find_clockwise_tangent_point_smooth(
-        goalPosition, centerPoint, radius
-    )
-
-    # Compute angles for arc length
-    v4 = startPosition - centerPoint
-    v3 = tangentPoint - centerPoint
-
-    theta = clockwise_angle(v4, v3)
-
-    # Compute final path length
-    straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
-    arcLength = radius * theta
-    totalLength = arcLength + straightLineLength
+    totalLength = jnp.where(jnp.isnan(totalLength), jnp.inf, totalLength)
 
     return totalLength, tangentPoint
 
@@ -273,34 +174,7 @@ def find_dubins_path_length_left_strait(
     straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
     arcLength = radius * theta
     totalLength = arcLength + straightLineLength
-
-    return totalLength, tangentPoint
-
-
-@jax.jit
-def find_dubins_path_length_left_strait_smooth(
-    startPosition, startHeading, goalPosition, radius
-):
-    centerPoint = jnp.array(
-        [
-            startPosition[0] - radius * jnp.sin(startHeading),
-            startPosition[1] + radius * jnp.cos(startHeading),
-        ]
-    )
-    tangentPoint = find_counter_clockwise_tangent_point_smooth(
-        goalPosition, centerPoint, radius
-    )
-
-    # Compute angles for arc length
-    v4 = startPosition - centerPoint
-    v3 = tangentPoint - centerPoint
-
-    theta = counterclockwise_angle(v4, v3)
-
-    # Compute final path length
-    straightLineLength = jnp.linalg.norm(goalPosition - tangentPoint)
-    arcLength = radius * theta
-    totalLength = arcLength + straightLineLength
+    totalLength = jnp.where(jnp.isnan(totalLength), jnp.inf, totalLength)
 
     return totalLength, tangentPoint
 
@@ -310,26 +184,18 @@ find_dubins_path_length_left_strait_vec = jax.vmap(
 )
 
 
-@jax.jit
-def soft_min(a: jnp.ndarray, b: jnp.ndarray, alpha: float) -> jnp.ndarray:
-    """
-    Smooth approximation to min(a, b) that handles NaNs:
-      - If a is NaN and b is not, returns b
-      - If b is NaN and a is not, returns a
-      - If both are NaN, returns NaN
-    Uses soft‑min:  -alpha * log(exp(-a/alpha) + exp(-b/alpha))
-    """
-    # Standard soft-min
-    smin = -alpha * jnp.log(jnp.exp(-a / alpha) + jnp.exp(-b / alpha))
-    # Identify NaNs
-    nan_a = jnp.isnan(a)
-    nan_b = jnp.isnan(b)
-    # Where one input is NaN, take the other
-    res = jnp.where(nan_a & ~nan_b, b, smin)
-    res = jnp.where(nan_b & ~nan_a, a, res)
-    # If both are NaN, result should be NaN
-    res = jnp.where(nan_a & nan_b, jnp.nan, res)
-    return res
+# def smooth_min(x, alpha=200.0, epsilon=1e-6):
+#     return -jnp.log(jnp.sum(jnp.exp(-alpha * x) + epsilon)) / alpha
+def smooth_min(x, alpha=10.0, epsilon=1e-6):
+    # Clip inputs to prevent exp overflow
+    x = jnp.clip(x, -1e3, 1e3)
+
+    # Replace NaNs (if not already done) — just in case
+    x = jnp.where(jnp.isnan(x), 1e6, x)
+
+    # Compute softmin
+    softmin = -jnp.log(jnp.sum(jnp.exp(-alpha * x) + epsilon)) / alpha
+    return softmin
 
 
 @jax.jit
@@ -343,23 +209,10 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
 
     lengths = jnp.array([straitLeftLength, straitRightLength])
 
-    return jnp.nanmin(lengths)
-
-
-@jax.jit
-def find_shortest_dubins_path_soft_min(
-    pursuerPosition, pursuerHeading, goalPosition, radius
-):
-    straitLeftLength, _ = find_dubins_path_length_right_strait_smooth(
-        pursuerPosition, pursuerHeading, goalPosition, radius
-    )
-    straitRightLength, _ = find_dubins_path_length_left_strait_smooth(
-        pursuerPosition, pursuerHeading, goalPosition, radius
-    )
-
-    lengths = jnp.array([straitLeftLength, straitRightLength])
-
-    return soft_min(*lengths, 0.01)
+    # return smooth_min(lengths)
+    # return sofmin(*lengths, 0.01)
+    return jnp.min(lengths)
+    # return jnp.nanmin(lengths)
 
 
 # Vectorized version over goalPosition
@@ -367,33 +220,6 @@ vectorized_find_shortest_dubins_path = jax.vmap(
     find_shortest_dubins_path,
     in_axes=(None, None, 0, None),  # Vectorize over goalPosition (3rd argument)
 )
-
-
-@jax.jit
-def in_dubins_engagement_zone_soft_min_single(
-    startPosition,
-    startHeading,
-    turnRadius,
-    captureRadius,
-    pursuerRange,
-    pursuerSpeed,
-    evaderPosition,
-    evaderHeading,
-    evaderSpeed,
-):
-    speedRatio = evaderSpeed / pursuerSpeed
-
-    # Compute goal positions
-    direction = jnp.array(
-        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
-    )  # Heading unit vector
-    goalPositions = evaderPosition + speedRatio * pursuerRange * direction
-    dubinsPathLengths = find_shortest_dubins_path_soft_min(
-        startPosition, startHeading, goalPositions, turnRadius
-    )
-
-    ez = dubinsPathLengths - (captureRadius + pursuerRange)
-    return ez
 
 
 @jax.jit
@@ -440,7 +266,7 @@ def in_dubins_engagement_zone_single(
         startPosition, startHeading, goalPositions, turnRadius
     )
 
-    ez = dubinsPathLengths - (captureRadius + pursuerRange)
+    ez = dubinsPathLengths - pursuerRange
     return ez
 
 
@@ -993,4 +819,4 @@ if __name__ == "__main__":
     main_EZ()
     # fig, ax = plt.subplots()
     # ax.scatter(0, 0, c="r")
-    # plt.show()
+# plt.show()
