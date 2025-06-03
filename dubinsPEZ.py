@@ -16,7 +16,7 @@ from scipy.stats import zmap
 
 import dubinsEZ
 import fast_pursuer
-import nueral_network_EZ
+# import nueral_network_EZ
 
 
 jax.config.update("jax_enable_x64", True)
@@ -761,6 +761,52 @@ quadratic_dubins_pez = jax.jit(
             None,
             None,
             None,
+            None,
+            None,
+            None,
+        ),
+    )
+)
+
+
+def quadratic_dubins_PEZ_full_cov_single(
+    evaderPositions, evaderHeadings, evaderSpeed, pursuerParams, full_cov
+):
+    evaderParams = jnp.concatenate(
+        [evaderPositions, jnp.array([evaderHeadings]), jnp.array([evaderSpeed])]
+    )
+    val = dubins_EZ_single_combined_input(pursuerParams, evaderParams)
+    dDubinsEZ_dPursuerParamsValue = dDubinsEZ_dPursuerParams(
+        pursuerParams, evaderParams
+    )
+    d2DubinsEZ_dPursuerParamsValue = d2DubinsEZ_dPursuerParams(
+        pursuerParams, evaderParams
+    )
+
+    mean = val + 0.5 * jnp.trace(d2DubinsEZ_dPursuerParamsValue @ full_cov)
+    var = (
+        dDubinsEZ_dPursuerParamsValue @ full_cov @ dDubinsEZ_dPursuerParamsValue.T
+        + 0.5
+        * jnp.trace(
+            d2DubinsEZ_dPursuerParamsValue
+            @ full_cov
+            @ d2DubinsEZ_dPursuerParamsValue
+            @ full_cov
+        )
+    )
+    return (
+        jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(var)),
+        mean,
+        var,
+    )
+
+
+quadratic_dubins_pez_full_cov = jax.jit(
+    jax.vmap(
+        quadratic_dubins_PEZ_full_cov_single,
+        in_axes=(
+            0,
+            0,
             None,
             None,
             None,

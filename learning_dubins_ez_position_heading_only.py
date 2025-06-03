@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import dubinsEZ
+import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
 
@@ -135,6 +136,16 @@ def first_true_index_safe(boolean_array):
     return jnp.where(found, idx, -1)
 
 
+def simulate_trajectory_fn(startPosition, heading, speed, tmax, numPoints):
+    currentPosition = jnp.array(startPosition)
+    t = jnp.linspace(0.0, tmax, numPoints)  # shape (T,)
+    direction = jnp.array([jnp.cos(heading), jnp.sin(heading)])  # shape (2,)
+    displacement = t[:, None] * speed * direction  # shape (T, 2)
+    pathHistory = currentPosition + displacement  # shape (T, 2)
+    headings = heading * jnp.ones(numPoints)  # shape (T,)
+    return pathHistory, headings
+
+
 def send_low_priority_agent(
     startPosition,
     heading,
@@ -148,12 +159,15 @@ def send_low_priority_agent(
     tmax,
     numPoints,
 ):
-    currentPosition = jnp.array(startPosition)
-    t = jnp.linspace(0.0, tmax, numPoints)  # shape (T,)
-    direction = jnp.array([jnp.cos(heading), jnp.sin(heading)])  # shape (2,)
-    displacement = t[:, None] * speed * direction  # shape (T, 2)
-    pathHistory = currentPosition + displacement  # shape (T, 2)
-    headings = heading * jnp.ones(numPoints)  # shape (T,)
+    # currentPosition = jnp.array(startPosition)
+    # t = jnp.linspace(0.0, tmax, numPoints)  # shape (T,)
+    # direction = jnp.array([jnp.cos(heading), jnp.sin(heading)])  # shape (2,)
+    # displacement = t[:, None] * speed * direction  # shape (T, 2)
+    # pathHistory = currentPosition + displacement  # shape (T, 2)
+    # headings = heading * jnp.ones(numPoints)  # shape (T,)
+    pathHistory, headings = simulate_trajectory_fn(
+        startPosition, heading, speed, tmax, numPoints
+    )
     EZ = dubinsEZ.in_dubins_engagement_zone(
         pursuerPosition,
         pursuerHeading,
@@ -679,6 +693,69 @@ def uniform_circular_entry_points_with_heading_noise(
         results.append((start_pos, heading))
 
     return results
+
+
+def pez_probability_fn(
+    pursuerParms, pursuerCov, pathHistory, headings, speed, trueParams
+):
+    pez = dubinsPEZ.quadratic_dubins_pez_full_cov(
+        pathHistory, headings, speed, pursuerParms, pursuerCov
+    )
+    return pez
+
+
+def optimize_next_low_priority_path(
+    theta_hat,  # current pursuer parameter estimate
+    cov_theta,  # current full posterior covariance
+    trueParams,  # known fixed evader parameters etc.
+    center=jnp.array([0.0, 0.0]),
+    radius=3.0,
+    num_angles=32,
+    num_headings=32,
+    speed=1.0,  # assumed fixed speed for all candidates
+):
+    # Generate candidate start positions (around circle)
+    angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
+    headings = jnp.linspace(-jnp.pi, jnp.pi, num_headings)
+
+    angle_grid, heading_grid = jnp.meshgrid(angles, headings)
+    angle_flat = angle_grid.ravel()
+    heading_flat = heading_grid.ravel()
+
+    def score_candidate(angle, heading):
+        start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
+        # pathHistory =
+        # headings=
+        pathHistory, headings_path = simulate_trajectory_fn(start_pos, heading)
+
+        # Evaluate PEZ probability at current theta
+        def prob_fn(theta):
+            return pez_probability_fn(
+                theta, cov_theta, pathHistory, headings_path, speed, trueParams
+            )
+
+        # Interception probability at current theta
+        p = prob_fn(theta_hat)
+
+        # Gradient of pez prob w.r.t theta (∇ log p for Fisher Info)
+        grad_logp = jax.grad(lambda th: jnp.log(prob_fn(th)))(theta_hat)
+
+        # Fisher information approximation
+        fisher = p * (1 - p) * jnp.outer(grad_logp, grad_logp)
+
+        # Score = Tr(Σ · I)
+        return jnp.trace(cov_theta @ fisher)
+
+    scores = jax.vmap(score_candidate)(angle_flat, heading_flat)
+    best_idx = jnp.argmax(scores)
+
+    best_angle = angle_flat[best_idx]
+    best_heading = heading_flat[best_idx]
+    best_start_pos = center + radius * jnp.array(
+        [jnp.cos(best_angle), jnp.sin(best_angle)]
+    )
+
+    return best_start_pos, best_heading
 
 
 def plot_true_and_learned_pursuer(
