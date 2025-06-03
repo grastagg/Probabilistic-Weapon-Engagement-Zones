@@ -794,11 +794,7 @@ def quadratic_dubins_PEZ_full_cov_single(
             @ full_cov
         )
     )
-    return (
-        jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(var)),
-        mean,
-        var,
-    )
+    return jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(var))
 
 
 quadratic_dubins_pez_full_cov = jax.jit(

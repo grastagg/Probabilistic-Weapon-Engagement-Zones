@@ -473,6 +473,10 @@ def find_initial_position_and_heading(interceptedList, endPoints):
     centroid, principal_axis = centroid_and_principal_axis(interceptedPoints)
     heading = np.arctan2(principal_axis[1], principal_axis[0])
     negHeading = np.arctan2(-principal_axis[1], -principal_axis[0])
+    if np.isnan(heading):
+        centroid = np.array([0.0, 0.0])
+        heading = 0.0
+        negHeading = 0.0
     return centroid, heading, negHeading
 
 
@@ -559,9 +563,10 @@ def run_optimization(
         endPoints,
         trueParams,
     )
+    print("loss:", lossHessian)
     cov = jnp.linalg.inv(lossHessian)
     print("trace of covariance matrix:", jnp.trace(cov))
-    return sol
+    return sol, cov
 
 
 def learn_ez(
@@ -620,7 +625,7 @@ def learn_ez(
                 (lowerLimit[5] + upperLimit[5]) / 2.0,
             ]
         )
-    sol1 = run_optimization(
+    sol1, cov1 = run_optimization(
         headings,
         speeds,
         interceptedList,
@@ -633,7 +638,7 @@ def learn_ez(
         upperLimit,
         trueParams,
     )
-    sol2 = run_optimization(
+    sol2, cov2 = run_optimization(
         headings,
         speeds,
         interceptedList,
@@ -652,10 +657,14 @@ def learn_ez(
     print("loss 1", sol1.fStar)
     print("Pursuer X2:", pursuerX2)
     print("loss 2", sol2.fStar)
+    bestParams = pursuerX1 if sol1.fStar < sol2.fStar else pursuerX2
+    bestCov = cov1 if sol1.fStar < sol2.fStar else cov2
 
     return (
         pursuerX1,
         pursuerX2,
+        bestParams,  # Return the best parameters as well
+        bestCov,  # Return the covariance of the best parameters
     )
 
 
@@ -701,14 +710,14 @@ def pez_probability_fn(
     pez = dubinsPEZ.quadratic_dubins_pez_full_cov(
         pathHistory, headings, speed, pursuerParms, pursuerCov
     )
-    return pez
+    return jnp.max(pez)
 
 
 def optimize_next_low_priority_path(
     theta_hat,  # current pursuer parameter estimate
     cov_theta,  # current full posterior covariance
     trueParams,  # known fixed evader parameters etc.
-    center=jnp.array([0.0, 0.0]),
+    center=np.array([0.0, 0.0]),
     radius=3.0,
     num_angles=32,
     num_headings=32,
@@ -716,6 +725,7 @@ def optimize_next_low_priority_path(
     tmax=10.0,  # assumed fixed time for all candidates
     num_points=100,  # number of points in trajectory simulation
 ):
+    print("Optimizing next low-priority path...")
     # Generate candidate start positions (around circle)
     angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
     headings = jnp.linspace(-jnp.pi, jnp.pi, num_headings)
@@ -748,7 +758,7 @@ def optimize_next_low_priority_path(
         fisher = p * (1 - p) * jnp.outer(grad_logp, grad_logp)
 
         # Score = Tr(Σ · I)
-        return jnp.trace(cov_theta @ fisher)
+        return jnp.trace(fisher)
 
     scores = jax.vmap(score_candidate)(angle_flat, heading_flat)
     best_idx = jnp.argmax(scores)
@@ -758,6 +768,7 @@ def optimize_next_low_priority_path(
     best_start_pos = center + radius * jnp.array(
         [jnp.cos(best_angle), jnp.sin(best_angle)]
     )
+    print("scores", scores)
 
     return best_start_pos, best_heading
 
@@ -805,81 +816,22 @@ def plot_true_and_learned_pursuer(
     )
 
 
-def main():
-    pursuerPosition = np.array([0.0, 0.0])
-    pursuerHeading = (5.0 / 20.0) * np.pi
-    pursuerRange = 1.0
-    pursuerCaptureRadius = 0.0
-    pursuerSpeed = 2.0
-    pursuerTurnRadius = 0.3
-    agentSpeed = 1.0
-    dt = 0.11
-    searchCircleCenter = [0, 0]
-    searchCircleRadius = 3.0
-    tmax = (2 * searchCircleRadius) / agentSpeed
-    trueParams = jnp.array(
-        [
-            pursuerPosition[0],
-            pursuerPosition[1],
-            pursuerHeading,
-            pursuerSpeed,
-            pursuerTurnRadius,
-            pursuerRange,
-        ]
-    )
-
-    numPoints = int(tmax / dt) + 1
-
-    interceptedList = []
-    numLowPriorityAgents = 102
-
-    endPoints = []
-    endTimes = []
-    pathHistories = []
-    pathMasks = []
-    startPositions = []
-    headings = []
-    speeds = []
-
-    agents = uniform_circular_entry_points_with_heading_noise(
-        searchCircleCenter,
-        searchCircleRadius,
-        numLowPriorityAgents,
-        heading_noise_std=0.5,
-    )
-    # for _ in range(numLowPriorityAgents):
-    for startPosition, heading in agents:
-        # startPosition, heading = sample_entry_point_and_heading(xbounds, ybounds)
-        startPositions.append(startPosition)
-        headings.append(heading)
-        speeds.append(agentSpeed)
-        intercepted, endPoint, endTime, pathHistory, pathMask = send_low_priority_agent(
-            startPosition,
-            heading,
-            agentSpeed,
-            pursuerPosition,
-            pursuerHeading,
-            pursuerTurnRadius,
-            pursuerCaptureRadius,
-            pursuerRange,
-            pursuerSpeed,
-            tmax,
-            numPoints,
-        )
-        interceptedList.append(intercepted)
-        endPoints.append(endPoint)
-        endTimes.append(endTime)
-        pathHistories.append(pathHistory)
-        pathMasks.append(pathMask)
-
-    interceptedList = jnp.array(interceptedList)
-    endPoints = jnp.array(endPoints)
-    endTimes = jnp.array(endTimes)
-    pathHistories = jnp.array(pathHistories)
-    pathMasks = jnp.array(pathMasks)
-    headings = jnp.array(headings)
-    speeds = jnp.array(speeds)
-
+def plot_all(
+    startPositions,
+    interceptedList,
+    endPoints,
+    pathHistories,
+    pathMasks,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerRange,
+    pursuerTurnRadius,
+    headings,
+    speeds,
+    pursuerX1,
+    pursuerX2,
+    trueParams,
+):
     fig, ax = plt.subplots()
     plot_low_priority_paths(
         startPositions, interceptedList, endPoints, pathHistories, pathMasks, ax
@@ -893,50 +845,6 @@ def main():
         colors=["magenta"],
     )
     plt.legend(fontsize=18)
-
-    print("LEARNING")
-    (
-        pursuerX1,
-        pursuerX2,
-    ) = learn_ez(
-        headings,
-        speeds,
-        interceptedList,
-        pathHistories,
-        pathMasks,
-        endPoints,
-        endTimes,
-        trueParams,
-    )
-    (
-        pursuerPositionLearned1,
-        pursuerHeadingLearned1,
-        pursuerSpeedLearned1,
-        minimumTurnRadiusLearned1,
-        pursuerRangeLearned1,
-    ) = pursuerX_to_params(pursuerX1, trueParams)
-    (
-        pursuerPositionLearned2,
-        pursuerHeadingLearned2,
-        pursuerSpeedLearned2,
-        minimumTurnRadiusLearned2,
-        pursuerRangeLearned2,
-    ) = pursuerX_to_params(pursuerX2, trueParams)
-    print("Pursuer position:", pursuerPosition)
-    print("Pursuer heading:", pursuerHeading)
-    print("Pursuer speed:", pursuerSpeed)
-    print("Pursuer turn radius:", pursuerTurnRadius)
-    print("Pursuer range:", pursuerRange)
-    print("Learned pursuer position 1:", pursuerPositionLearned1)
-    print("Learned pursuer heading 1:", pursuerHeadingLearned1)
-    print("Learned pursuer speed 1:", pursuerSpeedLearned1)
-    print("Learned pursuer turn radius 1:", minimumTurnRadiusLearned1)
-    print("Learned pursuer range 1:", pursuerRangeLearned1)
-    print("Learned pursuer position 2:", pursuerPositionLearned2)
-    print("Learned pursuer heading 2:", pursuerHeadingLearned2)
-    print("Learned pursuer speed 2:", pursuerSpeedLearned2)
-    print("Learned pursuer turn radius 2:", minimumTurnRadiusLearned2)
-    print("Learned pursuer range 2:", pursuerRangeLearned2)
 
     fig, ax = plt.subplots()
     plt.title("1")
@@ -960,6 +868,20 @@ def main():
         ax,
         colors=["green"],
     )
+    (
+        pursuerPositionLearned1,
+        pursuerHeadingLearned1,
+        pursuerSpeedLearned1,
+        minimumTurnRadiusLearned1,
+        pursuerRangeLearned1,
+    ) = pursuerX_to_params(pursuerX1, trueParams)
+    (
+        pursuerPositionLearned2,
+        pursuerHeadingLearned2,
+        pursuerSpeedLearned2,
+        minimumTurnRadiusLearned2,
+        pursuerRangeLearned2,
+    ) = pursuerX_to_params(pursuerX2, trueParams)
     dubinsEZ.plot_dubins_reachable_set(
         pursuerPositionLearned1,
         pursuerHeadingLearned1,
@@ -1017,6 +939,119 @@ def main():
     plt.legend()
 
 
+def main():
+    pursuerPosition = np.array([0.0, 0.0])
+    pursuerHeading = (5.0 / 20.0) * np.pi
+    pursuerRange = 1.0
+    pursuerCaptureRadius = 0.0
+    pursuerSpeed = 2.0
+    pursuerTurnRadius = 0.3
+    agentSpeed = 1.0
+    dt = 0.11
+    searchCircleCenter = np.array([0, 0])
+    searchCircleRadius = 3.0
+    tmax = (2 * searchCircleRadius) / agentSpeed
+    trueParams = jnp.array(
+        [
+            pursuerPosition[0],
+            pursuerPosition[1],
+            pursuerHeading,
+            pursuerSpeed,
+            pursuerTurnRadius,
+            pursuerRange,
+        ]
+    )
+
+    numPoints = int(tmax / dt) + 1
+
+    interceptedList = []
+    numLowPriorityAgents = 102
+
+    endPoints = []
+    endTimes = []
+    pathHistories = []
+    pathMasks = []
+    startPositions = []
+    headings = []
+    speeds = []
+
+    num_angles = 32
+    num_headings = 32
+
+    # agents = uniform_circular_entry_points_with_heading_noise(
+    #     searchCircleCenter,
+    #     searchCircleRadius,
+    #     numLowPriorityAgents,
+    #     heading_noise_std=0.5,
+    # )
+    for i in range(numLowPriorityAgents):
+        if i == 0:
+            startPosition = jnp.array([-searchCircleRadius, 0.0])
+            heading = 0.0
+        else:
+            startPosition, heading = optimize_next_low_priority_path(
+                theta_hat,
+                cov_theta,
+                trueParams,
+                searchCircleCenter,
+                searchCircleRadius,
+                num_angles,
+                num_headings,
+                agentSpeed,
+                tmax,
+                numPoints,
+            )
+
+        startPositions.append(startPosition)
+        headings.append(heading)
+        speeds.append(agentSpeed)
+        intercepted, endPoint, endTime, pathHistory, pathMask = send_low_priority_agent(
+            startPosition,
+            heading,
+            agentSpeed,
+            pursuerPosition,
+            pursuerHeading,
+            pursuerTurnRadius,
+            pursuerCaptureRadius,
+            pursuerRange,
+            pursuerSpeed,
+            tmax,
+            numPoints,
+        )
+        interceptedList.append(intercepted)
+        endPoints.append(endPoint)
+        endTimes.append(endTime)
+        pathHistories.append(pathHistory)
+        pathMasks.append(pathMask)
+        print("LEARNING")
+        (pursuerX1, pursuerX2, theta_hat, cov_theta) = learn_ez(
+            jnp.array(headings),
+            jnp.array(speeds),
+            jnp.array(interceptedList),
+            jnp.array(pathHistories),
+            jnp.array(pathMasks),
+            jnp.array(endPoints),
+            jnp.array(endTimes),
+            trueParams,
+        )
+        plot_all(
+            startPositions,
+            interceptedList,
+            endPoints,
+            pathHistories,
+            pathMasks,
+            pursuerPosition,
+            pursuerHeading,
+            pursuerRange,
+            pursuerTurnRadius,
+            headings,
+            speeds,
+            pursuerX1,
+            pursuerX2,
+            trueParams,
+        )
+        plt.show()
+
+
 if __name__ == "__main__":
     main()
-    plt.show()
