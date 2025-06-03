@@ -9,9 +9,12 @@ import matplotlib.pyplot as plt
 
 import dubinsEZ
 
-positionAndHeadingOnly = True
+jax.config.update("jax_enable_x64", True)
 
-np.random.seed(42)  # for reproducibility
+positionAndHeadingOnly = False
+
+
+np.random.seed(3256)  # for reproducibility
 
 
 def plot_low_priority_paths(
@@ -306,57 +309,55 @@ def smooth_min(x, alpha=10.0):
     return -jnp.log(jnp.sum(jnp.exp(-alpha * x))) / alpha
 
 
-# @jax.jit
-# def learning_loss_function_single(
-#     pursuerX,
-#     heading,
-#     speed,
-#     intercepted,
-#     pathHistory,
-#     pathMask,
-#     interceptedPoint,
-#     trueParams,
-# ):
-#     headings = heading * jnp.ones(pathHistory.shape[0])
-#     # pathHistory = jnp.ones_like(pathHistory)
-#
-#     ez = dubinsEZ_from_pursuerX(
-#         pursuerX,
-#         pathHistory,
-#         headings,
-#         speed,
-#         trueParams,
-#     )  # shape (T,)
-#
-#     rsEnd = dubins_reachable_set_from_pursuerX(
-#         pursuerX,
-#         jnp.array([interceptedPoint]),
-#         trueParams,
-#     )[0]
-#     # rsEnd = dubinsEZ_from_pursuerX(
-#     #     pursuerX,
-#     #     jnp.array([interceptedPoint]),
-#     #     jnp.array([heading]),
-#     #     speed,
-#     #     trueParams,
-#     # )[0]
-#
-#     interceptedLossEZ = jax.nn.relu(smooth_min(ez))
-#     survivedLossEZ = jax.nn.relu(-smooth_min(ez))
-#
-#     lossEZ = jax.lax.cond(
-#         intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
-#     )
-#
-#     interceptedLossRS = jax.nn.relu(rsEnd)
-#     survivedLossRS = 0.0
-#
-#     lossRS = jax.lax.cond(
-#         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
-#     )
-#     # return lossRS
-#
-#     return lossEZ + lossRS
+def activation(x, beta=10.0):
+    # return jnp.log1p(jnp.exp(beta * x)) / beta
+    return jax.nn.relu(x)  # ReLU activation function
+    return (jnp.tanh(10.0 * x) + 1.0) / 2.0 * x**2
+
+
+def compute_intercept_probability(ez_min, alpha=10.0):
+    # return ez_min > 0.0
+    return jax.nn.sigmoid(-alpha * ez_min)
+
+
+@jax.jit
+def learning_log_likelihood_single(
+    pursuerX,
+    heading,
+    speed,
+    intercepted,
+    pathHistory,
+    pathMask,
+    interceptedPoint,
+    trueParams,
+):
+    headings = heading * jnp.ones(pathHistory.shape[0])
+    ez = dubinsEZ_from_pursuerX(
+        pursuerX,
+        pathHistory,
+        headings,
+        speed,
+        trueParams,
+    )  # (T,)
+
+    ez_min = jnp.min(jnp.where(pathMask, ez, jnp.inf))  # only active along path
+    p = compute_intercept_probability(ez_min)  # ∈ (0, 1)
+
+    # Clip p to avoid log(0)
+    epsilon = 1e-6
+    p = jnp.clip(p, epsilon, 1.0 - epsilon)
+
+    loglik = jnp.log(p) * intercepted + jnp.log1p(-p) * (1 - intercepted)
+
+    # Optional: keep RS loss if you want a hybrid loss
+    rsEnd = dubins_reachable_set_from_pursuerX(
+        pursuerX,
+        jnp.array([interceptedPoint]),
+        trueParams,
+    )[0]
+    rsLoss = activation(rsEnd)  # Non-negative loss if in RS
+    rsLoss = jnp.where(intercepted, rsLoss, 0.0)  # Only apply if intercepted
+    return -loglik + rsLoss  # Negative log-likelihood + optional penalty
 
 
 @jax.jit
@@ -371,8 +372,6 @@ def learning_loss_function_single(
     trueParams,
 ):
     headings = heading * jnp.ones(pathHistory.shape[0])
-    # pathHistory = jnp.where(pathMask[:, None], pathHistory, 10000)
-    # jax.debug.print("Path history shape: {}", pathHistory)
     ez = dubinsEZ_from_pursuerX(
         pursuerX,
         pathHistory,
@@ -380,17 +379,14 @@ def learning_loss_function_single(
         speed,
         trueParams,
     )  # (T,)
-
-    # ez = jnp.where(pathMask, ez, jnp.inf)
     rsEnd = dubins_reachable_set_from_pursuerX(
         pursuerX,
         jnp.array([interceptedPoint]),
         trueParams,
     )[0]
-    # rsAll = dubins_reachable_set_from_pursuerX(pursuerX, pathHistory)
 
-    interceptedLossEZ = jax.nn.relu(jnp.min(ez))  # loss if intercepted
-    survivedLossEZ = jax.nn.relu(-jnp.min(ez))  # loss if survived
+    interceptedLossEZ = activation(jnp.min(ez))  # loss if intercepted
+    survivedLossEZ = activation(-jnp.min(ez))  # loss if survived
     lossEZ = jax.lax.cond(
         intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
     )
@@ -403,9 +399,15 @@ def learning_loss_function_single(
     return lossEZ + lossRS
 
 
+# batched_loss = jax.jit(
+#     jax.vmap(
+#         learning_loss_function_single,
+#         in_axes=(None, 0, 0, 0, 0, 0, 0, None),
+#     )
+# )
 batched_loss = jax.jit(
     jax.vmap(
-        learning_loss_function_single,
+        learning_log_likelihood_single,
         in_axes=(None, 0, 0, 0, 0, 0, 0, None),
     )
 )
@@ -438,7 +440,7 @@ def total_learning_loss(
     return jnp.sum(losses) / len(losses)
 
 
-dTotalLossDX = jax.jit(jax.grad(total_learning_loss, argnums=0))
+dTotalLossDX = jax.jit(jax.jacfwd(total_learning_loss, argnums=0))
 
 
 def centroid_and_principal_axis(points):
@@ -490,16 +492,17 @@ def run_optimization(
         return funcs, False
 
     def sens(xDict, funcs):
+        pursuerX = xDict["pursuerX"]
         dX = dTotalLossDX(
-            xDict["pursuerX"],
+            pursuerX,
             headings,
             speeds,
             interceptedList,
             pathHistories,
             pathMasks,
+            endPoints,
             trueParams,
         )
-        print("Gradient of loss:", dX)
         funcsSens = {}
         funcsSens["loss"] = {
             "pursuerX": dX,
@@ -527,9 +530,23 @@ def run_optimization(
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
-    opt.options["derivative_test"] = "first-order"
+    # opt.options["derivative_test"] = "first-order"
 
-    sol = opt(optProb, sens="FD")
+    # sol = opt(optProb, sens="FD")
+    sol = opt(optProb, sens=sens)
+
+    lossHessian = jax.jacfwd(jax.jacfwd(total_learning_loss, argnums=0))(
+        sol.xStar["pursuerX"],
+        headings,
+        speeds,
+        interceptedList,
+        pathHistories,
+        pathMasks,
+        endPoints,
+        trueParams,
+    )
+    cov = jnp.linalg.inv(lossHessian)
+    print("trace of covariance matrix:", jnp.trace(cov))
     return sol
 
 
@@ -544,7 +561,7 @@ def learn_ez(
     trueParams,
 ):
     lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
-    upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 5.0, 5.0])
+    upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
     if positionAndHeadingOnly:
         lowerLimit = lowerLimit[:3]
         upperLimit = upperLimit[:3]
@@ -552,8 +569,6 @@ def learn_ez(
     startPosition, startHeading1, startHeading2 = find_initial_position_and_heading(
         interceptedList, endPoints
     )
-    print("pursuer position initial guess:", startPosition)
-    print("pursuer heading initial guess:", startHeading1, startHeading2)
 
     if positionAndHeadingOnly:
         intialPursuerX1 = jnp.array(
@@ -591,29 +606,6 @@ def learn_ez(
                 (lowerLimit[5] + upperLimit[5]) / 2.0,
             ]
         )
-    loss1 = total_learning_loss(
-        intialPursuerX1,
-        headings,
-        speeds,
-        interceptedList,
-        pathHistories,
-        pathMasks,
-        endPoints,
-        trueParams,
-    )
-    print("TEST", intialPursuerX1)
-    gradLoss1 = dTotalLossDX(
-        intialPursuerX1,
-        headings,
-        speeds,
-        interceptedList,
-        pathHistories,
-        pathMasks,
-        endPoints,
-        trueParams,
-    )
-    print("Initial loss 1:", loss1)
-    print("Initial gradient loss 1:", gradLoss1)
     sol1 = run_optimization(
         headings,
         speeds,
@@ -647,11 +639,6 @@ def learn_ez(
     print("Pursuer X2:", pursuerX2)
     print("loss 2", sol2.fStar)
 
-    # lossHessian = jax.hessian(total_learning_loss, argnums=0)(
-    #     pursuerX, headings, speeds, interceptedList, pathHistories, pathMasks, endPoints
-    # )
-    # print("Loss Hessian:\n", lossHessian)
-    # cov = jnp.linalg.inv(lossHessian)
     return (
         pursuerX1,
         pursuerX2,
@@ -743,15 +730,12 @@ def main():
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
-    pursuerTurnRadius = 0.2
+    pursuerTurnRadius = 0.3
     agentSpeed = 1.0
-    xbounds = (-3.0, 3.0)
-    ybounds = (-3.0, 3.0)
-    dt = 0.1
+    dt = 0.11
     searchCircleCenter = [0, 0]
     searchCircleRadius = 3.0
     tmax = (2 * searchCircleRadius) / agentSpeed
-    print("tmax", tmax)
     trueParams = jnp.array(
         [
             pursuerPosition[0],
@@ -766,7 +750,7 @@ def main():
     numPoints = int(tmax / dt) + 1
 
     interceptedList = []
-    numLowPriorityAgents = 10
+    numLowPriorityAgents = 102
 
     endPoints = []
     endTimes = []
