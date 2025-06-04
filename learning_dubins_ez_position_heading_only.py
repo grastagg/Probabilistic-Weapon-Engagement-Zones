@@ -562,10 +562,8 @@ def run_optimization(
         pathMasks,
         endPoints,
         trueParams,
-    )
-    print("loss:", lossHessian)
+    ) + 1e-3 * np.eye(numVars)  # Add small value to diagonal for numerical stability
     cov = jnp.linalg.inv(lossHessian)
-    print("trace of covariance matrix:", jnp.trace(cov))
     return sol, cov
 
 
@@ -704,71 +702,87 @@ def uniform_circular_entry_points_with_heading_noise(
     return results
 
 
-def pez_probability_fn(
-    pursuerParms, pursuerCov, pathHistory, headings, speed, trueParams
-):
-    pez = dubinsPEZ.quadratic_dubins_pez_full_cov(
-        pathHistory, headings, speed, pursuerParms, pursuerCov
+def ez_probability_fn(pursuerParms, pathHistory, headings, speed, trueParams):
+    ez = dubinsEZ_from_pursuerX(
+        pursuerParms,
+        pathHistory,
+        headings,
+        speed,
+        trueParams,
     )
-    return jnp.max(pez)
+    alpha = 10.0  # Smoothing parameter for sigmoid
+    return jax.nn.sigmoid(-jnp.min(ez) * alpha)  # Probability of interception
+    return jnp.min(ez) < 0.0
 
 
 def optimize_next_low_priority_path(
-    theta_hat,  # current pursuer parameter estimate
-    cov_theta,  # current full posterior covariance
-    trueParams,  # known fixed evader parameters etc.
-    center=np.array([0.0, 0.0]),
+    theta_hat,
+    cov_theta,
+    trueParams,
+    center=jnp.array([0.0, 0.0]),
     radius=3.0,
     num_angles=32,
     num_headings=32,
-    speed=1.0,  # assumed fixed speed for all candidates
-    tmax=10.0,  # assumed fixed time for all candidates
-    num_points=100,  # number of points in trajectory simulation
+    speed=1.0,
+    tmax=10.0,
+    num_points=100,
+    num_samples=1000,
+    alpha=20.0,
+    key=jax.random.PRNGKey(0),
 ):
     print("Optimizing next low-priority path...")
-    # Generate candidate start positions (around circle)
+
+    # Generate candidate start positions and headings
     angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
     headings = jnp.linspace(-jnp.pi, jnp.pi, num_headings)
-
     angle_grid, heading_grid = jnp.meshgrid(angles, headings)
     angle_flat = angle_grid.ravel()
     heading_flat = heading_grid.ravel()
 
+    # Sample theta once outside the scoring function
+    theta_samples = jax.random.multivariate_normal(
+        key, mean=theta_hat, cov=cov_theta, shape=(num_samples,)
+    )
+
     def score_candidate(angle, heading):
         start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
-        # pathHistory =
-        # headings=
         pathHistory, headings_path = simulate_trajectory_fn(
             start_pos, heading, speed, tmax, num_points
         )
 
-        # Evaluate PEZ probability at current theta
         def prob_fn(theta):
-            return pez_probability_fn(
-                theta, cov_theta, pathHistory, headings_path, speed, trueParams
+            ez = dubinsEZ_from_pursuerX(
+                theta, pathHistory, headings_path, speed, trueParams
             )
+            margin = -jnp.min(ez)
+            return jax.nn.sigmoid(alpha * margin)
 
-        # Interception probability at current theta
-        p = prob_fn(theta_hat)
+        probs = jax.vmap(prob_fn)(theta_samples)
+        probs = jnp.clip(probs, 1e-6, 1 - 1e-6)
 
-        # Gradient of pez prob w.r.t theta (∇ log p for Fisher Info)
-        grad_logp = jax.grad(lambda th: jnp.log(prob_fn(th)))(theta_hat)
+        cond_entropy = -probs * jnp.log(probs) - (1 - probs) * jnp.log(1 - probs)
+        expected_cond_entropy = jnp.mean(cond_entropy)
 
-        # Fisher information approximation
-        fisher = p * (1 - p) * jnp.outer(grad_logp, grad_logp)
+        marginal_prob = jnp.mean(probs)
+        marginal_entropy = -marginal_prob * jnp.log(marginal_prob) - (
+            1 - marginal_prob
+        ) * jnp.log(1 - marginal_prob)
 
-        # Score = Tr(Σ · I)
-        return jnp.trace(fisher)
+        mutual_info = marginal_entropy - expected_cond_entropy
+        return mutual_info
 
     scores = jax.vmap(score_candidate)(angle_flat, heading_flat)
-    best_idx = jnp.argmax(scores)
+    best_idx = jnp.nanargmax(scores)
 
     best_angle = angle_flat[best_idx]
     best_heading = heading_flat[best_idx]
     best_start_pos = center + radius * jnp.array(
         [jnp.cos(best_angle), jnp.sin(best_angle)]
     )
+
     print("scores", scores)
+    print("best start position:", best_start_pos)
+    print("best heading:", best_heading)
 
     return best_start_pos, best_heading
 
