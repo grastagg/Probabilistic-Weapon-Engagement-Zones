@@ -324,7 +324,7 @@ def smooth_min(x, alpha=10.0):
 
 
 def activation(x, beta=100.0):
-    return jnp.log1p(jnp.exp(beta * x)) / beta
+    # return jnp.log1p(jnp.exp(beta * x)) / beta
     return jax.nn.relu(x)  # ReLU activation function
     return (jnp.tanh(10.0 * x) + 1.0) / 2.0 * x**2
 
@@ -454,6 +454,11 @@ def total_learning_loss(
     return jnp.sum(losses) / len(losses)
 
 
+batched_loss_multiple_pursuerX = jax.jit(
+    jax.vmap(total_learning_loss, in_axes=(0, None, None, None, None, None, None, None))
+)
+
+
 dTotalLossDX = jax.jit(jax.jacfwd(total_learning_loss, argnums=0))
 
 
@@ -478,6 +483,55 @@ def find_initial_position_and_heading(interceptedList, endPoints):
         heading = 0.0
         negHeading = 0.0
     return centroid, heading, negHeading
+
+
+def find_covariance_of_optimal(
+    pursuerXopt,  # shape (D,), the optimal parameter estimate
+    headings,
+    speeds,
+    intercepted_flags,
+    pathHistories,
+    pathMasks,
+    interceptedPoints,
+    trueParams,
+    N=1000,  # number of samples
+    std=0.5,  # stddev for perturbing theta
+    lambda_scale=1000.0,  # scales importance weights: exp(-lambda * loss)
+    key=jax.random.PRNGKey(0),  # PRNG key for reproducibility
+):
+    D = pursuerXopt.shape[0]
+
+    # 1. Sample theta vectors around the optimum
+    theta_samples = pursuerXopt + std * jax.random.normal(key, shape=(N, D))
+
+    # 2. Evaluate loss for each sample
+    losses = batched_loss_multiple_pursuerX(
+        theta_samples,  # shape (N, D)
+        headings,
+        speeds,
+        intercepted_flags,
+        pathHistories,
+        pathMasks,
+        interceptedPoints,
+        trueParams,
+    ).squeeze()  # shape (N,)
+    print("losses:", losses.shape)
+
+    # 3. Convert to importance weights
+    scaled_losses = -lambda_scale * (
+        losses - jnp.min(losses)
+    )  # for numerical stability
+    weights = jnp.exp(scaled_losses)
+    weights = weights / jnp.sum(weights)  # shape (N,)
+
+    # 4. Compute weighted mean
+    mean_theta = jnp.sum(weights[:, None] * theta_samples, axis=0)  # shape (D,)
+
+    # 5. Compute weighted covariance
+    centered = theta_samples - mean_theta  # shape (N, D)
+    cov = centered.T @ (centered * weights[:, None])  # shape (D, D)
+
+    return cov
 
 
 def run_optimization(
@@ -541,7 +595,7 @@ def run_optimization(
     )
     optProb.addObj("loss")
     opt = OPT("ipopt")
-    opt.options["print_level"] = 0
+    opt.options["print_level"] = 5
     opt.options["max_iter"] = 100
     username = getpass.getuser()
     opt.options["hsllib"] = (
@@ -553,7 +607,7 @@ def run_optimization(
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
 
-    lossHessian = jax.jacfwd(jax.jacfwd(total_learning_loss, argnums=0))(
+    cov = find_covariance_of_optimal(
         sol.xStar["pursuerX"],
         headings,
         speeds,
@@ -562,8 +616,20 @@ def run_optimization(
         pathMasks,
         endPoints,
         trueParams,
-    ) + 1e-3 * np.eye(numVars)  # Add small value to diagonal for numerical stability
-    cov = jnp.linalg.inv(lossHessian)
+    )
+
+    # lossHessian = jax.jacfwd(jax.jacfwd(total_learning_loss, argnums=0))(
+    #     sol.xStar["pursuerX"],
+    #     headings,
+    #     speeds,
+    #     interceptedList,
+    #     pathHistories,
+    #     pathMasks,
+    #     endPoints,
+    #     trueParams,
+    # )  # + 1e3 * np.eye(numVars)  # Add small value to diagonal for numerical stability
+    # cov = jnp.linalg.inv(lossHessian)
+    print("covariance matrix:", cov)
     return sol, cov
 
 
@@ -711,67 +777,138 @@ def ez_probability_fn(pursuerParms, pathHistory, headings, speed, trueParams):
         trueParams,
     )
     alpha = 10.0  # Smoothing parameter for sigmoid
-    return jax.nn.sigmoid(-jnp.min(ez) * alpha)  # Probability of interception
-    return jnp.min(ez) < 0.0
+    return jax.nn.sigmoid(-jnp.min(ez) * alpha)  # , ez  # Probability of interception
+
+
+def compute_mutual_information(
+    angle,
+    heading,
+    theta_hat,
+    cov_theta,
+    speed,
+    trueParams,
+    num_samples=1000,
+    alpha=20.0,
+    key=jax.random.PRNGKey(0),
+):
+    position = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
+    pathHistory, headings = simulate_trajectory_fn(
+        position, heading, speed, tmax, num_points
+    )
+
+    # Sample theta ~ N(theta_hat, cov_theta)
+    theta_samples = jax.random.multivariate_normal(
+        key, mean=theta_hat, cov=cov_theta, shape=(num_samples,)
+    )
+
+    # Define p_theta(x): smooth probability of interception
+    def prob_fn(theta):
+        ez = dubinsEZ_from_pursuerX(theta, pathHistory, headings, speed, trueParams)
+        # return jnp.min(ez) < 0.0  # True if inside engagement zone
+        margin = -jnp.min(ez)  # positive if inside PEZ
+        return jax.nn.sigmoid(alpha * margin)
+
+    # Compute p_i for all theta_i
+    probs = jax.vmap(prob_fn)(theta_samples)
+
+    # Clip to avoid log(0)
+    probs = jnp.clip(probs, 1e-6, 1 - 1e-6)
+
+    # 1. Marginal interception probability
+    p_bar = jnp.mean(probs)
+
+    # 2. Entropy of marginal
+    marginal_entropy = -p_bar * jnp.log(p_bar) - (1 - p_bar) * jnp.log(1 - p_bar)
+
+    # 3. Expected conditional entropy
+    conditional_entropies = -probs * jnp.log(probs) - (1 - probs) * jnp.log(1 - probs)
+    expected_cond_entropy = jnp.mean(conditional_entropies)
+
+    # 4. Mutual information
+    mutual_info = marginal_entropy - expected_cond_entropy
+    return mutual_info
 
 
 def optimize_next_low_priority_path(
     theta_hat,
-    cov_theta,
+    headings,
+    speeds,
+    interceptedList,
+    pathHistories,
+    pathMasks,
+    endPoints,
+    endTimes,
     trueParams,
-    center=jnp.array([0.0, 0.0]),
+    center,
     radius=3.0,
     num_angles=32,
     num_headings=32,
     speed=1.0,
     tmax=10.0,
     num_points=100,
-    num_samples=1000,
-    alpha=20.0,
-    key=jax.random.PRNGKey(0),
 ):
     print("Optimizing next low-priority path...")
 
     # Generate candidate start positions and headings
     angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
-    headings = jnp.linspace(-jnp.pi, jnp.pi, num_headings)
-    angle_grid, heading_grid = jnp.meshgrid(angles, headings)
+    headingsSac = jnp.linspace(-jnp.pi, jnp.pi, num_headings)
+    angle_grid, heading_grid = jnp.meshgrid(angles, headingsSac)
     angle_flat = angle_grid.ravel()
     heading_flat = heading_grid.ravel()
 
-    # Sample theta once outside the scoring function
-    theta_samples = jax.random.multivariate_normal(
-        key, mean=theta_hat, cov=cov_theta, shape=(num_samples,)
-    )
-
-    def score_candidate(angle, heading):
+    def expected_grad_score(angle, heading):
         start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
-        pathHistory, headings_path = simulate_trajectory_fn(
+        new_path, new_headings = simulate_trajectory_fn(
             start_pos, heading, speed, tmax, num_points
         )
+        new_headings = jnp.reshape(new_headings, (-1,))
 
-        def prob_fn(theta):
-            ez = dubinsEZ_from_pursuerX(
-                theta, pathHistory, headings_path, speed, trueParams
+        new_mask = jnp.ones(new_path.shape[0], dtype=bool)
+        new_end = new_path[-1]
+
+        def grad_norm_if(intercepted):
+            print("new_headings:", new_headings.shape)
+            print("headings", headings.shape)
+            new_pathHistories = jnp.concatenate(
+                [pathHistories, new_path[None, :, :]], axis=0
             )
-            margin = -jnp.min(ez)
-            return jax.nn.sigmoid(alpha * margin)
+            new_headings_all = jnp.concatenate(
+                [headings, jnp.array([new_headings[0]])], axis=0
+            )
 
-        probs = jax.vmap(prob_fn)(theta_samples)
-        probs = jnp.clip(probs, 1e-6, 1 - 1e-6)
+            new_speeds = jnp.concatenate([speeds, jnp.array([speed])], axis=0)
+            new_intercepted = jnp.concatenate(
+                [interceptedList, jnp.array([intercepted])], axis=0
+            )
+            new_masks = jnp.concatenate([pathMasks, new_mask[None, :]], axis=0)
+            new_endpoints = jnp.concatenate([endPoints, new_end[None, :]], axis=0)
 
-        cond_entropy = -probs * jnp.log(probs) - (1 - probs) * jnp.log(1 - probs)
-        expected_cond_entropy = jnp.mean(cond_entropy)
+            grad = dTotalLossDX(
+                theta_hat,
+                new_headings_all,
+                new_speeds,
+                new_intercepted,
+                new_pathHistories,
+                new_masks,
+                new_endpoints,
+                trueParams,
+            )
+            print("grad", grad)
+            return jnp.sum(grad**2)
 
-        marginal_prob = jnp.mean(probs)
-        marginal_entropy = -marginal_prob * jnp.log(marginal_prob) - (
-            1 - marginal_prob
-        ) * jnp.log(1 - marginal_prob)
+        p = ez_probability_fn(theta_hat, new_path, new_headings, speed, trueParams)
+        p = jnp.clip(p, 1e-6, 1 - 1e-6)
 
-        mutual_info = marginal_entropy - expected_cond_entropy
-        return mutual_info
+        return p * grad_norm_if(True) + (1 - p) * grad_norm_if(False)
 
-    scores = jax.vmap(score_candidate)(angle_flat, heading_flat)
+    scores = jax.vmap(
+        expected_grad_score,
+        in_axes=(
+            0,
+            0,
+        ),
+    )(angle_flat, heading_flat)
+
     best_idx = jnp.nanargmax(scores)
 
     best_angle = angle_flat[best_idx]
@@ -830,7 +967,6 @@ def plot_true_and_learned_pursuer(
     )
 
 
-<<<<<<< HEAD
 def plot_all(
     startPositions,
     interceptedList,
@@ -955,12 +1091,12 @@ def plot_all(
 
 
 def main():
-    pursuerPosition = np.array([0.0, 0.0])
+    pursuerPosition = np.array([-1.0, 1.0])
     pursuerHeading = (5.0 / 20.0) * np.pi
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
-    pursuerTurnRadius = 0.3
+    pursuerTurnRadius = 0.2
     agentSpeed = 1.0
     dt = 0.11
     searchCircleCenter = np.array([0, 0])
@@ -980,7 +1116,7 @@ def main():
     numPoints = int(tmax / dt) + 1
 
     interceptedList = []
-    numLowPriorityAgents = 102
+    numLowPriorityAgents = 20
 
     endPoints = []
     endTimes = []
@@ -999,22 +1135,30 @@ def main():
     #     numLowPriorityAgents,
     #     heading_noise_std=0.5,
     # )
+    plotEvery = 5
     for i in range(numLowPriorityAgents):
         if i == 0:
             startPosition = jnp.array([-searchCircleRadius, 0.0])
             heading = 0.0
         else:
+            print("test heading:", headings)
             startPosition, heading = optimize_next_low_priority_path(
                 theta_hat,
-                cov_theta,
+                jnp.array(headings),
+                jnp.array(speeds),
+                jnp.array(interceptedList),
+                jnp.array(pathHistories),
+                jnp.array(pathMasks),
+                jnp.array(endPoints),
+                jnp.array(endTimes),
                 trueParams,
                 searchCircleCenter,
                 searchCircleRadius,
-                num_angles,
-                num_headings,
-                agentSpeed,
-                tmax,
-                numPoints,
+                num_angles=32,
+                num_headings=32,
+                speed=agentSpeed,
+                tmax=tmax,
+                num_points=numPoints,
             )
 
         startPositions.append(startPosition)
@@ -1049,23 +1193,24 @@ def main():
             jnp.array(endTimes),
             trueParams,
         )
-        plot_all(
-            startPositions,
-            interceptedList,
-            endPoints,
-            pathHistories,
-            pathMasks,
-            pursuerPosition,
-            pursuerHeading,
-            pursuerRange,
-            pursuerTurnRadius,
-            headings,
-            speeds,
-            pursuerX1,
-            pursuerX2,
-            trueParams,
-        )
-        plt.show()
+        if i % plotEvery == 0:
+            plot_all(
+                startPositions,
+                interceptedList,
+                endPoints,
+                pathHistories,
+                pathMasks,
+                pursuerPosition,
+                pursuerHeading,
+                pursuerRange,
+                pursuerTurnRadius,
+                headings,
+                speeds,
+                pursuerX1,
+                pursuerX2,
+                trueParams,
+            )
+            plt.show()
 
 
 if __name__ == "__main__":
