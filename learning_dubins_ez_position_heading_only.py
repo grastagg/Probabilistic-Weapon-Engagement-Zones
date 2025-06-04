@@ -810,7 +810,7 @@ def plot_true_and_learned_pursuer(
 
 
 def main():
-    pursuerPosition = np.array([0.0, 0.0])
+    pursuerPosition = np.array([-1.0, 1.0])
     pursuerHeading = (5.0 / 20.0) * np.pi
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
