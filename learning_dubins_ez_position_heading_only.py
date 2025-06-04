@@ -664,7 +664,7 @@ def learn_ez(
 
 
 def uniform_circular_entry_points_with_heading_noise(
-    center, radius, num_agents, heading_noise_std=0.5
+    center, radius, num_agents, heading_noise_std=0.000005
 ):
     """
     Uniformly sample agent entry points around a circle, with headings toward the center plus noise.
@@ -849,7 +849,7 @@ def main():
         searchCircleCenter,
         searchCircleRadius,
         numLowPriorityAgents,
-        heading_noise_std=0.5,
+        heading_noise_std=0.00005,
     )
     # for _ in range(numLowPriorityAgents):
     for startPosition, heading in agents:
