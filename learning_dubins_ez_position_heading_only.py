@@ -15,7 +15,7 @@ jax.config.update("jax_enable_x64", True)
 positionAndHeadingOnly = False
 
 
-np.random.seed(3256)  # for reproducibility
+np.random.seed(326)  # for reproducibility
 
 
 def plot_low_priority_paths(
@@ -323,8 +323,8 @@ def smooth_min(x, alpha=10.0):
     return -jnp.log(jnp.sum(jnp.exp(-alpha * x))) / alpha
 
 
-def activation(x, beta=10.0):
-    # return jnp.log1p(jnp.exp(beta * x)) / beta
+def activation(x, beta=100.0):
+    return jnp.log1p(jnp.exp(beta * x)) / beta
     return jax.nn.relu(x)  # ReLU activation function
     return (jnp.tanh(10.0 * x) + 1.0) / 2.0 * x**2
 
@@ -413,18 +413,18 @@ def learning_loss_function_single(
     return lossEZ + lossRS
 
 
-# batched_loss = jax.jit(
-#     jax.vmap(
-#         learning_loss_function_single,
-#         in_axes=(None, 0, 0, 0, 0, 0, 0, None),
-#     )
-# )
 batched_loss = jax.jit(
     jax.vmap(
-        learning_log_likelihood_single,
+        learning_loss_function_single,
         in_axes=(None, 0, 0, 0, 0, 0, 0, None),
     )
 )
+# batched_loss = jax.jit(
+#     jax.vmap(
+#         learning_log_likelihood_single,
+#         in_axes=(None, 0, 0, 0, 0, 0, 0, None),
+#     )
+# )
 
 
 @jax.jit
@@ -811,7 +811,7 @@ def main():
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
-    pursuerTurnRadius = 0.3
+    pursuerTurnRadius = 0.2
     agentSpeed = 1.0
     dt = 0.11
     searchCircleCenter = [0, 0]
@@ -831,7 +831,7 @@ def main():
     numPoints = int(tmax / dt) + 1
 
     interceptedList = []
-    numLowPriorityAgents = 102
+    numLowPriorityAgents = 100
 
     endPoints = []
     endTimes = []
