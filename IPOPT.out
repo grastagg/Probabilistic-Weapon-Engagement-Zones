@@ -6,7 +6,7 @@ List of user-set options:
                    hessian_approximation = limited-memory        yes
                                   hsllib = /home/ggs24/packages/ThirdParty-HSL/.libs/libcoinhsl.so  yes
                            linear_solver = ma97                  yes
-                                max_iter = 100                   yes
+                                max_iter = 1000                  yes
                              output_file = IPOPT.out             yes
                              print_level = 5                     yes
                       print_user_options = yes                   yes

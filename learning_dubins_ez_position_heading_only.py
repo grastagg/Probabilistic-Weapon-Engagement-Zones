@@ -479,9 +479,9 @@ def find_initial_position_and_heading(interceptedList, endPoints):
     heading = np.arctan2(principal_axis[1], principal_axis[0])
     negHeading = np.arctan2(-principal_axis[1], -principal_axis[0])
     if np.isnan(heading):
-        centroid = np.array([0.0, 0.0])
         heading = 0.0
         negHeading = 0.0
+        centroid = np.array([0.0, 0.0])
     return centroid, heading, negHeading
 
 
@@ -596,7 +596,7 @@ def run_optimization(
     optProb.addObj("loss")
     opt = OPT("ipopt")
     opt.options["print_level"] = 5
-    opt.options["max_iter"] = 100
+    opt.options["max_iter"] = 1000
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
