@@ -324,8 +324,8 @@ def smooth_min(x, alpha=10.0):
 
 
 def activation(x, beta=10.0):
-    return jnp.log1p(jnp.exp(beta * x)) / beta
     return jax.nn.relu(x)  # ReLU activation function
+    return jnp.log1p(jnp.exp(beta * x)) / beta
     return (jnp.tanh(10.0 * x) + 1.0) / 2.0 * x**2
 
 
@@ -840,8 +840,52 @@ def compute_mutual_information(
     return mutual_info
 
 
+def expected_grad_score(angle, heading):
+    start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
+    new_path, new_headings = simulate_trajectory_fn(
+        start_pos, heading, speed, tmax, num_points
+    )
+    new_headings = jnp.reshape(new_headings, (-1,))
+
+    new_mask = jnp.ones(new_path.shape[0], dtype=bool)
+    new_end = new_path[-1]
+
+    def grad_norm_if(intercepted):
+        new_pathHistories = jnp.concatenate(
+            [pathHistories, new_path[None, :, :]], axis=0
+        )
+        new_headings_all = jnp.concatenate(
+            [headings, jnp.array([new_headings[0]])], axis=0
+        )
+
+        new_speeds = jnp.concatenate([speeds, jnp.array([speed])], axis=0)
+        new_intercepted = jnp.concatenate(
+            [interceptedList, jnp.array([intercepted])], axis=0
+        )
+        new_masks = jnp.concatenate([pathMasks, new_mask[None, :]], axis=0)
+        new_endpoints = jnp.concatenate([endPoints, new_end[None, :]], axis=0)
+
+        grad = dTotalLossDX(
+            theta_hat,
+            new_headings_all,
+            new_speeds,
+            new_intercepted,
+            new_pathHistories,
+            new_masks,
+            new_endpoints,
+            trueParams,
+        )
+        return jnp.sum(grad**2)
+
+    p = ez_probability_fn(theta_hat, new_path, new_headings, speed, trueParams)
+    p = jnp.clip(p, 1e-6, 1 - 1e-6)
+
+    return p * grad_norm_if(True) + (1 - p) * grad_norm_if(False)
+
+
 def optimize_next_low_priority_path(
-    theta_hat,
+    pursuerX1,
+    pursuerX2,
     headings,
     speeds,
     interceptedList,
@@ -861,56 +905,45 @@ def optimize_next_low_priority_path(
     print("Optimizing next low-priority path...")
 
     # Generate candidate start positions and headings
-    angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
+    # angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
+    angles = jnp.linspace(-jnp.pi, jnp.pi, num_angles, endpoint=False)
     headingsSac = jnp.linspace(-jnp.pi, jnp.pi, num_headings)
     angle_grid, heading_grid = jnp.meshgrid(angles, headingsSac)
     angle_flat = angle_grid.ravel()
     heading_flat = heading_grid.ravel()
 
-    def expected_grad_score(angle, heading):
+    def inside_one_outside_other(angle, heading):
         start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
         new_path, new_headings = simulate_trajectory_fn(
             start_pos, heading, speed, tmax, num_points
         )
-        new_headings = jnp.reshape(new_headings, (-1,))
+        ez1 = dubinsEZ_from_pursuerX(
+            pursuerX1, new_path, new_headings, speed, trueParams
+        )
+        rs1 = dubins_reachable_set_from_pursuerX(pursuerX1, new_path, trueParams)
+        ez2 = dubinsEZ_from_pursuerX(
+            pursuerX2, new_path, new_headings, speed, trueParams
+        )
+        rs2 = dubins_reachable_set_from_pursuerX(pursuerX2, new_path, trueParams)
+        # min1 = jnp.min(ez1)
+        # min2 = jnp.min(ez2)
+        min1 = jnp.min(rs1)
+        min2 = jnp.min(rs2)
+        epsilon = 0.1
+        # Objective: find a path that is inside *exactly one* PEZ
+        inside1_outside2 = jax.nn.sigmoid(-min1 / epsilon) * (
+            1 - jax.nn.sigmoid(-min2 / epsilon)
+        )
+        inside2_outside1 = jax.nn.sigmoid(-min2 / epsilon) * (
+            1 - jax.nn.sigmoid(-min1 / epsilon)
+        )
 
-        new_mask = jnp.ones(new_path.shape[0], dtype=bool)
-        new_end = new_path[-1]
-
-        def grad_norm_if(intercepted):
-            new_pathHistories = jnp.concatenate(
-                [pathHistories, new_path[None, :, :]], axis=0
-            )
-            new_headings_all = jnp.concatenate(
-                [headings, jnp.array([new_headings[0]])], axis=0
-            )
-
-            new_speeds = jnp.concatenate([speeds, jnp.array([speed])], axis=0)
-            new_intercepted = jnp.concatenate(
-                [interceptedList, jnp.array([intercepted])], axis=0
-            )
-            new_masks = jnp.concatenate([pathMasks, new_mask[None, :]], axis=0)
-            new_endpoints = jnp.concatenate([endPoints, new_end[None, :]], axis=0)
-
-            grad = dTotalLossDX(
-                theta_hat,
-                new_headings_all,
-                new_speeds,
-                new_intercepted,
-                new_pathHistories,
-                new_masks,
-                new_endpoints,
-                trueParams,
-            )
-            return jnp.sum(grad**2)
-
-        p = ez_probability_fn(theta_hat, new_path, new_headings, speed, trueParams)
-        p = jnp.clip(p, 1e-6, 1 - 1e-6)
-
-        return p * grad_norm_if(True) + (1 - p) * grad_norm_if(False)
+        # Score: how strongly it distinguishes between the two
+        score = inside1_outside2 + inside2_outside1
+        return score
 
     scores = jax.vmap(
-        expected_grad_score,
+        inside_one_outside_other,
         in_axes=(
             0,
             0,
@@ -1095,7 +1128,7 @@ def plot_all(
 
 
 def main():
-    pursuerPosition = np.array([0.0, -1.0])
+    pursuerPosition = np.array([0.5, -1.0])
     pursuerHeading = (5.0 / 20.0) * np.pi
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
@@ -1136,7 +1169,7 @@ def main():
     #     numLowPriorityAgents,
     #     heading_noise_std=0.5,
     # )
-    plotEvery = 10
+    plotEvery = 20
     pursuerX = None
     for i in range(numLowPriorityAgents):
         if i == 0:
@@ -1144,7 +1177,8 @@ def main():
             heading = 0.0001
         else:
             startPosition, heading = optimize_next_low_priority_path(
-                pursuerX,
+                pursuerX1,
+                pursuerX2,
                 jnp.array(headings),
                 jnp.array(speeds),
                 jnp.array(interceptedList),
@@ -1194,7 +1228,7 @@ def main():
             trueParams,
             pursuerX,
         )
-        if i % plotEvery == 0:
+        if i % plotEvery == 0 and i > 0:
             plot_all(
                 startPositions,
                 interceptedList,
