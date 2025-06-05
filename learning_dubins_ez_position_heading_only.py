@@ -323,8 +323,8 @@ def smooth_min(x, alpha=10.0):
     return -jnp.log(jnp.sum(jnp.exp(-alpha * x))) / alpha
 
 
-def activation(x, beta=100.0):
-    # return jnp.log1p(jnp.exp(beta * x)) / beta
+def activation(x, beta=10.0):
+    return jnp.log1p(jnp.exp(beta * x)) / beta
     return jax.nn.relu(x)  # ReLU activation function
     return (jnp.tanh(10.0 * x) + 1.0) / 2.0 * x**2
 
@@ -515,7 +515,6 @@ def find_covariance_of_optimal(
         interceptedPoints,
         trueParams,
     ).squeeze()  # shape (N,)
-    print("losses:", losses.shape)
 
     # 3. Convert to importance weights
     scaled_losses = -lambda_scale * (
@@ -547,6 +546,8 @@ def run_optimization(
     upperLimit,
     trueParams,
 ):
+    print("Running optimization...", initialPursuerX)
+
     def objfunc(xDict):
         pursuerX = xDict["pursuerX"]
         loss = total_learning_loss(
@@ -595,8 +596,8 @@ def run_optimization(
     )
     optProb.addObj("loss")
     opt = OPT("ipopt")
-    opt.options["print_level"] = 5
-    opt.options["max_iter"] = 1000
+    opt.options["print_level"] = 0
+    opt.options["max_iter"] = 100
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
@@ -629,7 +630,6 @@ def run_optimization(
     #     trueParams,
     # )  # + 1e3 * np.eye(numVars)  # Add small value to diagonal for numerical stability
     # cov = jnp.linalg.inv(lossHessian)
-    print("covariance matrix:", cov)
     return sol, cov
 
 
@@ -642,6 +642,7 @@ def learn_ez(
     endPoints,
     endTimes,
     trueParams,
+    previousPursuerX=None,
 ):
     lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
     upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
@@ -669,14 +670,22 @@ def learn_ez(
             ]
         )
     else:
+        if previousPursuerX is not None:
+            initialSpeed = previousPursuerX[3]
+            initialTurnRadius = previousPursuerX[4]
+            initialRange = previousPursuerX[5]
+        else:
+            initialSpeed = (lowerLimit[3] + upperLimit[3]) / 2.0
+            initialTurnRadius = (lowerLimit[4] + upperLimit[4]) / 2.0
+            initialRange = (lowerLimit[5] + upperLimit[5]) / 2.0
         intialPursuerX1 = jnp.array(
             [
                 startPosition[0],
                 startPosition[1],
                 startHeading1,
-                (lowerLimit[3] + upperLimit[3]) / 2.0,
-                (lowerLimit[4] + upperLimit[4]) / 2.0,
-                (lowerLimit[5] + upperLimit[5]) / 2.0,
+                initialSpeed,
+                initialTurnRadius,
+                initialRange,
             ]
         )
         intialPursuerX2 = jnp.array(
@@ -684,9 +693,9 @@ def learn_ez(
                 startPosition[0],
                 startPosition[1],
                 startHeading2,
-                (lowerLimit[3] + upperLimit[3]) / 2.0,
-                (lowerLimit[4] + upperLimit[4]) / 2.0,
-                (lowerLimit[5] + upperLimit[5]) / 2.0,
+                initialSpeed,
+                initialTurnRadius,
+                initialRange,
             ]
         )
     sol1, cov1 = run_optimization(
@@ -721,7 +730,9 @@ def learn_ez(
     print("loss 1", sol1.fStar)
     print("Pursuer X2:", pursuerX2)
     print("loss 2", sol2.fStar)
-    bestParams = pursuerX1 if sol1.fStar < sol2.fStar else pursuerX2
+    # bestParams = pursuerX1 if sol1.fStar < sol2.fStar else pursuerX2
+    bestParams = pursuerX2 if sol2.fStar < sol1.fStar else pursuerX1
+
     bestCov = cov1 if sol1.fStar < sol2.fStar else cov2
 
     return (
@@ -841,8 +852,8 @@ def optimize_next_low_priority_path(
     trueParams,
     center,
     radius=3.0,
-    num_angles=32,
-    num_headings=32,
+    num_angles=40,
+    num_headings=40,
     speed=1.0,
     tmax=10.0,
     num_points=100,
@@ -867,8 +878,6 @@ def optimize_next_low_priority_path(
         new_end = new_path[-1]
 
         def grad_norm_if(intercepted):
-            print("new_headings:", new_headings.shape)
-            print("headings", headings.shape)
             new_pathHistories = jnp.concatenate(
                 [pathHistories, new_path[None, :, :]], axis=0
             )
@@ -893,7 +902,6 @@ def optimize_next_low_priority_path(
                 new_endpoints,
                 trueParams,
             )
-            print("grad", grad)
             return jnp.sum(grad**2)
 
         p = ez_probability_fn(theta_hat, new_path, new_headings, speed, trueParams)
@@ -916,10 +924,6 @@ def optimize_next_low_priority_path(
     best_start_pos = center + radius * jnp.array(
         [jnp.cos(best_angle), jnp.sin(best_angle)]
     )
-
-    print("scores", scores)
-    print("best start position:", best_start_pos)
-    print("best heading:", best_heading)
 
     return best_start_pos, best_heading
 
@@ -1091,7 +1095,7 @@ def plot_all(
 
 
 def main():
-    pursuerPosition = np.array([-1.0, 1.0])
+    pursuerPosition = np.array([0.0, -1.0])
     pursuerHeading = (5.0 / 20.0) * np.pi
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
@@ -1116,7 +1120,7 @@ def main():
     numPoints = int(tmax / dt) + 1
 
     interceptedList = []
-    numLowPriorityAgents = 20
+    numLowPriorityAgents = 51
 
     endPoints = []
     endTimes = []
@@ -1126,24 +1130,21 @@ def main():
     headings = []
     speeds = []
 
-    num_angles = 32
-    num_headings = 32
-
     # agents = uniform_circular_entry_points_with_heading_noise(
     #     searchCircleCenter,
     #     searchCircleRadius,
     #     numLowPriorityAgents,
     #     heading_noise_std=0.5,
     # )
-    plotEvery = 5
+    plotEvery = 10
+    pursuerX = None
     for i in range(numLowPriorityAgents):
         if i == 0:
-            startPosition = jnp.array([-searchCircleRadius, 0.0])
-            heading = 0.0
+            startPosition = jnp.array([-searchCircleRadius, 0.0001])
+            heading = 0.0001
         else:
-            print("test heading:", headings)
             startPosition, heading = optimize_next_low_priority_path(
-                theta_hat,
+                pursuerX,
                 jnp.array(headings),
                 jnp.array(speeds),
                 jnp.array(interceptedList),
@@ -1182,8 +1183,7 @@ def main():
         endTimes.append(endTime)
         pathHistories.append(pathHistory)
         pathMasks.append(pathMask)
-        print("LEARNING")
-        (pursuerX1, pursuerX2, theta_hat, cov_theta) = learn_ez(
+        (pursuerX1, pursuerX2, pursuerX, cov_theta) = learn_ez(
             jnp.array(headings),
             jnp.array(speeds),
             jnp.array(interceptedList),
@@ -1192,6 +1192,7 @@ def main():
             jnp.array(endPoints),
             jnp.array(endTimes),
             trueParams,
+            pursuerX,
         )
         if i % plotEvery == 0:
             plot_all(
