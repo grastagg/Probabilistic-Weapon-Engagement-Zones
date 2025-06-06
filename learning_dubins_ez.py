@@ -732,13 +732,13 @@ def learn_ez(
     print("loss 2", sol2.fStar)
     # bestParams = pursuerX1 if sol1.fStar < sol2.fStar else pursuerX2
     bestParams = pursuerX2 if sol2.fStar < sol1.fStar else pursuerX1
+    worseParams = pursuerX1 if sol1.fStar < sol2.fStar else pursuerX2
 
     bestCov = cov1 if sol1.fStar < sol2.fStar else cov2
 
     return (
-        pursuerX1,
-        pursuerX2,
-        bestParams,  # Return the best parameters as well
+        bestParams,  # Return the best parameters
+        worseParams,  # Return the worse parameters
         bestCov,  # Return the covariance of the best parameters
     )
 
@@ -795,9 +795,14 @@ def compute_mutual_information(
     angle,
     heading,
     theta_hat,
+    theta_hat2,
     cov_theta,
     speed,
     trueParams,
+    center,
+    radius,
+    tmax=10.0,
+    num_points=100,
     num_samples=1000,
     alpha=20.0,
     key=jax.random.PRNGKey(0),
@@ -840,7 +845,25 @@ def compute_mutual_information(
     return mutual_info
 
 
-def expected_grad_score(angle, heading):
+def expected_grad_score(
+    angle,
+    heading,
+    pursuerX1,
+    pursuerX2,
+    cov_theta,
+    speed,
+    trueParams,
+    center,
+    radius,
+    tmax=10.0,
+    num_points=100,
+    headings=None,
+    pathHistories=None,
+    pathMasks=None,
+    interceptedList=None,
+    endPoints=None,
+    speeds=None,
+):
     start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
     new_path, new_headings = simulate_trajectory_fn(
         start_pos, heading, speed, tmax, num_points
@@ -850,7 +873,7 @@ def expected_grad_score(angle, heading):
     new_mask = jnp.ones(new_path.shape[0], dtype=bool)
     new_end = new_path[-1]
 
-    def grad_norm_if(intercepted):
+    def grad_norm_if(intercepted, pursuerX):
         new_pathHistories = jnp.concatenate(
             [pathHistories, new_path[None, :, :]], axis=0
         )
@@ -866,6 +889,125 @@ def expected_grad_score(angle, heading):
         new_endpoints = jnp.concatenate([endPoints, new_end[None, :]], axis=0)
 
         grad = dTotalLossDX(
+            pursuerX,
+            new_headings_all,
+            new_speeds,
+            new_intercepted,
+            new_pathHistories,
+            new_masks,
+            new_endpoints,
+            trueParams,
+        )
+        return grad
+
+    # p1 = ez_probability_fn(pursuerX1, new_path, new_headings, speed, trueParams)
+    # p2 = ez_probability_fn(pursuerX2, new_path, new_headings, speed, trueParams)
+    g1_hit = grad_norm_if(True, pursuerX1)
+    g1_miss = grad_norm_if(False, pursuerX1)
+    g2_hit = grad_norm_if(True, pursuerX2)
+    g2_miss = grad_norm_if(False, pursuerX2)
+    var1 = jnp.sum((g1_hit - g1_miss) ** 2)
+    var2 = jnp.sum((g2_hit - g2_miss) ** 2)
+
+    return var1 + var2
+
+    return -(
+        p1 * grad_norm_if(True, pursuerX1)
+        + (1 - p1) * grad_norm_if(False, pursuerX1)
+        + p2 * grad_norm_if(True, pursuerX2)
+        + (1 - p2) * grad_norm_if(False, pursuerX2)
+    )
+
+
+def inside_one_outside_other(
+    angle,
+    heading,
+    pursuerX1,
+    pursuerX2,
+    cov_theta,
+    speed,
+    trueParams,
+    center,
+    radius,
+    tmax=10.0,
+    num_points=100,
+    headings=None,
+    pathHistories=None,
+    pathMasks=None,
+    interceptedList=None,
+    endPoints=None,
+    speeds=None,
+):
+    start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
+    new_path, new_headings = simulate_trajectory_fn(
+        start_pos, heading, speed, tmax, num_points
+    )
+    ez1 = dubinsEZ_from_pursuerX(pursuerX1, new_path, new_headings, speed, trueParams)
+    rs1 = dubins_reachable_set_from_pursuerX(pursuerX1, new_path, trueParams)
+    ez2 = dubinsEZ_from_pursuerX(pursuerX2, new_path, new_headings, speed, trueParams)
+    rs2 = dubins_reachable_set_from_pursuerX(pursuerX2, new_path, trueParams)
+    # min1 = jnp.min(ez1)
+    # min2 = jnp.min(ez2)
+    min1 = jnp.min(rs1)
+    min2 = jnp.min(rs2)
+    epsilon = 0.1
+    # Objective: find a path that is inside *exactly one* PEZ
+    inside1_outside2 = jax.nn.sigmoid(-min1 / epsilon) * (
+        1 - jax.nn.sigmoid(-min2 / epsilon)
+    )
+    inside2_outside1 = jax.nn.sigmoid(-min2 / epsilon) * (
+        1 - jax.nn.sigmoid(-min1 / epsilon)
+    )
+
+    # Score: how strongly it distinguishes between the two
+    score = inside1_outside2 + inside2_outside1
+    return score
+
+
+def covarianve_reduction_score(
+    angle,
+    heading,
+    theta_hat,
+    theta_hat2,
+    cov_theta,
+    speed,
+    trueParams,
+    center,
+    radius,
+    tmax=10.0,
+    num_points=100,
+    headings=None,
+    pathHistories=None,
+    pathMasks=None,
+    interceptedList=None,
+    endPoints=None,
+    speeds=None,
+):
+    print("tmax", tmax, "num_points", num_points)
+    start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
+    new_path, new_headings = simulate_trajectory_fn(
+        start_pos, heading, speed, tmax, num_points
+    )
+    new_headings = jnp.reshape(new_headings, (-1,))
+
+    new_mask = jnp.ones(new_path.shape[0], dtype=bool)
+    new_end = new_path[-1]
+
+    def loss_cov(intercepted):
+        new_pathHistories = jnp.concatenate(
+            [pathHistories, new_path[None, :, :]], axis=0
+        )
+        new_headings_all = jnp.concatenate(
+            [headings, jnp.array([new_headings[0]])], axis=0
+        )
+
+        new_speeds = jnp.concatenate([speeds, jnp.array([speed])], axis=0)
+        new_intercepted = jnp.concatenate(
+            [interceptedList, jnp.array([intercepted])], axis=0
+        )
+        new_masks = jnp.concatenate([pathMasks, new_mask[None, :]], axis=0)
+        new_endpoints = jnp.concatenate([endPoints, new_end[None, :]], axis=0)
+        lossHessian = jax.jacfwd(jax.jacfwd(total_learning_loss, argnums=0))(
             theta_hat,
             new_headings_all,
             new_speeds,
@@ -875,12 +1017,12 @@ def expected_grad_score(angle, heading):
             new_endpoints,
             trueParams,
         )
-        return jnp.sum(grad**2)
+        return jnp.linalg.inv(lossHessian) + 1e-5 * jnp.eye(lossHessian.shape[0])
 
     p = ez_probability_fn(theta_hat, new_path, new_headings, speed, trueParams)
-    p = jnp.clip(p, 1e-6, 1 - 1e-6)
 
-    return p * grad_norm_if(True) + (1 - p) * grad_norm_if(False)
+    cov = p * loss_cov(True) + (1 - p) * loss_cov(False)
+    return -jnp.trace(cov)
 
 
 def optimize_next_low_priority_path(
@@ -903,6 +1045,7 @@ def optimize_next_low_priority_path(
     num_points=100,
 ):
     print("Optimizing next low-priority path...")
+    print("num_points", num_points, "tmax", tmax, "speed", speed)
 
     # Generate candidate start positions and headings
     # angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
@@ -912,43 +1055,46 @@ def optimize_next_low_priority_path(
     angle_flat = angle_grid.ravel()
     heading_flat = heading_grid.ravel()
 
-    def inside_one_outside_other(angle, heading):
-        start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
-        new_path, new_headings = simulate_trajectory_fn(
-            start_pos, heading, speed, tmax, num_points
-        )
-        ez1 = dubinsEZ_from_pursuerX(
-            pursuerX1, new_path, new_headings, speed, trueParams
-        )
-        rs1 = dubins_reachable_set_from_pursuerX(pursuerX1, new_path, trueParams)
-        ez2 = dubinsEZ_from_pursuerX(
-            pursuerX2, new_path, new_headings, speed, trueParams
-        )
-        rs2 = dubins_reachable_set_from_pursuerX(pursuerX2, new_path, trueParams)
-        # min1 = jnp.min(ez1)
-        # min2 = jnp.min(ez2)
-        min1 = jnp.min(rs1)
-        min2 = jnp.min(rs2)
-        epsilon = 0.1
-        # Objective: find a path that is inside *exactly one* PEZ
-        inside1_outside2 = jax.nn.sigmoid(-min1 / epsilon) * (
-            1 - jax.nn.sigmoid(-min2 / epsilon)
-        )
-        inside2_outside1 = jax.nn.sigmoid(-min2 / epsilon) * (
-            1 - jax.nn.sigmoid(-min1 / epsilon)
-        )
-
-        # Score: how strongly it distinguishes between the two
-        score = inside1_outside2 + inside2_outside1
-        return score
-
     scores = jax.vmap(
-        inside_one_outside_other,
+        expected_grad_score,
         in_axes=(
             0,
             0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ),
-    )(angle_flat, heading_flat)
+    )(
+        angle_flat,
+        heading_flat,
+        pursuerX1,
+        pursuerX2,
+        None,
+        speed,
+        trueParams,
+        center,
+        radius,
+        tmax,
+        num_points,
+        headings,
+        pathHistories,
+        pathMasks,
+        interceptedList,
+        endPoints,
+        speeds,
+    )
 
     best_idx = jnp.nanargmax(scores)
 
@@ -1170,7 +1316,7 @@ def main():
     #     heading_noise_std=0.5,
     # )
     plotEvery = 20
-    pursuerX = None
+    pursuerX1 = None
     for i in range(numLowPriorityAgents):
         if i == 0:
             startPosition = jnp.array([-searchCircleRadius, 0.0001])
@@ -1217,7 +1363,7 @@ def main():
         endTimes.append(endTime)
         pathHistories.append(pathHistory)
         pathMasks.append(pathMask)
-        (pursuerX1, pursuerX2, pursuerX, cov_theta) = learn_ez(
+        (pursuerX1, pursuerX2, pursuerXcov) = learn_ez(
             jnp.array(headings),
             jnp.array(speeds),
             jnp.array(interceptedList),
@@ -1226,7 +1372,7 @@ def main():
             jnp.array(endPoints),
             jnp.array(endTimes),
             trueParams,
-            pursuerX,
+            pursuerX1,
         )
         if i % plotEvery == 0 and i > 0:
             plot_all(
