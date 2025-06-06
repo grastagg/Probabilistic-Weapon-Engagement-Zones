@@ -671,18 +671,27 @@ def learn_ez(
         )
     else:
         if previousPursuerX is not None:
+            # initialPosition = previousPursuerX[0:2]
+            # initialHeading1 = previousPursuerX[2]
+            # initialHeading2 = previousPursuerX[2] + np.pi % (2 * np.pi)
+            initialPosition = startPosition
+            initialHeading1 = startHeading1
+            initialHeading2 = startHeading2
             initialSpeed = previousPursuerX[3]
             initialTurnRadius = previousPursuerX[4]
             initialRange = previousPursuerX[5]
         else:
+            initialPosition = startPosition
+            initialHeading1 = startHeading1
+            initialHeading2 = startHeading2
             initialSpeed = (lowerLimit[3] + upperLimit[3]) / 2.0
             initialTurnRadius = (lowerLimit[4] + upperLimit[4]) / 2.0
             initialRange = (lowerLimit[5] + upperLimit[5]) / 2.0
         intialPursuerX1 = jnp.array(
             [
-                startPosition[0],
-                startPosition[1],
-                startHeading1,
+                initialPosition[0],
+                initialPosition[1],
+                initialHeading1,
                 initialSpeed,
                 initialTurnRadius,
                 initialRange,
@@ -690,9 +699,9 @@ def learn_ez(
         )
         intialPursuerX2 = jnp.array(
             [
-                startPosition[0],
-                startPosition[1],
-                startHeading2,
+                initialPosition[0],
+                initialPosition[1],
+                initialHeading2,
                 initialSpeed,
                 initialTurnRadius,
                 initialRange,
@@ -946,6 +955,13 @@ def inside_one_outside_other(
     rs1 = dubins_reachable_set_from_pursuerX(pursuerX1, new_path, trueParams)
     ez2 = dubinsEZ_from_pursuerX(pursuerX2, new_path, new_headings, speed, trueParams)
     rs2 = dubins_reachable_set_from_pursuerX(pursuerX2, new_path, trueParams)
+
+    # inside1 = rs1 < 0.0  # shape (T,)
+    # inside2 = rs2 < 0.0  # shape (T,)
+    # inside1_outside2 = jnp.logical_and(inside1, ~inside2)  # inside 1, outside 2
+    # inside2_outside1 = jnp.logical_and(inside2, ~inside1)  # inside 2, outside 1
+    # return jnp.sum(inside1_outside2) + jnp.sum(inside2_outside1)
+
     # min1 = jnp.min(ez1)
     # min2 = jnp.min(ez2)
     min1 = jnp.min(rs1)
@@ -1056,7 +1072,7 @@ def optimize_next_low_priority_path(
     heading_flat = heading_grid.ravel()
 
     scores = jax.vmap(
-        expected_grad_score,
+        inside_one_outside_other,
         in_axes=(
             0,
             0,
@@ -1095,6 +1111,7 @@ def optimize_next_low_priority_path(
         endPoints,
         speeds,
     )
+    print("scores", scores)
 
     best_idx = jnp.nanargmax(scores)
 
@@ -1167,6 +1184,8 @@ def plot_all(
     trueParams,
 ):
     fig, ax = plt.subplots()
+    ax.set_xlim(-3.0, 3.0)
+    ax.set_ylim(-3.0, 3.0)
     plot_low_priority_paths(
         startPositions, interceptedList, endPoints, pathHistories, pathMasks, ax
     )
@@ -1178,9 +1197,12 @@ def plot_all(
         ax,
         colors=["magenta"],
     )
-    plt.legend(fontsize=18)
+    # plt.legend(fontsize=18)
 
-    fig, ax = plt.subplots()
+    fig1, axes = plt.subplots(1, 2)
+    ax = axes[0]
+    ax.set_xlim(-3.0, 3.0)
+    ax.set_ylim(-3.0, 3.0)
     plt.title("1")
     plot_low_priority_paths_with_ez(
         headings,
@@ -1231,9 +1253,11 @@ def plot_all(
         pursuerHeadingLearned1,
         ax,
     )
-    plt.legend()
+    # plt.legend()
 
-    fig1, ax1 = plt.subplots()
+    ax1 = axes[1]
+    ax1.set_xlim(-3.0, 3.0)
+    ax1.set_ylim(-3.0, 3.0)
     plt.title("2")
     plot_low_priority_paths_with_ez(
         headings,
@@ -1270,12 +1294,13 @@ def plot_all(
         pursuerHeadingLearned2,
         ax1,
     )
-    plt.legend()
+    # plt.legend()
+    return fig1
 
 
 def main():
-    pursuerPosition = np.array([0.5, -1.0])
-    pursuerHeading = (5.0 / 20.0) * np.pi
+    pursuerPosition = np.array([0.0, 0.0])
+    pursuerHeading = (10.0 / 20.0) * np.pi
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
@@ -1299,7 +1324,7 @@ def main():
     numPoints = int(tmax / dt) + 1
 
     interceptedList = []
-    numLowPriorityAgents = 51
+    numLowPriorityAgents = 25
 
     endPoints = []
     endTimes = []
@@ -1315,7 +1340,7 @@ def main():
     #     numLowPriorityAgents,
     #     heading_noise_std=0.5,
     # )
-    plotEvery = 20
+    plotEvery = 1
     pursuerX1 = None
     for i in range(numLowPriorityAgents):
         if i == 0:
@@ -1375,7 +1400,7 @@ def main():
             pursuerX1,
         )
         if i % plotEvery == 0 and i > 0:
-            plot_all(
+            fig1 = plot_all(
                 startPositions,
                 interceptedList,
                 endPoints,
@@ -1391,7 +1416,8 @@ def main():
                 pursuerX2,
                 trueParams,
             )
-            plt.show()
+            fig1.savefig(f"video/{i}.png")
+            plt.close(fig1)
 
 
 if __name__ == "__main__":
