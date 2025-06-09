@@ -1342,6 +1342,8 @@ def main():
     # )
     plotEvery = 1
     pursuerX1 = None
+    pursuerParameterRMSE_history = []
+    pursuerParameter_history = []
     for i in range(numLowPriorityAgents):
         if i == 0:
             startPosition = jnp.array([-searchCircleRadius, 0.0001])
@@ -1419,6 +1421,32 @@ def main():
             fig1.savefig(f"video/{i}.png")
             plt.close(fig1)
 
+        plt.close("all")
+        rmse = np.sqrt(np.mean((trueParams - pursuerX1) ** 2))
+        pursuerParameterRMSE_history.append(rmse)
+        pursuerParameter_history.append(pursuerX1)
+    pursuerParameter_history = jnp.array(pursuerParameter_history)
+    fig, axes = plt.subplots(3, 2)
+    axes[0, 0].plot(pursuerParameter_history[:, 0])
+    axes[0, 0].set_title("Pursuer X Position")
+    axes[0, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[0], "r--")
+    axes[0, 1].plot(pursuerParameter_history[:, 1])
+    axes[0, 1].set_title("Pursuer Y Position")
+    axes[0, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[1], "r--")
+    axes[1, 0].plot(pursuerParameter_history[:, 2])
+    axes[1, 0].set_title("Pursuer Heading")
+    axes[1, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[2], "r--")
+    axes[1, 1].plot(pursuerParameter_history[:, 3])
+    axes[1, 1].set_title("Pursuer Speed")
+    axes[1, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[3], "r--")
+    axes[2, 0].plot(pursuerParameter_history[:, 4])
+    axes[2, 0].set_title("Pursuer Turn Radius")
+    axes[2, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[4], "r--")
+    axes[2, 1].plot(pursuerParameter_history[:, 5])
+    axes[2, 1].set_title("Pursuer Range")
+    axes[2, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[5], "r--")
+
 
 if __name__ == "__main__":
     main()
+    plt.show()
