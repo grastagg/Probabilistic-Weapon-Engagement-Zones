@@ -335,46 +335,6 @@ def compute_intercept_probability(ez_min, alpha=10.0):
 
 
 @jax.jit
-def learning_log_likelihood_single(
-    pursuerX,
-    heading,
-    speed,
-    intercepted,
-    pathHistory,
-    pathMask,
-    interceptedPoint,
-    trueParams,
-):
-    headings = heading * jnp.ones(pathHistory.shape[0])
-    ez = dubinsEZ_from_pursuerX(
-        pursuerX,
-        pathHistory,
-        headings,
-        speed,
-        trueParams,
-    )  # (T,)
-
-    ez_min = jnp.min(jnp.where(pathMask, ez, jnp.inf))  # only active along path
-    p = compute_intercept_probability(ez_min)  # ∈ (0, 1)
-
-    # Clip p to avoid log(0)
-    epsilon = 1e-6
-    p = jnp.clip(p, epsilon, 1.0 - epsilon)
-
-    loglik = jnp.log(p) * intercepted + jnp.log1p(-p) * (1 - intercepted)
-
-    # Optional: keep RS loss if you want a hybrid loss
-    rsEnd = dubins_reachable_set_from_pursuerX(
-        pursuerX,
-        jnp.array([interceptedPoint]),
-        trueParams,
-    )[0]
-    rsLoss = activation(rsEnd)  # Non-negative loss if in RS
-    rsLoss = jnp.where(intercepted, rsLoss, 0.0)  # Only apply if intercepted
-    return -loglik + rsLoss  # Negative log-likelihood + optional penalty
-
-
-@jax.jit
 def learning_loss_function_single(
     pursuerX,
     heading,
@@ -406,9 +366,11 @@ def learning_loss_function_single(
     )
     interceptedLossRS = jax.nn.relu(rsEnd)  # loss if intercepted in RS
     survivedLossRS = 0.0  # loss if survived in RS
+    # survivedLossRS = jax.nn.relu(-jnp.min(rsAll))  # loss if survived in RS
     lossRS = jax.lax.cond(
         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
     )
+    # return rsEnd**2
     # return lossRS
     return lossEZ + lossRS
 
@@ -419,12 +381,6 @@ batched_loss = jax.jit(
         in_axes=(None, 0, 0, 0, 0, 0, 0, None),
     )
 )
-# batched_loss = jax.jit(
-#     jax.vmap(
-#         learning_log_likelihood_single,
-#         in_axes=(None, 0, 0, 0, 0, 0, 0, None),
-#     )
-# )
 
 
 @jax.jit
@@ -454,12 +410,36 @@ def total_learning_loss(
     return jnp.sum(losses) / len(losses)
 
 
+def total_learning_log_loss(
+    pursuerX,
+    headings,
+    speeds,
+    intercepted_flags,
+    pathHistories,
+    pathMasks,
+    interceptedPoints,
+    trueParams,
+):
+    losses = batched_log_loss(
+        pursuerX,
+        headings,
+        speeds,
+        intercepted_flags,
+        pathHistories,
+        pathMasks,
+        interceptedPoints,
+        trueParams,
+    )
+    return jnp.sum(losses)
+
+
 batched_loss_multiple_pursuerX = jax.jit(
     jax.vmap(total_learning_loss, in_axes=(0, None, None, None, None, None, None, None))
 )
 
 
 dTotalLossDX = jax.jit(jax.jacfwd(total_learning_loss, argnums=0))
+dTotalLogLossDX = jax.jit(jax.jacfwd(total_learning_log_loss, argnums=0))
 
 
 def centroid_and_principal_axis(points):
@@ -499,14 +479,8 @@ def find_covariance_of_optimal(
     lambda_scale=1000.0,  # scales importance weights: exp(-lambda * loss)
     key=jax.random.PRNGKey(0),  # PRNG key for reproducibility
 ):
-    D = pursuerXopt.shape[0]
-
-    # 1. Sample theta vectors around the optimum
-    theta_samples = pursuerXopt + std * jax.random.normal(key, shape=(N, D))
-
-    # 2. Evaluate loss for each sample
-    losses = batched_loss_multiple_pursuerX(
-        theta_samples,  # shape (N, D)
+    hessian = jax.jacfwd(dTotalLogLossDX)(
+        pursuerXopt,
         headings,
         speeds,
         intercepted_flags,
@@ -514,26 +488,14 @@ def find_covariance_of_optimal(
         pathMasks,
         interceptedPoints,
         trueParams,
-    ).squeeze()  # shape (N,)
-
-    # 3. Convert to importance weights
-    scaled_losses = -lambda_scale * (
-        losses - jnp.min(losses)
-    )  # for numerical stability
-    weights = jnp.exp(scaled_losses)
-    weights = weights / jnp.sum(weights)  # shape (N,)
-
-    # 4. Compute weighted mean
-    mean_theta = jnp.sum(weights[:, None] * theta_samples, axis=0)  # shape (D,)
-
-    # 5. Compute weighted covariance
-    centered = theta_samples - mean_theta  # shape (N, D)
-    cov = centered.T @ (centered * weights[:, None])  # shape (D, D)
+    )
+    print("Hessian:", hessian)
+    cov = jnp.linalg.inv(hessian)
 
     return cov
 
 
-def run_optimization(
+def run_optimization_hueristic(
     headings,
     speeds,
     interceptedList,
@@ -546,8 +508,6 @@ def run_optimization(
     upperLimit,
     trueParams,
 ):
-    print("Running optimization...", initialPursuerX)
-
     def objfunc(xDict):
         pursuerX = xDict["pursuerX"]
         loss = total_learning_loss(
@@ -607,30 +567,8 @@ def run_optimization(
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
-
-    cov = find_covariance_of_optimal(
-        sol.xStar["pursuerX"],
-        headings,
-        speeds,
-        interceptedList,
-        pathHistories,
-        pathMasks,
-        endPoints,
-        trueParams,
-    )
-
-    # lossHessian = jax.jacfwd(jax.jacfwd(total_learning_loss, argnums=0))(
-    #     sol.xStar["pursuerX"],
-    #     headings,
-    #     speeds,
-    #     interceptedList,
-    #     pathHistories,
-    #     pathMasks,
-    #     endPoints,
-    #     trueParams,
-    # )  # + 1e3 * np.eye(numVars)  # Add small value to diagonal for numerical stability
-    # cov = jnp.linalg.inv(lossHessian)
-    return sol, cov
+    print("Ran optimization hueristic...", sol.xStar["pursuerX"], " loss:", sol.fStar)
+    return sol
 
 
 def learn_ez(
@@ -707,7 +645,7 @@ def learn_ez(
                 initialRange,
             ]
         )
-    sol1, cov1 = run_optimization(
+    sol1 = run_optimization_hueristic(
         headings,
         speeds,
         interceptedList,
@@ -720,7 +658,8 @@ def learn_ez(
         upperLimit,
         trueParams,
     )
-    sol2, cov2 = run_optimization(
+    loss1 = sol1.fStar
+    sol2 = run_optimization_hueristic(
         headings,
         speeds,
         interceptedList,
@@ -733,17 +672,27 @@ def learn_ez(
         upperLimit,
         trueParams,
     )
+    loss2 = sol2.fStar
     pursuerX1 = sol1.xStar["pursuerX"]
     pursuerX2 = sol2.xStar["pursuerX"]
-    print("Pursuer X1:", pursuerX1)
-    print("loss 1", sol1.fStar)
-    print("Pursuer X2:", pursuerX2)
-    print("loss 2", sol2.fStar)
-    # bestParams = pursuerX1 if sol1.fStar < sol2.fStar else pursuerX2
-    bestParams = pursuerX2 if sol2.fStar < sol1.fStar else pursuerX1
-    worseParams = pursuerX1 if sol1.fStar < sol2.fStar else pursuerX2
+    # bestParams = pursuerX2 if sol2.fStar < sol1.fStar else pursuerX1
+    # worseParams = pursuerX1 if sol1.fStar < sol2.fStar else pursuerX2
+    bestParams = pursuerX2 if loss2 < loss1 else pursuerX1
+    worseParams = pursuerX1 if loss1 < loss2 else pursuerX2
 
-    bestCov = cov1 if sol1.fStar < sol2.fStar else cov2
+    # bestCov = cov1 if sol1.fStar < sol2.fStar else cov2
+    bestCov = None  # Placeholder for covariance, not computed here
+    # bestCov = find_covariance_of_optimal(
+    #     bestParams,
+    #     headings,
+    #     speeds,
+    #     interceptedList,
+    #     pathHistories,
+    #     pathMasks,
+    #     endPoints,
+    #     trueParams,
+    # )
+    # print("covariance of best parameters:", bestCov)
 
     return (
         bestParams,  # Return the best parameters
@@ -854,6 +803,11 @@ def compute_mutual_information(
     return mutual_info
 
 
+def softmin(x, tau=0.5):
+    x = jnp.asarray(x)
+    return -tau * jnp.log(jnp.sum(jnp.exp(-x / tau)))
+
+
 def expected_grad_score(
     angle,
     heading,
@@ -909,23 +863,22 @@ def expected_grad_score(
         )
         return grad
 
-    # p1 = ez_probability_fn(pursuerX1, new_path, new_headings, speed, trueParams)
-    # p2 = ez_probability_fn(pursuerX2, new_path, new_headings, speed, trueParams)
+    # ez1 = dubinsEZ_from_pursuerX(pursuerX1, new_path, new_headings, speed, trueParams)
+    # ez2 = dubinsEZ_from_pursuerX(pursuerX2, new_path, new_headings, speed, trueParams)
+    # ez1_margin = softmin(ez1)
+    # ez2_margin = softmin(ez2)
+    # p1 = jax.nn.sigmoid(-ez1_margin / 0.5)
+    # p2 = jax.nn.sigmoid(-ez2_margin / 0.5)
+
     g1_hit = grad_norm_if(True, pursuerX1)
     g1_miss = grad_norm_if(False, pursuerX1)
     g2_hit = grad_norm_if(True, pursuerX2)
     g2_miss = grad_norm_if(False, pursuerX2)
-    var1 = jnp.sum((g1_hit - g1_miss) ** 2)
-    var2 = jnp.sum((g2_hit - g2_miss) ** 2)
-
-    return var1 + var2
-
-    return -(
-        p1 * grad_norm_if(True, pursuerX1)
-        + (1 - p1) * grad_norm_if(False, pursuerX1)
-        + p2 * grad_norm_if(True, pursuerX2)
-        + (1 - p2) * grad_norm_if(False, pursuerX2)
-    )
+    p1 = 0.5
+    p2 = 0.5
+    grad_sq_norm_1 = p1 * jnp.sum(g1_hit**2) + (1 - p1) * jnp.sum(g1_miss**2)
+    grad_sq_norm_2 = p2 * jnp.sum(g2_hit**2) + (1 - p2) * jnp.sum(g2_miss**2)
+    return -grad_sq_norm_1 - grad_sq_norm_2
 
 
 def inside_one_outside_other(
@@ -1060,8 +1013,19 @@ def optimize_next_low_priority_path(
     tmax=10.0,
     num_points=100,
 ):
+    randomPath = False
+    if randomPath:
+        best_angle = np.random.uniform(-np.pi, np.pi)
+        best_start_pos = center + radius * jnp.array(
+            [jnp.cos(best_angle), jnp.sin(best_angle)]
+        )
+        headingToCenter = np.arctan2(
+            center[1] - best_start_pos[1],  # Δy
+            center[0] - best_start_pos[0],  # Δx
+        )
+        best_heading = headingToCenter + np.random.normal(0.0, 0.5)
+        return best_start_pos, best_heading
     print("Optimizing next low-priority path...")
-    print("num_points", num_points, "tmax", tmax, "speed", speed)
 
     # Generate candidate start positions and headings
     # angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
@@ -1072,7 +1036,7 @@ def optimize_next_low_priority_path(
     heading_flat = heading_grid.ravel()
 
     scores = jax.vmap(
-        inside_one_outside_other,
+        expected_grad_score,
         in_axes=(
             0,
             0,
@@ -1111,7 +1075,6 @@ def optimize_next_low_priority_path(
         endPoints,
         speeds,
     )
-    print("scores", scores)
 
     best_idx = jnp.nanargmax(scores)
 
@@ -1120,6 +1083,7 @@ def optimize_next_low_priority_path(
     best_start_pos = center + radius * jnp.array(
         [jnp.cos(best_angle), jnp.sin(best_angle)]
     )
+    print("best location:", best_start_pos, "best heading:", best_heading)
 
     return best_start_pos, best_heading
 
@@ -1324,7 +1288,7 @@ def main():
     numPoints = int(tmax / dt) + 1
 
     interceptedList = []
-    numLowPriorityAgents = 25
+    numLowPriorityAgents = 20
 
     endPoints = []
     endTimes = []
