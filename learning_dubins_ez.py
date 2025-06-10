@@ -988,7 +988,7 @@ def maximize_loss(
 
     loss1 = loss_if(pursuerX1, pursuerX2)
     loss2 = loss_if(pursuerX2, pursuerX1)
-    return jnp.maximum(loss1, loss2)  # We want to maximize the loss, so we take the max
+    # return jnp.maximum(loss1, loss2)
 
     return loss1 + loss2
 
@@ -1087,7 +1087,7 @@ def optimize_next_low_priority_path(
     heading_flat = heading_grid.ravel()
 
     scores = jax.vmap(
-        maximize_loss,
+        inside_one_outside_other,
         in_axes=(
             0,
             0,
@@ -1317,7 +1317,7 @@ def plot_all(
 
 def main():
     pursuerPosition = np.array([0.0, 0.0])
-    pursuerHeading = (10.0 / 20.0) * np.pi
+    pursuerHeading = (0.0 / 20.0) * np.pi
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
