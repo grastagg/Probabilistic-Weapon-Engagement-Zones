@@ -146,6 +146,26 @@ def simulate_trajectory_fn(startPosition, heading, speed, tmax, numPoints):
     return pathHistory, headings
 
 
+def find_interception_point_and_time(
+    speed, pursuerSpeed, direction, pursuerRange, t, pathHistory, firstTrueIndex
+):
+    intercepted = True
+    speedRatio = speed / pursuerSpeed
+
+    interceptionPoint = (
+        pathHistory[firstTrueIndex] + speedRatio * pursuerRange * direction
+    )
+    interceptionTime = t[firstTrueIndex] + pursuerRange / pursuerSpeed
+    # print(
+    #     "test agent will be intercepted at",
+    #     interceptionPoint,
+    #     "at time",
+    #     interceptionTime,
+    # )
+    mask = t < interceptionTime
+    return (intercepted, interceptionPoint, interceptionTime, mask)
+
+
 def send_low_priority_agent(
     startPosition,
     heading,
@@ -182,20 +202,18 @@ def send_low_priority_agent(
     inEZ = EZ < 0.0  # shape (T,)
     firstTrueIndex = first_true_index_safe(inEZ)
     if firstTrueIndex != -1:
-        intercepted = True
-        speedRatio = speed / pursuerSpeed
+        intercepted, interceptionPoint, interceptionTime, mask = (
+            find_interception_point_and_time(
+                speed,
+                pursuerSpeed,
+                direction,
+                pursuerRange,
+                t,
+                pathHistory,
+                firstTrueIndex,
+            )
+        )
 
-        interceptionPoint = (
-            pathHistory[firstTrueIndex] + speedRatio * pursuerRange * direction
-        )
-        interceptionTime = t[firstTrueIndex] + pursuerRange / pursuerSpeed
-        print(
-            "test agent will be intercepted at",
-            interceptionPoint,
-            "at time",
-            interceptionTime,
-        )
-        mask = t < interceptionTime
     else:
         interceptionPoint = pathHistory[-1]
         interceptionTime = t[-1]
@@ -489,7 +507,6 @@ def find_covariance_of_optimal(
         interceptedPoints,
         trueParams,
     )
-    print("Hessian:", hessian)
     cov = jnp.linalg.inv(hessian)
 
     return cov
@@ -584,6 +601,8 @@ def learn_ez(
 ):
     lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
     upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
+    numStartHeadings = 10
+
     if positionAndHeadingOnly:
         lowerLimit = lowerLimit[:3]
         upperLimit = upperLimit[:3]
@@ -876,9 +895,102 @@ def expected_grad_score(
     g2_miss = grad_norm_if(False, pursuerX2)
     p1 = 0.5
     p2 = 0.5
-    grad_sq_norm_1 = p1 * jnp.sum(g1_hit**2) + (1 - p1) * jnp.sum(g1_miss**2)
-    grad_sq_norm_2 = p2 * jnp.sum(g2_hit**2) + (1 - p2) * jnp.sum(g2_miss**2)
+    grad_sq_norm_1 = p1 * jnp.sum(g1_hit**2)  # + (1 - p1) * jnp.sum(g1_miss**2)
+    grad_sq_norm_2 = p2 * jnp.sum(g2_hit**2)  # + (1 - p2) * jnp.sum(g2_miss**2)
     return -grad_sq_norm_1 - grad_sq_norm_2
+
+
+def maximize_loss(
+    angle,
+    heading,
+    pursuerX1,
+    pursuerX2,
+    cov_theta,
+    speed,
+    trueParams,
+    center,
+    radius,
+    tmax=10.0,
+    num_points=100,
+    headings=None,
+    pathHistories=None,
+    pathMasks=None,
+    interceptedList=None,
+    endPoints=None,
+    speeds=None,
+):
+    start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
+    new_path, new_headings = simulate_trajectory_fn(
+        start_pos, heading, speed, tmax, num_points
+    )
+    new_headings = jnp.reshape(new_headings, (-1,))
+
+    def loss_if(pursuerX1, pursuerX2):
+        new_pathHistories = jnp.concatenate(
+            [pathHistories, new_path[None, :, :]], axis=0
+        )
+        new_headings_all = jnp.concatenate(
+            [headings, jnp.array([new_headings[0]])], axis=0
+        )
+
+        new_speeds = jnp.concatenate([speeds, jnp.array([speed])], axis=0)
+
+        ez = dubinsEZ_from_pursuerX(
+            pursuerX1, new_path, new_headings, speed, trueParams
+        )
+        inEZ = ez < 0.0  # shape (T,)
+        intercepted = jnp.any(inEZ)
+
+        def if_intercepted():
+            firstTrueIndex = first_true_index_safe(inEZ)
+
+            direction = jnp.array([jnp.cos(heading), jnp.sin(heading)])  # shape (2,)
+            t = jnp.linspace(0.0, tmax, num_points)  # shape (T,)
+            intercepted, new_end, interceptionTime, new_mask = (
+                find_interception_point_and_time(
+                    speed,
+                    pursuerX1[3],  # pursuerSpeed
+                    direction,  # direction
+                    pursuerX1[5],  # pursuerRange
+                    t,
+                    new_path,
+                    firstTrueIndex,
+                )
+            )
+            return new_mask, new_end
+
+        def if_not_intercepted():
+            new_mask = jnp.ones(new_path.shape[0], dtype=bool)
+            new_end = new_path[-1]
+            return new_mask, new_end
+
+        new_mask, new_end = jax.lax.cond(
+            intercepted, if_intercepted, if_not_intercepted
+        )
+
+        new_intercepted = jnp.concatenate(
+            [interceptedList, jnp.array([intercepted])], axis=0
+        )
+        new_masks = jnp.concatenate([pathMasks, new_mask[None, :]], axis=0)
+        new_endpoints = jnp.concatenate([endPoints, new_end[None, :]], axis=0)
+
+        loss = total_learning_loss(
+            pursuerX2,
+            new_headings_all,
+            new_speeds,
+            new_intercepted,
+            new_pathHistories,
+            new_masks,
+            new_endpoints,
+            trueParams,
+        )
+        return loss
+
+    loss1 = loss_if(pursuerX1, pursuerX2)
+    loss2 = loss_if(pursuerX2, pursuerX1)
+    return jnp.maximum(loss1, loss2)  # We want to maximize the loss, so we take the max
+
+    return loss1 + loss2
 
 
 def inside_one_outside_other(
@@ -933,67 +1045,6 @@ def inside_one_outside_other(
     return score
 
 
-def covarianve_reduction_score(
-    angle,
-    heading,
-    theta_hat,
-    theta_hat2,
-    cov_theta,
-    speed,
-    trueParams,
-    center,
-    radius,
-    tmax=10.0,
-    num_points=100,
-    headings=None,
-    pathHistories=None,
-    pathMasks=None,
-    interceptedList=None,
-    endPoints=None,
-    speeds=None,
-):
-    print("tmax", tmax, "num_points", num_points)
-    start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
-    new_path, new_headings = simulate_trajectory_fn(
-        start_pos, heading, speed, tmax, num_points
-    )
-    new_headings = jnp.reshape(new_headings, (-1,))
-
-    new_mask = jnp.ones(new_path.shape[0], dtype=bool)
-    new_end = new_path[-1]
-
-    def loss_cov(intercepted):
-        new_pathHistories = jnp.concatenate(
-            [pathHistories, new_path[None, :, :]], axis=0
-        )
-        new_headings_all = jnp.concatenate(
-            [headings, jnp.array([new_headings[0]])], axis=0
-        )
-
-        new_speeds = jnp.concatenate([speeds, jnp.array([speed])], axis=0)
-        new_intercepted = jnp.concatenate(
-            [interceptedList, jnp.array([intercepted])], axis=0
-        )
-        new_masks = jnp.concatenate([pathMasks, new_mask[None, :]], axis=0)
-        new_endpoints = jnp.concatenate([endPoints, new_end[None, :]], axis=0)
-        lossHessian = jax.jacfwd(jax.jacfwd(total_learning_loss, argnums=0))(
-            theta_hat,
-            new_headings_all,
-            new_speeds,
-            new_intercepted,
-            new_pathHistories,
-            new_masks,
-            new_endpoints,
-            trueParams,
-        )
-        return jnp.linalg.inv(lossHessian) + 1e-5 * jnp.eye(lossHessian.shape[0])
-
-    p = ez_probability_fn(theta_hat, new_path, new_headings, speed, trueParams)
-
-    cov = p * loss_cov(True) + (1 - p) * loss_cov(False)
-    return -jnp.trace(cov)
-
-
 def optimize_next_low_priority_path(
     pursuerX1,
     pursuerX2,
@@ -1007,8 +1058,8 @@ def optimize_next_low_priority_path(
     trueParams,
     center,
     radius=3.0,
-    num_angles=40,
-    num_headings=40,
+    num_angles=1,
+    num_headings=1,
     speed=1.0,
     tmax=10.0,
     num_points=100,
@@ -1036,7 +1087,7 @@ def optimize_next_low_priority_path(
     heading_flat = heading_grid.ravel()
 
     scores = jax.vmap(
-        expected_grad_score,
+        maximize_loss,
         in_axes=(
             0,
             0,
@@ -1075,6 +1126,8 @@ def optimize_next_low_priority_path(
         endPoints,
         speeds,
     )
+    print("min scores", jnp.min(scores))
+    print("max score:", jnp.max(scores))
 
     best_idx = jnp.nanargmax(scores)
 
