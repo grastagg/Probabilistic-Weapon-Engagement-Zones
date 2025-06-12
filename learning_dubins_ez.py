@@ -607,6 +607,7 @@ def learn_ez(
     endTimes,
     trueParams,
     previousPursuerXList=None,
+    numStartHeadings=10,
 ):
     lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
     upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
@@ -614,13 +615,13 @@ def learn_ez(
         interceptedList, endPoints
     )
 
-    numStartHeadings = 10
     initialPursuerXList = []
     initialHeadings = np.linspace(
-        startHeading1, startHeading1 + 2 * np.pi, numStartHeadings
+        startHeading1, startHeading1 + 2 * np.pi, numStartHeadings, endpoint=False
     )
     # map initial headint to [_pi, pi]
     initialHeadings = np.mod(initialHeadings + np.pi, 2 * np.pi) - np.pi
+    print("initialHeadings", initialHeadings)
     for i in range(numStartHeadings):
         previousPursuerX = (
             previousPursuerXList[i] if previousPursuerXList is not None else None
@@ -684,6 +685,9 @@ def learn_ez(
     lossList = lossList[sorted_indices]
     pursuerXList = pursuerXList[sorted_indices]
     print("loss", lossList)
+    # only return ones with zero loss
+    # pursuerXList = pursuerXList[lossList == 0.0]
+    # lossList = lossList[lossList == 0.0]
     return pursuerXList, lossList
 
 
@@ -1134,21 +1138,23 @@ def inside_model_disagreement_score(
     new_headings = jnp.reshape(new_headings, (-1,))
 
     # Compute min EZ value for each parameter set
-    def min_rs(pX):
+    def in_rs(pX):
         rs = dubins_reachable_set_from_pursuerX(pX, new_path, trueParams)
-        return jnp.min(rs)
+        return rs <= 0.0
 
-    min_vals = jax.vmap(min_rs)(pursuerXList)  # (N,)
-    probs = min_vals < 0.0
+    probs = jax.vmap(in_rs)(pursuerXList)  # (N,)
+    # probs = rs_vals < 0.0
     # probs = jax.nn.sigmoid(-min_vals / epsilon)  # (N,), soft in/out decision
 
     # Pairwise disagreement: p_i * (1 - p_j) + p_j * (1 - p_i)
     def pairwise_disagree(i, j):
         pi = probs[i]
         pj = probs[j]
-        return pi * (1 - pj) + pj * (1 - pi)
+        # jax.debug.print("pi: {}, pj: {}", pi, pj)
+        return jnp.sum(pi != pj)
+        # return pi * (1 - pj) + pj * (1 - pi)
 
-    indices = jnp.arange(N)
+    # indices = jnp.arange(N)
     pairs = jnp.array([(i, j) for i in range(N) for j in range(i + 1, N)])
 
     def pair_score(pair):
@@ -1200,7 +1206,7 @@ def optimize_next_low_priority_path(
     heading_flat = heading_grid.ravel()
 
     scores = jax.vmap(
-        maximize_loss_multi,
+        inside_model_disagreement_score,
         in_axes=(
             0,
             0,
@@ -1295,6 +1301,18 @@ def plot_true_and_learned_pursuer(
     )
 
 
+def make_axes(numPlots):
+    # pick 1 or 2 rows
+    nrows = min(2, numPlots)
+    # compute how many columns you need
+    ncols = int(np.ceil(numPlots / nrows))
+    # always return a 2D array of Axes
+    fig, axes = plt.subplots(nrows, ncols, squeeze=False)
+    # flatten and discard any extra axes
+    axes = axes.flatten()[:numPlots]
+    return fig, axes
+
+
 def plot_all(
     startPositions,
     interceptedList,
@@ -1329,15 +1347,15 @@ def plot_all(
 
     numPlots = len(pursuerXList)
     # make 2 rows and ceil(numPlots/2) columns
-    # numPlots = 3
-    fig1, axes = plt.subplots(2, int(np.ceil(numPlots / 2)))
+    numPlots = 2
+    fig1, axes = make_axes(numPlots)
+
     for i in range(numPlots):
         # pick ax
-        ax = axes[i % 2, i // 2]
+        ax = axes[i]
 
         ax.set_xlim(-3.0, 3.0)
         ax.set_ylim(-3.0, 3.0)
-        plt.title("1")
         pursuerX = pursuerXList[i].squeeze()
         plot_low_priority_paths_with_ez(
             headings,
@@ -1411,8 +1429,10 @@ def main():
 
     numPoints = int(tmax / dt) + 1
 
+    numOptimizerStarts = 25
+
     interceptedList = []
-    numLowPriorityAgents = 25
+    numLowPriorityAgents = 15
     endPoints = []
     endTimes = []
     pathHistories = []
@@ -1430,8 +1450,11 @@ def main():
     plotEvery = 1
     pursuerParameterRMSE_history = []
     pursuerParameter_history = []
+    lossList_history = []
     pursuerXList = None
-    for i in range(numLowPriorityAgents):
+    singlePursuerX = False
+    i = 0
+    while i < numLowPriorityAgents and not singlePursuerX:
         print("iteration:", i)
         if i == 0:
             startPosition = jnp.array([-searchCircleRadius, 0.0001])
@@ -1487,6 +1510,7 @@ def main():
             jnp.array(endTimes),
             trueParams,
             pursuerXList,
+            numOptimizerStarts,
         )
         if i % plotEvery == 0:
             fig1 = plot_all(
@@ -1509,30 +1533,72 @@ def main():
             plt.close(fig1)
 
         plt.close("all")
-        pursuerX1 = pursuerXList[0]
-        rmse = np.sqrt(np.mean((trueParams - pursuerX1) ** 2))
-        pursuerParameterRMSE_history.append(rmse)
-        pursuerParameter_history.append(pursuerX1)
+        # pursuerX1 = pursuerXList[0]
+        # rmse = np.sqrt(np.mean((trueParams - pursuerX1) ** 2))
+        # pursuerParameterRMSE_history.append(rmse)
+        pursuerParameter_history.append(pursuerXList)
+        lossList_history.append(lossList)
+        i += 1
+        singlePursuerX = len(pursuerXList) == 1
+    print("collapsed to single pursuer with ", i, "agents")
     pursuerParameter_history = jnp.array(pursuerParameter_history)
+    lossList_history = jnp.array(lossList_history)
     fig, axes = plt.subplots(3, 2)
-    axes[0, 0].plot(pursuerParameter_history[:, 0])
     axes[0, 0].set_title("Pursuer X Position")
     axes[0, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[0], "r--")
-    axes[0, 1].plot(pursuerParameter_history[:, 1])
     axes[0, 1].set_title("Pursuer Y Position")
     axes[0, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[1], "r--")
-    axes[1, 0].plot(pursuerParameter_history[:, 2])
     axes[1, 0].set_title("Pursuer Heading")
     axes[1, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[2], "r--")
-    axes[1, 1].plot(pursuerParameter_history[:, 3])
     axes[1, 1].set_title("Pursuer Speed")
     axes[1, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[3], "r--")
-    axes[2, 0].plot(pursuerParameter_history[:, 4])
     axes[2, 0].set_title("Pursuer Turn Radius")
     axes[2, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[4], "r--")
-    axes[2, 1].plot(pursuerParameter_history[:, 5])
     axes[2, 1].set_title("Pursuer Range")
     axes[2, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[5], "r--")
+    for i in range(numOptimizerStarts):
+        c = lossList_history[:, i]
+        axes[0, 0].scatter(
+            range(numLowPriorityAgents),
+            pursuerParameter_history[:, i, 0],
+            c=c,
+            cmap="viridis_r",
+        )
+        axes[0, 1].scatter(
+            range(numLowPriorityAgents),
+            pursuerParameter_history[:, i, 1],
+            c=c,
+            cmap="viridis_r",
+        )
+        axes[1, 0].scatter(
+            range(numLowPriorityAgents),
+            pursuerParameter_history[:, i, 2],
+            c=c,
+            cmap="viridis_r",
+        )
+        axes[1, 1].scatter(
+            range(numLowPriorityAgents),
+            pursuerParameter_history[:, i, 3],
+            c=c,
+            cmap="viridis_r",
+        )
+        axes[2, 0].scatter(
+            range(numLowPriorityAgents),
+            pursuerParameter_history[:, i, 4],
+            c=c,
+            cmap="viridis_r",
+        )
+        axes[2, 1].scatter(
+            range(numLowPriorityAgents),
+            pursuerParameter_history[:, i, 5],
+            c=c,
+            cmap="viridis_r",
+        )
+    # axes[0, 1].plot(pursuerParameter_history[:, 1])
+    # axes[1, 0].plot(pursuerParameter_history[:, 2])
+    # axes[1, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[3], "r--")
+    # axes[2, 0].plot(pursuerParameter_history[:, 4])
+    # axes[2, 1].plot(pursuerParameter_history[:, 5])
 
 
 if __name__ == "__main__":
