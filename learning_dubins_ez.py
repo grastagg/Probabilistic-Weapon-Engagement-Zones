@@ -12,8 +12,7 @@ import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
 
-positionAndHeadingOnly = False
-
+positionAndHeadingOnly = True
 
 np.random.seed(326)  # for reproducibility
 
@@ -1183,6 +1182,7 @@ def optimize_next_low_priority_path(
     tmax=10.0,
     num_points=100,
 ):
+    print("num pursuerXList:", pursuerXList.shape[0])
     randomPath = False
     if randomPath:
         best_angle = np.random.uniform(-np.pi, np.pi)
@@ -1429,7 +1429,7 @@ def main():
 
     numPoints = int(tmax / dt) + 1
 
-    numOptimizerStarts = 25
+    numOptimizerStarts = 50
 
     interceptedList = []
     numLowPriorityAgents = 15
@@ -1453,6 +1453,7 @@ def main():
     lossList_history = []
     pursuerXList = None
     singlePursuerX = False
+    pursuerXListZeroLoss = None
     i = 0
     while i < numLowPriorityAgents and not singlePursuerX:
         print("iteration:", i)
@@ -1460,8 +1461,13 @@ def main():
             startPosition = jnp.array([-searchCircleRadius, 0.0001])
             heading = 0.0001
         else:
+            if pursuerXList is not None:
+                pursuerXListZeroLoss = pursuerXList[lossList == 0.0]
+            else:
+                pursuerXListZeroLoss = None
             startPosition, heading = optimize_next_low_priority_path(
-                pursuerXList,
+                # pursuerXList,
+                pursuerXListZeroLoss,
                 jnp.array(headings),
                 jnp.array(speeds),
                 jnp.array(interceptedList),
@@ -1543,62 +1549,86 @@ def main():
     print("collapsed to single pursuer with ", i, "agents")
     pursuerParameter_history = jnp.array(pursuerParameter_history)
     lossList_history = jnp.array(lossList_history)
-    fig, axes = plt.subplots(3, 2)
-    axes[0, 0].set_title("Pursuer X Position")
-    axes[0, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[0], "r--")
-    axes[0, 1].set_title("Pursuer Y Position")
-    axes[0, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[1], "r--")
-    axes[1, 0].set_title("Pursuer Heading")
-    axes[1, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[2], "r--")
-    axes[1, 1].set_title("Pursuer Speed")
-    axes[1, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[3], "r--")
-    axes[2, 0].set_title("Pursuer Turn Radius")
-    axes[2, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[4], "r--")
-    axes[2, 1].set_title("Pursuer Range")
-    axes[2, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[5], "r--")
-    for i in range(numOptimizerStarts):
-        c = lossList_history[:, i]
-        axes[0, 0].scatter(
-            range(numLowPriorityAgents),
-            pursuerParameter_history[:, i, 0],
-            c=c,
-            cmap="viridis_r",
-        )
-        axes[0, 1].scatter(
-            range(numLowPriorityAgents),
-            pursuerParameter_history[:, i, 1],
-            c=c,
-            cmap="viridis_r",
-        )
-        axes[1, 0].scatter(
-            range(numLowPriorityAgents),
-            pursuerParameter_history[:, i, 2],
-            c=c,
-            cmap="viridis_r",
-        )
-        axes[1, 1].scatter(
-            range(numLowPriorityAgents),
-            pursuerParameter_history[:, i, 3],
-            c=c,
-            cmap="viridis_r",
-        )
-        axes[2, 0].scatter(
-            range(numLowPriorityAgents),
-            pursuerParameter_history[:, i, 4],
-            c=c,
-            cmap="viridis_r",
-        )
-        axes[2, 1].scatter(
-            range(numLowPriorityAgents),
-            pursuerParameter_history[:, i, 5],
-            c=c,
-            cmap="viridis_r",
-        )
-    # axes[0, 1].plot(pursuerParameter_history[:, 1])
-    # axes[1, 0].plot(pursuerParameter_history[:, 2])
-    # axes[1, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[3], "r--")
-    # axes[2, 0].plot(pursuerParameter_history[:, 4])
-    # axes[2, 1].plot(pursuerParameter_history[:, 5])
+    if not positionAndHeadingOnly:
+        fig, axes = plt.subplots(3, 2)
+        axes[0, 0].set_title("Pursuer X Position")
+        axes[0, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[0], "r--")
+        axes[0, 1].set_title("Pursuer Y Position")
+        axes[0, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[1], "r--")
+        axes[1, 0].set_title("Pursuer Heading")
+        axes[1, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[2], "r--")
+        axes[1, 1].set_title("Pursuer Speed")
+        axes[1, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[3], "r--")
+        axes[2, 0].set_title("Pursuer Turn Radius")
+        axes[2, 0].plot(np.ones(len(pursuerParameter_history)) * trueParams[4], "r--")
+        axes[2, 1].set_title("Pursuer Range")
+        axes[2, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[5], "r--")
+        for i in range(numOptimizerStarts):
+            c = lossList_history[:, i]
+            axes[0, 0].scatter(
+                range(numLowPriorityAgents),
+                pursuerParameter_history[:, i, 0],
+                c=c,
+                cmap="viridis_r",
+            )
+            axes[0, 1].scatter(
+                range(numLowPriorityAgents),
+                pursuerParameter_history[:, i, 1],
+                c=c,
+                cmap="viridis_r",
+            )
+            axes[1, 0].scatter(
+                range(numLowPriorityAgents),
+                pursuerParameter_history[:, i, 2],
+                c=c,
+                cmap="viridis_r",
+            )
+            axes[1, 1].scatter(
+                range(numLowPriorityAgents),
+                pursuerParameter_history[:, i, 3],
+                c=c,
+                cmap="viridis_r",
+            )
+            axes[2, 0].scatter(
+                range(numLowPriorityAgents),
+                pursuerParameter_history[:, i, 4],
+                c=c,
+                cmap="viridis_r",
+            )
+            axes[2, 1].scatter(
+                range(numLowPriorityAgents),
+                pursuerParameter_history[:, i, 5],
+                c=c,
+                cmap="viridis_r",
+            )
+    else:
+        fig, axes = plt.subplots(3)
+        axes[0].set_title("Pursuer X Position")
+        axes[0].plot(np.ones(len(pursuerParameter_history)) * trueParams[0], "r--")
+        axes[1].set_title("Pursuer Y Position")
+        axes[1].plot(np.ones(len(pursuerParameter_history)) * trueParams[1], "r--")
+        axes[2].set_title("Pursuer Heading")
+        axes[2].plot(np.ones(len(pursuerParameter_history)) * trueParams[2], "r--")
+        for i in range(numOptimizerStarts):
+            c = lossList_history[:, i]
+            axes[0].scatter(
+                range(numLowPriorityAgents),
+                pursuerParameter_history[:, i, 0],
+                c=c,
+                cmap="viridis_r",
+            )
+            axes[1].scatter(
+                range(numLowPriorityAgents),
+                pursuerParameter_history[:, i, 1],
+                c=c,
+                cmap="viridis_r",
+            )
+            axes[2].scatter(
+                range(numLowPriorityAgents),
+                pursuerParameter_history[:, i, 2],
+                c=c,
+                cmap="viridis_r",
+            )
 
 
 if __name__ == "__main__":
