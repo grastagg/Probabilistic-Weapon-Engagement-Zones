@@ -12,7 +12,7 @@ import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
 
-positionAndHeadingOnly = True
+positionAndHeadingOnly = False
 
 np.random.seed(326)  # for reproducibility
 
@@ -155,12 +155,6 @@ def find_interception_point_and_time(
         pathHistory[firstTrueIndex] + speedRatio * pursuerRange * direction
     )
     interceptionTime = t[firstTrueIndex] + pursuerRange / pursuerSpeed
-    # print(
-    #     "test agent will be intercepted at",
-    #     interceptionPoint,
-    #     "at time",
-    #     interceptionTime,
-    # )
     mask = t < interceptionTime
     return (intercepted, interceptionPoint, interceptionTime, mask)
 
@@ -390,14 +384,6 @@ def learning_loss_function_single(
     )
     # return rsEnd**2
     # return lossRS
-    # jax.debug.print(
-    #     "intercepted: {}, ez_min: {}, rsEnd: {}, lossEZ: {}, lossRS: {}",
-    #     intercepted,
-    #     jnp.min(ez),
-    #     rsEnd,
-    #     lossEZ,
-    #     lossRS,
-    # )
     return lossEZ + lossRS
 
 
@@ -582,7 +568,7 @@ def run_optimization_hueristic(
     optProb.addObj("loss")
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
-    opt.options["max_iter"] = 100
+    opt.options["max_iter"] = 50
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
@@ -620,7 +606,6 @@ def learn_ez(
     )
     # map initial headint to [_pi, pi]
     initialHeadings = np.mod(initialHeadings + np.pi, 2 * np.pi) - np.pi
-    print("initialHeadings", initialHeadings)
     for i in range(numStartHeadings):
         previousPursuerX = (
             previousPursuerXList[i] if previousPursuerXList is not None else None
@@ -1143,15 +1128,12 @@ def inside_model_disagreement_score(
 
     probs = jax.vmap(in_rs)(pursuerXList)  # (N,)
     # probs = rs_vals < 0.0
-    # probs = jax.nn.sigmoid(-min_vals / epsilon)  # (N,), soft in/out decision
 
     # Pairwise disagreement: p_i * (1 - p_j) + p_j * (1 - p_i)
     def pairwise_disagree(i, j):
         pi = probs[i]
         pj = probs[j]
-        # jax.debug.print("pi: {}, pj: {}", pi, pj)
         return jnp.sum(pi != pj)
-        # return pi * (1 - pj) + pj * (1 - pi)
 
     # indices = jnp.arange(N)
     pairs = jnp.array([(i, j) for i in range(N) for j in range(i + 1, N)])
@@ -1182,7 +1164,6 @@ def optimize_next_low_priority_path(
     tmax=10.0,
     num_points=100,
 ):
-    print("num pursuerXList:", pursuerXList.shape[0])
     randomPath = False
     if randomPath:
         best_angle = np.random.uniform(-np.pi, np.pi)
@@ -1243,8 +1224,6 @@ def optimize_next_low_priority_path(
         endPoints,
         speeds,
     )
-    print("min scores", jnp.min(scores))
-    print("max score:", jnp.max(scores))
 
     best_idx = jnp.nanargmax(scores)
 
@@ -1253,7 +1232,6 @@ def optimize_next_low_priority_path(
     best_start_pos = center + radius * jnp.array(
         [jnp.cos(best_angle), jnp.sin(best_angle)]
     )
-    print("best location:", best_start_pos, "best heading:", best_heading)
 
     return best_start_pos, best_heading
 
@@ -1347,7 +1325,7 @@ def plot_all(
 
     numPlots = len(pursuerXList)
     # make 2 rows and ceil(numPlots/2) columns
-    numPlots = 2
+    numPlots = 10
     fig1, axes = make_axes(numPlots)
 
     for i in range(numPlots):
@@ -1429,10 +1407,10 @@ def main():
 
     numPoints = int(tmax / dt) + 1
 
-    numOptimizerStarts = 50
+    numOptimizerStarts = 10
 
     interceptedList = []
-    numLowPriorityAgents = 15
+    numLowPriorityAgents = 17
     endPoints = []
     endTimes = []
     pathHistories = []
@@ -1546,7 +1524,6 @@ def main():
         lossList_history.append(lossList)
         i += 1
         singlePursuerX = len(pursuerXList) == 1
-    print("collapsed to single pursuer with ", i, "agents")
     pursuerParameter_history = jnp.array(pursuerParameter_history)
     lossList_history = jnp.array(lossList_history)
     if not positionAndHeadingOnly:
@@ -1564,42 +1541,36 @@ def main():
         axes[2, 1].set_title("Pursuer Range")
         axes[2, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[5], "r--")
         for i in range(numOptimizerStarts):
-            c = lossList_history[:, i]
+            mask = lossList_history[:, i] == 0.0
             axes[0, 0].scatter(
-                range(numLowPriorityAgents),
-                pursuerParameter_history[:, i, 0],
-                c=c,
-                cmap="viridis_r",
+                np.arange(numLowPriorityAgents)[mask],
+                pursuerParameter_history[:, i, 0][mask],
+                c="b",
             )
             axes[0, 1].scatter(
-                range(numLowPriorityAgents),
-                pursuerParameter_history[:, i, 1],
-                c=c,
-                cmap="viridis_r",
+                np.arange(numLowPriorityAgents)[mask],
+                pursuerParameter_history[:, i, 1][mask],
+                c="b",
             )
             axes[1, 0].scatter(
-                range(numLowPriorityAgents),
-                pursuerParameter_history[:, i, 2],
-                c=c,
-                cmap="viridis_r",
+                np.arange(numLowPriorityAgents)[mask],
+                pursuerParameter_history[:, i, 2][mask],
+                c="b",
             )
             axes[1, 1].scatter(
-                range(numLowPriorityAgents),
-                pursuerParameter_history[:, i, 3],
-                c=c,
-                cmap="viridis_r",
+                np.arange(numLowPriorityAgents)[mask],
+                pursuerParameter_history[:, i, 3][mask],
+                c="b",
             )
             axes[2, 0].scatter(
-                range(numLowPriorityAgents),
-                pursuerParameter_history[:, i, 4],
-                c=c,
-                cmap="viridis_r",
+                np.arange(numLowPriorityAgents)[mask],
+                pursuerParameter_history[:, i, 4][mask],
+                c="b",
             )
             axes[2, 1].scatter(
-                range(numLowPriorityAgents),
-                pursuerParameter_history[:, i, 5],
-                c=c,
-                cmap="viridis_r",
+                np.arange(numLowPriorityAgents)[mask],
+                pursuerParameter_history[:, i, 5][mask],
+                c="b",
             )
     else:
         fig, axes = plt.subplots(3)
@@ -1610,24 +1581,22 @@ def main():
         axes[2].set_title("Pursuer Heading")
         axes[2].plot(np.ones(len(pursuerParameter_history)) * trueParams[2], "r--")
         for i in range(numOptimizerStarts):
+            mask = lossList_history[:, i] == 0.0
             c = lossList_history[:, i]
             axes[0].scatter(
-                range(numLowPriorityAgents),
-                pursuerParameter_history[:, i, 0],
-                c=c,
-                cmap="viridis_r",
+                np.arange(numLowPriorityAgents)[mask],
+                pursuerParameter_history[:, i, 0][mask],
+                c="b",
             )
             axes[1].scatter(
-                range(numLowPriorityAgents),
-                pursuerParameter_history[:, i, 1],
-                c=c,
-                cmap="viridis_r",
+                np.arange(numLowPriorityAgents)[mask],
+                pursuerParameter_history[:, i, 1][mask],
+                c="b",
             )
             axes[2].scatter(
-                range(numLowPriorityAgents),
-                pursuerParameter_history[:, i, 2],
-                c=c,
-                cmap="viridis_r",
+                np.arange(numLowPriorityAgents)[mask],
+                pursuerParameter_history[:, i, 2][mask],
+                c="b",
             )
 
 
