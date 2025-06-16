@@ -1407,7 +1407,7 @@ def main():
 
     numPoints = int(tmax / dt) + 1
 
-    numOptimizerStarts = 10
+    numOptimizerStarts = 50
 
     interceptedList = []
     numLowPriorityAgents = 17
