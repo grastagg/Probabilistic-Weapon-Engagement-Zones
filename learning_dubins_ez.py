@@ -13,7 +13,7 @@ import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
 
-positionAndHeadingOnly = False
+positionAndHeadingOnly = True
 
 np.random.seed(326)  # for reproducibility
 
@@ -624,15 +624,10 @@ def find_opt_starting_pursuerX(
     initialHeadings = np.linspace(
         startHeading1, startHeading1 + 2 * np.pi, numStartHeadings, endpoint=False
     )
-    # map initial headint to [_pi, pi]
     initialHeadings = np.mod(initialHeadings + np.pi, 2 * np.pi) - np.pi
+
     for i in range(numStartHeadings):
-        previousPursuerX = (
-            previousPursuerXList[i] if previousPursuerXList is not None else None
-        )
-        if positionAndHeadingOnly:
-            lowerLimit = lowerLimit[:3]
-            upperLimit = upperLimit[:3]
+        previousPursuerX = previousPursuerXList[i]
 
         if positionAndHeadingOnly:
             intialPursuerX = jnp.array(
@@ -643,16 +638,10 @@ def find_opt_starting_pursuerX(
                 ]
             )
         else:
-            if previousPursuerX is not None:
-                initialPosition = startPosition
-                initialSpeed = previousPursuerX[3]
-                initialTurnRadius = previousPursuerX[4]
-                initialRange = previousPursuerX[5]
-            else:
-                initialPosition = startPosition
-                initialSpeed = (lowerLimit[3] + upperLimit[3]) / 2.0
-                initialTurnRadius = (lowerLimit[4] + upperLimit[4]) / 2.0
-                initialRange = (lowerLimit[5] + upperLimit[5]) / 2.0
+            initialPosition = startPosition
+            initialSpeed = previousPursuerX[3]
+            initialTurnRadius = previousPursuerX[4]
+            initialRange = previousPursuerX[5]
             intialPursuerX = jnp.array(
                 [
                     initialPosition[0],
@@ -683,6 +672,9 @@ def learn_ez(
     upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
     pursuerXList = []
     lossList = []
+    if positionAndHeadingOnly:
+        lowerLimit = lowerLimit[:3]
+        upperLimit = upperLimit[:3]
     if previousPursuerXList is None:
         initialPursuerXList = latin_hypercube_uniform(
             lowerLimit, upperLimit, numStartHeadings
