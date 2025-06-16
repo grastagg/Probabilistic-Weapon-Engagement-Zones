@@ -6,6 +6,7 @@ from pyoptsparse import Optimization, OPT, IPOPT
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
+from pyDOE import lhs  # or pyDOE2
 
 import dubinsEZ
 import dubinsPEZ
@@ -582,20 +583,39 @@ def run_optimization_hueristic(
     return sol
 
 
-def learn_ez(
-    headings,
-    speeds,
+def latin_hypercube_uniform(lowerLimit, upperLimit, numSamples):
+    """
+    Perform Latin Hypercube Sampling between lower and upper limits (uniform).
+
+    Args:
+        lowerLimit: array-like, shape (D,)
+        upperLimit: array-like, shape (D,)
+        numSamples: int, number of samples
+
+    Returns:
+        samples: jnp.ndarray of shape (numSamples, D)
+    """
+    lowerLimit = np.array(lowerLimit)
+    upperLimit = np.array(upperLimit)
+    dim = len(lowerLimit)
+
+    # LHS in [0,1]^d
+    lhs_unit = lhs(dim, samples=numSamples)
+
+    # Scale to [lower, upper]
+    lhs_scaled = lowerLimit + lhs_unit * (upperLimit - lowerLimit)
+
+    return jnp.array(lhs_scaled)
+
+
+def find_opt_starting_pursuerX(
     interceptedList,
-    pathHistories,
-    pathMasks,
     endPoints,
-    endTimes,
-    trueParams,
-    previousPursuerXList=None,
+    previousPursuerXList,
+    lowerLimit,
+    upperLimit,
     numStartHeadings=10,
 ):
-    lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
-    upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
     startPosition, startHeading1, startHeading2 = find_initial_position_and_heading(
         interceptedList, endPoints
     )
@@ -644,8 +664,38 @@ def learn_ez(
                 ]
             )
         initialPursuerXList.append(intialPursuerX)
+    return jnp.array(initialPursuerXList)
+
+
+def learn_ez(
+    headings,
+    speeds,
+    interceptedList,
+    pathHistories,
+    pathMasks,
+    endPoints,
+    endTimes,
+    trueParams,
+    previousPursuerXList=None,
+    numStartHeadings=10,
+):
+    lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
+    upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
     pursuerXList = []
     lossList = []
+    if previousPursuerXList is None:
+        initialPursuerXList = latin_hypercube_uniform(
+            lowerLimit, upperLimit, numStartHeadings
+        )
+    else:
+        initialPursuerXList = find_opt_starting_pursuerX(
+            interceptedList,
+            endPoints,
+            previousPursuerXList,
+            lowerLimit,
+            upperLimit,
+            numStartHeadings,
+        )
     for i in range(len(initialPursuerXList)):
         sol = run_optimization_hueristic(
             headings,
