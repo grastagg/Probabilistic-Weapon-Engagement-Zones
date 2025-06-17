@@ -1,4 +1,5 @@
 import re
+import time
 import jax
 import getpass
 from jax._src.sharding_impls import PositionalSharding
@@ -13,7 +14,7 @@ import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
 
-positionAndHeadingOnly = True
+positionAndHeadingOnly = False
 
 np.random.seed(326)  # for reproducibility
 
@@ -388,10 +389,62 @@ def learning_loss_function_single(
     return lossEZ + lossRS
 
 
+@jax.jit
+def quantification_loss_function_single(
+    pursuerX,
+    heading,
+    speed,
+    intercepted,
+    pathHistory,
+    pathMask,
+    interceptedPoint,
+    trueParams,
+):
+    headings = heading * jnp.ones(pathHistory.shape[0])
+    ez = dubinsEZ_from_pursuerX(
+        pursuerX,
+        pathHistory,
+        headings,
+        speed,
+        trueParams,
+    )  # (T,)
+    rsEnd = dubins_reachable_set_from_pursuerX(
+        pursuerX,
+        jnp.array([interceptedPoint]),
+        trueParams,
+    )[0]
+    rsEnd = jnp.where(jnp.isinf(rsEnd), 1000.0, rsEnd)
+
+    interceptedLossEZ = activation(jnp.min(ez))  # loss if intercepted
+    survivedLossEZ = activation(-jnp.min(ez))  # loss if survived
+    lossEZ = jax.lax.cond(
+        intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
+    )
+    interceptedLossRS = jax.nn.relu(rsEnd)  # loss if intercepted in RS
+    interceptedLossRS = jax.nn.relu(rsEnd) + 0.1 * jax.nn.relu(
+        -rsEnd
+    )  # loss if intercepted in RS
+
+    survivedLossRS = 0.0  # loss if survived in RS
+    # survivedLossRS = jax.nn.relu(-jnp.min(rsAll))  # loss if survived in RS
+    lossRS = jax.lax.cond(
+        intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
+    )
+    # return rsEnd**2
+    # return lossRS
+    return lossEZ + lossRS
+
+
 batched_loss = jax.jit(
     jax.vmap(
         learning_loss_function_single,
         in_axes=(None, 0, 0, 0, 0, 0, 0, None),
+    )
+)
+
+batched_quatification_loss = jax.jit(
+    jax.vmap(
+        quantification_loss_function_single, in_axes=(None, 0, 0, 0, 0, 0, 0, None)
     )
 )
 
@@ -423,7 +476,8 @@ def total_learning_loss(
     return jnp.sum(losses) / len(losses)
 
 
-def total_learning_log_loss(
+@jax.jit
+def total_quantification_loss(
     pursuerX,
     headings,
     speeds,
@@ -433,7 +487,8 @@ def total_learning_log_loss(
     interceptedPoints,
     trueParams,
 ):
-    losses = batched_log_loss(
+    # shape (N,)
+    losses = batched_quatification_loss(
         pursuerX,
         headings,
         speeds,
@@ -443,7 +498,9 @@ def total_learning_log_loss(
         interceptedPoints,
         trueParams,
     )
-    return jnp.sum(losses)
+
+    # total loss = sum over agents
+    return jnp.sum(losses) / len(losses)
 
 
 batched_loss_multiple_pursuerX = jax.jit(
@@ -452,7 +509,6 @@ batched_loss_multiple_pursuerX = jax.jit(
 
 
 dTotalLossDX = jax.jit(jax.jacfwd(total_learning_loss, argnums=0))
-dTotalLogLossDX = jax.jit(jax.jacfwd(total_learning_log_loss, argnums=0))
 
 
 def centroid_and_principal_axis(points):
@@ -579,8 +635,27 @@ def run_optimization_hueristic(
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
-    print("Ran optimization hueristic...", sol.xStar["pursuerX"], " loss:", sol.fStar)
-    return sol
+    pursuerX = sol.xStar["pursuerX"]
+    quantificationLoss = total_quantification_loss(
+        pursuerX,
+        headings,
+        speeds,
+        interceptedList,
+        pathHistories,
+        pathMasks,
+        endPoints,
+        trueParams,
+    )
+    loss = sol.fStar
+    print(
+        "Ran optimization hueristic...",
+        sol.xStar["pursuerX"],
+        " loss:",
+        sol.fStar,
+        "quantification loss",
+        quantificationLoss,
+    )
+    return pursuerX, loss, quantificationLoss
 
 
 def latin_hypercube_uniform(lowerLimit, upperLimit, numSamples):
@@ -628,6 +703,9 @@ def find_opt_starting_pursuerX(
 
     for i in range(numStartHeadings):
         previousPursuerX = previousPursuerXList[i]
+        if positionAndHeadingOnly:
+            lowerLimit = lowerLimit[:3]
+            upperLimit = upperLimit[:3]
 
         if positionAndHeadingOnly:
             intialPursuerX = jnp.array(
@@ -668,10 +746,13 @@ def learn_ez(
     previousPursuerXList=None,
     numStartHeadings=10,
 ):
+    jax.config.update("jax_platform_name", "cpu")
+    start = time.time()
     lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
     upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
     pursuerXList = []
     lossList = []
+    quantificationLossList = []
     if positionAndHeadingOnly:
         lowerLimit = lowerLimit[:3]
         upperLimit = upperLimit[:3]
@@ -689,7 +770,7 @@ def learn_ez(
             numStartHeadings,
         )
     for i in range(len(initialPursuerXList)):
-        sol = run_optimization_hueristic(
+        pursuerX, loss, quantificationLoss = run_optimization_hueristic(
             headings,
             speeds,
             interceptedList,
@@ -702,19 +783,38 @@ def learn_ez(
             upperLimit,
             trueParams,
         )
-        pursuerXList.append(sol.xStar["pursuerX"])
-        lossList.append(sol.fStar)
+        pursuerXList.append(pursuerX)
+        lossList.append(loss)
+        quantificationLossList.append(quantificationLoss)
 
     pursuerXList = jnp.array(pursuerXList).squeeze()
     lossList = jnp.array(lossList).squeeze()
-    sorted_indices = jnp.argsort(lossList)
+    quantificationLossList = jnp.array(quantificationLossList).squeeze()
+
+    # sorted_indices = jnp.argsort(lossList)
+    sorted_indices = jnp.argsort(quantificationLossList)
     lossList = lossList[sorted_indices]
     pursuerXList = pursuerXList[sorted_indices]
+    quantificationLossList = quantificationLossList[sorted_indices]
+    numZero = np.sum(lossList == 0.0)
+    ranks = np.linspace(0, 1, numZero)
+    rankList = np.zeros_like(lossList)
+    countZero = 0
+    for i in range(len(lossList)):
+        if lossList[i] > 0.0:
+            rankList[i] = 1.0
+        else:
+            rankList[i] = ranks[countZero]
+            countZero += 1
+    quantificationLossList = rankList
+
     print("loss", lossList)
+    print("quantification loss", quantificationLossList)
     # only return ones with zero loss
     # pursuerXList = pursuerXList[lossList == 0.0]
     # lossList = lossList[lossList == 0.0]
-    return pursuerXList, lossList
+    print("time to learn ez", time.time() - start)
+    return pursuerXList, lossList, quantificationLossList
 
 
 def uniform_circular_entry_points_with_heading_noise(
@@ -908,7 +1008,7 @@ def maximize_loss(
     center,
     radius,
     tmax=10.0,
-    num_points=100,
+    num_points=1000,
     headings=None,
     pathHistories=None,
     pathMasks=None,
@@ -1206,6 +1306,9 @@ def optimize_next_low_priority_path(
     tmax=10.0,
     num_points=100,
 ):
+    print("num particles", len(pursuerXList))
+    jax.config.update("jax_platform_name", "gpu")
+    start = time.time()
     randomPath = False
     if randomPath:
         best_angle = np.random.uniform(-np.pi, np.pi)
@@ -1275,6 +1378,7 @@ def optimize_next_low_priority_path(
         [jnp.cos(best_angle), jnp.sin(best_angle)]
     )
 
+    print("time to optimize next low-priority path:", time.time() - start)
     return best_start_pos, best_heading
 
 
@@ -1452,7 +1556,7 @@ def main():
     numOptimizerStarts = 50
 
     interceptedList = []
-    numLowPriorityAgents = 17
+    numLowPriorityAgents = 16
     endPoints = []
     endTimes = []
     pathHistories = []
@@ -1471,6 +1575,7 @@ def main():
     pursuerParameterRMSE_history = []
     pursuerParameter_history = []
     lossList_history = []
+    quantificationLossList_history = []
     pursuerXList = None
     singlePursuerX = False
     pursuerXListZeroLoss = None
@@ -1526,7 +1631,7 @@ def main():
         endTimes.append(endTime)
         pathHistories.append(pathHistory)
         pathMasks.append(pathMask)
-        (pursuerXList, lossList) = learn_ez(
+        (pursuerXList, lossList, guantificationLossList) = learn_ez(
             jnp.array(headings),
             jnp.array(speeds),
             jnp.array(interceptedList),
@@ -1559,15 +1664,14 @@ def main():
             plt.close(fig1)
 
         plt.close("all")
-        # pursuerX1 = pursuerXList[0]
-        # rmse = np.sqrt(np.mean((trueParams - pursuerX1) ** 2))
-        # pursuerParameterRMSE_history.append(rmse)
         pursuerParameter_history.append(pursuerXList)
         lossList_history.append(lossList)
+        quantificationLossList_history.append(guantificationLossList)
         i += 1
         singlePursuerX = len(pursuerXList) == 1
     pursuerParameter_history = jnp.array(pursuerParameter_history)
     lossList_history = jnp.array(lossList_history)
+    quantificationLossList_history = jnp.array(quantificationLossList_history)
     if not positionAndHeadingOnly:
         fig, axes = plt.subplots(3, 2)
         axes[0, 0].set_title("Pursuer X Position")
@@ -1584,35 +1688,51 @@ def main():
         axes[2, 1].plot(np.ones(len(pursuerParameter_history)) * trueParams[5], "r--")
         for i in range(numOptimizerStarts):
             mask = lossList_history[:, i] == 0.0
+            c = quantificationLossList_history[:, i][mask]
+            max = 1.0
+            c = jnp.clip(c, 0.0, max)  # Ensure c is in [0, 1] for color mapping
+            print("c", c)
             axes[0, 0].scatter(
                 np.arange(numLowPriorityAgents)[mask],
                 pursuerParameter_history[:, i, 0][mask],
-                c="b",
+                c=c,
+                vmin=0.0,
+                vmax=max,
             )
             axes[0, 1].scatter(
                 np.arange(numLowPriorityAgents)[mask],
                 pursuerParameter_history[:, i, 1][mask],
-                c="b",
+                c=c,
+                vmin=0.0,
+                vmax=max,
             )
             axes[1, 0].scatter(
                 np.arange(numLowPriorityAgents)[mask],
                 pursuerParameter_history[:, i, 2][mask],
-                c="b",
+                c=c,
+                vmin=0.0,
+                vmax=max,
             )
             axes[1, 1].scatter(
                 np.arange(numLowPriorityAgents)[mask],
                 pursuerParameter_history[:, i, 3][mask],
-                c="b",
+                c=c,
+                vmin=0.0,
+                vmax=max,
             )
             axes[2, 0].scatter(
                 np.arange(numLowPriorityAgents)[mask],
                 pursuerParameter_history[:, i, 4][mask],
-                c="b",
+                c=c,
+                vmin=0.0,
+                vmax=max,
             )
             axes[2, 1].scatter(
                 np.arange(numLowPriorityAgents)[mask],
                 pursuerParameter_history[:, i, 5][mask],
-                c="b",
+                c=c,
+                vmin=0.0,
+                vmax=max,
             )
     else:
         fig, axes = plt.subplots(3)
@@ -1624,21 +1744,21 @@ def main():
         axes[2].plot(np.ones(len(pursuerParameter_history)) * trueParams[2], "r--")
         for i in range(numOptimizerStarts):
             mask = lossList_history[:, i] == 0.0
-            c = lossList_history[:, i]
+            c = quantificationLossList_history[:, i][mask]
             axes[0].scatter(
                 np.arange(numLowPriorityAgents)[mask],
                 pursuerParameter_history[:, i, 0][mask],
-                c="b",
+                c=c,
             )
             axes[1].scatter(
                 np.arange(numLowPriorityAgents)[mask],
                 pursuerParameter_history[:, i, 1][mask],
-                c="b",
+                c=c,
             )
             axes[2].scatter(
                 np.arange(numLowPriorityAgents)[mask],
                 pursuerParameter_history[:, i, 2][mask],
-                c="b",
+                c=c,
             )
 
 
