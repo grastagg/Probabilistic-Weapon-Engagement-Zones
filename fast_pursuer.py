@@ -82,7 +82,7 @@ def inEngagementZone(
 
 
 def plotMahalanobisDistance(
-    pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True, cax=None
+    pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=False, cax=None
 ):
     # Define the grid
     x = np.linspace(-2, 2, 100)
@@ -105,7 +105,12 @@ def plotMahalanobisDistance(
 
     # Plot filled contours for Mahalanobis distance with darker red shades
     c = ax.contourf(
-        X, Y, malhalanobisDistance, levels=[0, 1, 2, 3], colors=colors, alpha=0.75
+        X,
+        Y,
+        malhalanobisDistance,
+        levels=[0, 1, 2, 3],
+        colors=colors,
+        alpha=0.75,
     )
     # c = ax.pcolormesh(X, Y, malhalanobisDistance)
 
@@ -170,8 +175,17 @@ def plotEngagementZone(
     # c = plt.Circle([0,0], pursuerRange+pursuerCaptureRange, fill=False)
     # ax.add_artist(c)
     # plt.contour(X, Y, engagementZonePlot, levels=[0, 1], colors=['red'])
-    ax.contour(X, Y, engagementZonePlot.reshape((50, 50)), levels=[0], colors=["red"])
+    ax.contour(
+        X,
+        Y,
+        engagementZonePlot.reshape((50, 50)),
+        levels=[0],
+        colors=["red"],
+        linewidths=2,
+    )
     ax.scatter(pursuerPosition[0], pursuerPosition[1], color="red")
+    c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
+    ax.add_artist(c)
 
     return
 
@@ -574,7 +588,6 @@ def plotProbablisticEngagementZone(
     y = jnp.linspace(-2, 2, 50)
     X, Y = jnp.meshgrid(x, y)
     agentPositions = jnp.vstack([X.ravel(), Y.ravel()]).T
-    print(agentPositions.shape)
     agentHeadings = jnp.ones(50 * 50) * agentHeading
 
     # Compute Jacobian of engagement zone function
@@ -611,16 +624,16 @@ def plotProbablisticEngagementZone(
     engagementZonePlot_reshaped = engagementZonePlot_np.reshape(X.shape)
 
     # Plotting
-    c = ax.contour(X, Y, engagementZonePlot_reshaped, levels=np.linspace(0.1, 1, 10))
+    c = ax.contour(
+        X, Y, engagementZonePlot_reshaped, levels=np.linspace(0.1, 1, 10), linewidths=2
+    )
     ax.clabel(c, inline=True, fontsize=22)
-    ax.tick_params(axis="x", labelsize=26)
-    ax.tick_params(axis="y", labelsize=26)
 
     # Add circle representing pursuer's range
     # for i in range(3):
     #     c = plt.Circle(pursuerPosition, pursuerRange + i*np.sqrt(pursuerRangeVar) + pursuerCaptureRange, fill=False, color='r', linestyle='--')
     #     ax.add_artist(c)
-    c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
+    # c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
     ax.add_artist(c)
 
     return engagementZonePlot_reshaped
@@ -697,11 +710,12 @@ def plotMCProbablisticEngagementZone(
     # c = ax.pcolormesh(X, Y, engagementZonePlot)
     # c = plt.Circle(pursuerPosition, pursuerRange+pursuerCaptureRange, fill=False)
     # ax.add_artist(c)
-    c = ax.contour(X, Y, engagementZonePlot, levels=np.linspace(0.1, 1, 10))
+    c = ax.contour(
+        X, Y, engagementZonePlot, levels=np.linspace(0.1, 1, 10), linewidths=2
+    )
     ax.clabel(c, inline=True, fontsize=22)
     ax.tick_params(axis="x", labelsize=26)
     ax.tick_params(axis="y", labelsize=26)
-    c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
     ax.add_artist(c)
 
     return engagementZonePlot
@@ -757,11 +771,11 @@ def monte_carlo_probalistic_engagment_zone(
 def main():
     pursuerRange = 1.0
     pursuerRangeVar = 0.1
-    pursuerCaptureRange = 0.1
+    pursuerCaptureRange = 0.2
     pursuerCaptureRangeVar = 0.02
     pursuerSpeed = 2.0
     pursuerSpeedVar = 0.0
-    agentSpeed = 0.5
+    agentSpeed = 1
 
     agentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
@@ -789,17 +803,19 @@ def main():
         agentSpeed,
         mcAx,
     )
-    plotEngagementZone(
-        agentInitialHeading,
-        pursuerInitialPosition.squeeze(),
-        pursuerRange,
-        pursuerCaptureRange,
-        pursuerSpeed,
-        agentSpeed,
-        mcAx,
-    )
+    # plotEngagementZone(
+    #     agentInitialHeading,
+    #     pursuerInitialPosition.squeeze(),
+    #     pursuerRange,
+    #     pursuerCaptureRange,
+    #     pursuerSpeed,
+    #     agentSpeed,
+    #     mcAx,
+    # )
     mcAx.set_xlabel("X", fontsize=26)
     mcAx.set_ylabel("Y", fontsize=26)
+    mcAx.tick_params(axis="x", labelsize=26)
+    mcAx.tick_params(axis="y", labelsize=26)
     mcAx.set_aspect("equal")
     mcAx.set_title("Monte Carlo PEZ", fontsize=36)
     # linFig, linAx = plt.subplots(1, 1)
@@ -810,30 +826,32 @@ def main():
         )
 
     linAx.set_aspect("equal")
-    linPez = plotProbablisticEngagementZone(
-        agentPositionCov,
-        agentInitialHeading,
-        agentHeadingVar,
-        pursuerInitialPosition,
-        pursuerPositionCov,
-        pursuerRange,
-        pursuerRangeVar,
-        pursuerCaptureRange,
-        pursuerCaptureRangeVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        agentSpeed,
-        linAx,
-    )
-    plotEngagementZone(
-        agentInitialHeading,
-        pursuerInitialPosition,
-        pursuerRange,
-        pursuerCaptureRange,
-        pursuerSpeed,
-        agentSpeed,
-        linAx,
-    )
+    # linPez = plotProbablisticEngagementZone(
+    #     agentPositionCov,
+    #     agentInitialHeading,
+    #     agentHeadingVar,
+    #     pursuerInitialPosition,
+    #     pursuerPositionCov,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     pursuerCaptureRange,
+    #     pursuerCaptureRangeVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     agentSpeed,
+    #     linAx,
+    # )
+    linAx.tick_params(axis="x", labelsize=26)
+    linAx.tick_params(axis="y", labelsize=26)
+    # plotEngagementZone(
+    #     agentInitialHeading,
+    #     pursuerInitialPosition,
+    #     pursuerRange,
+    #     pursuerCaptureRange,
+    #     pursuerSpeed,
+    #     agentSpeed,
+    #     linAx,
+    # )
     linAx.set_xlabel("X", fontsize=26)
     linAx.set_ylabel("Y", fontsize=26)
     linAx.set_title("Linearized PEZ", fontsize=36)
