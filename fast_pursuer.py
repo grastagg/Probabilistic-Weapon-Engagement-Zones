@@ -764,6 +764,26 @@ def monte_carlo_probalistic_engagment_zone(
     return numInEngagementZone / numMonteCarloTrials
 
 
+def plot_abs_diff(linPez, mcPez, ax, fig):
+    absdiff = np.abs(linPez - mcPez)
+
+    x = jnp.linspace(-2, 2, 50)
+    y = jnp.linspace(-2, 2, 50)
+    X, Y = jnp.meshgrid(x, y)
+    c = ax.pcolormesh(X, Y, absdiff.reshape(X.shape), cmap="viridis")
+    cbar = fig.colorbar(c, ax=ax)
+    cbar.set_label("Absolute Difference", fontsize=26)
+    cbar.ax.tick_params(labelsize=22)
+    cbar.ax.tick_params(labelsize=22)
+
+    ax.set_aspect("equal")
+    ax.set_xlabel("X", fontsize=26)
+    ax.set_ylabel("Y", fontsize=26)
+    ax.tick_params(axis="x", labelsize=26)
+    ax.tick_params(axis="y", labelsize=26)
+    ax.set_title("Linear vs MC PEZ", fontsize=36)
+
+
 # probabalisticEngagementZone(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, np.array([[0.1, 0], [0, 0.1]]), pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
 # inEngagementZone(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
 
@@ -771,11 +791,11 @@ def monte_carlo_probalistic_engagment_zone(
 def main():
     pursuerRange = 1.0
     pursuerRangeVar = 0.1
-    pursuerCaptureRange = 0.2
+    pursuerCaptureRange = 0.1
     pursuerCaptureRangeVar = 0.02
     pursuerSpeed = 2.0
     pursuerSpeedVar = 0.0
-    agentSpeed = 1
+    agentSpeed = 0.5
 
     agentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
@@ -826,21 +846,21 @@ def main():
         )
 
     linAx.set_aspect("equal")
-    # linPez = plotProbablisticEngagementZone(
-    #     agentPositionCov,
-    #     agentInitialHeading,
-    #     agentHeadingVar,
-    #     pursuerInitialPosition,
-    #     pursuerPositionCov,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     pursuerCaptureRange,
-    #     pursuerCaptureRangeVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     agentSpeed,
-    #     linAx,
-    # )
+    linPez = plotProbablisticEngagementZone(
+        agentPositionCov,
+        agentInitialHeading,
+        agentHeadingVar,
+        pursuerInitialPosition,
+        pursuerPositionCov,
+        pursuerRange,
+        pursuerRangeVar,
+        pursuerCaptureRange,
+        pursuerCaptureRangeVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        agentSpeed,
+        linAx,
+    )
     linAx.tick_params(axis="x", labelsize=26)
     linAx.tick_params(axis="y", labelsize=26)
     # plotEngagementZone(
@@ -856,7 +876,9 @@ def main():
     linAx.set_ylabel("Y", fontsize=26)
     linAx.set_title("Linearized PEZ", fontsize=36)
     fig.set_size_inches(20, 20)
-    plt.savefig("/home/ggs24/Desktop/PEZ.png", dpi=500, bbox_inches="tight")
+    # plt.savefig("/home/ggs24/Desktop/PEZ.png", dpi=500, bbox_inches="tight")
+    fig, ax = plt.subplots(1, 1)
+    plot_abs_diff(linPez, mcEz, ax, fig)
     plt.show()
     #
     # fig,axes = plt.subplots(2,4,layout='constrained')
