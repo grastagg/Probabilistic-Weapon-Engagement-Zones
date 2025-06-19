@@ -372,6 +372,8 @@ def learning_loss_function_single(
         trueParams,
     )[0]
     rsEnd = jnp.where(jnp.isinf(rsEnd), 1000.0, rsEnd)
+    rsAll = dubins_reachable_set_from_pursuerX(pursuerX, pathHistory, trueParams)
+    rsAll = jnp.where(jnp.isinf(rsAll), 1000.0, rsAll)
 
     interceptedLossEZ = activation(jnp.min(ez))  # loss if intercepted
     survivedLossEZ = activation(-jnp.min(ez))  # loss if survived
@@ -379,8 +381,9 @@ def learning_loss_function_single(
         intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
     )
     interceptedLossRS = jax.nn.relu(rsEnd)  # loss if intercepted in RS
-    survivedLossRS = 0.0  # loss if survived in RS
-    # survivedLossRS = jax.nn.relu(-jnp.min(rsAll))  # loss if survived in RS
+    # survivedLossRS = 0.0  # loss if survived in RS
+    # TODO: keep this in or take it out?
+    survivedLossRS = jax.nn.relu(-jnp.min(rsAll))  # loss if survived in RS
     lossRS = jax.lax.cond(
         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
     )
@@ -749,7 +752,7 @@ def learn_ez(
 ):
     jax.config.update("jax_platform_name", "cpu")
     start = time.time()
-    lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
+    lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.1, 0.0])
     upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
     pursuerXList = []
     lossList = []
@@ -1824,7 +1827,7 @@ def main():
     numOptimizerStarts = 50
 
     interceptedList = []
-    numLowPriorityAgents = 25
+    numLowPriorityAgents = 20
     endPoints = []
     endTimes = []
     pathHistories = []
