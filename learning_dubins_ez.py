@@ -347,6 +347,23 @@ def compute_intercept_probability(ez_min, alpha=10.0):
     return jax.nn.sigmoid(-alpha * ez_min)
 
 
+def mask_remove_last_two_before_false(mask: jnp.ndarray):
+    # Step 1: Find the index of the first False
+    first_false_idx = jnp.argmax(~mask)  # argmax of inverse gives first False
+
+    # Step 2: Compute indices to zero (just before the first False)
+    idx1 = jnp.maximum(first_false_idx - 1, 0)
+    idx2 = jnp.maximum(first_false_idx - 2, 0)
+    idx3 = jnp.maximum(first_false_idx - 3, 0)
+
+    # Step 3: Create new mask with two entries set to False
+    new_mask = mask.at[idx1].set(False)  # Set the first index to False
+    new_mask = new_mask.at[idx2].set(False)  # Set the second index to False
+    new_mask = new_mask.at[idx3].set(False)  # Set the third index to False
+
+    return new_mask
+
+
 @jax.jit
 def learning_loss_function_single(
     pursuerX,
@@ -383,6 +400,12 @@ def learning_loss_function_single(
         intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
     )
     interceptedLossRS = activation(rsEnd)  # loss if intercepted in RS
+    # newMask = mask_remove_last_two_before_false(pathMask)
+    # rsAll = jnp.where(newMask, rsAll, jnp.inf)  # apply new mask to rsAll
+    # interceptedLossRSAll = activation(-jnp.min(rsAll))
+    # interceptedLossRS = (
+    #     interceptedLossRSAll + interceptedLossRS
+    # )  # loss if intercepted in RS
     # survivedLossRS = 0.0  # loss if skkurvived in RS
     # TODO: keep this in or take it out?
     survivedLossRS = activation(-jnp.min(rsAll))  # loss if survived in RS
@@ -1842,8 +1865,8 @@ def plot_pursuer_parameters_spread(
 
 
 def main():
-    pursuerPosition = np.array([0.0, 0.0])
-    pursuerHeading = (0.0 / 20.0) * np.pi
+    pursuerPosition = np.array([0.45, -0.7])
+    pursuerHeading = (6.0 / 20.0) * np.pi
     pursuerRange = 2.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
