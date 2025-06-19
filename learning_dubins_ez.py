@@ -366,6 +366,7 @@ def learning_loss_function_single(
         speed,
         trueParams,
     )  # (T,)
+    ez = jnp.where(pathMask, ez, jnp.inf)  # apply mask to ez
     rsEnd = dubins_reachable_set_from_pursuerX(
         pursuerX,
         jnp.array([interceptedPoint]),
@@ -373,17 +374,18 @@ def learning_loss_function_single(
     )[0]
     rsEnd = jnp.where(jnp.isinf(rsEnd), 1000.0, rsEnd)
     rsAll = dubins_reachable_set_from_pursuerX(pursuerX, pathHistory, trueParams)
-    rsAll = jnp.where(jnp.isinf(rsAll), 1000.0, rsAll)
+    rsAll = jnp.where(pathMask, rsAll, jnp.inf)  # apply mask to rsAll
+    # rsAll = jnp.where(jnp.isinf(rsAll), 1000.0, rsAll)
 
     interceptedLossEZ = activation(jnp.min(ez))  # loss if intercepted
     survivedLossEZ = activation(-jnp.min(ez))  # loss if survived
     lossEZ = jax.lax.cond(
         intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
     )
-    interceptedLossRS = jax.nn.relu(rsEnd)  # loss if intercepted in RS
-    # survivedLossRS = 0.0  # loss if survived in RS
+    interceptedLossRS = activation(rsEnd)  # loss if intercepted in RS
+    # survivedLossRS = 0.0  # loss if skkurvived in RS
     # TODO: keep this in or take it out?
-    survivedLossRS = jax.nn.relu(-jnp.min(rsAll))  # loss if survived in RS
+    survivedLossRS = activation(-jnp.min(rsAll))  # loss if survived in RS
     lossRS = jax.lax.cond(
         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
     )
@@ -579,6 +581,8 @@ def run_optimization_hueristic(
     upperLimit,
     trueParams,
 ):
+    print("running optimization heuristic: ", initialPursuerX)
+
     def objfunc(xDict):
         pursuerX = xDict["pursuerX"]
         loss = total_learning_loss(
@@ -613,6 +617,17 @@ def run_optimization_hueristic(
         }
         return funcsSens, False
 
+    initialLoss = total_learning_loss(
+        initialPursuerX,
+        headings,
+        speeds,
+        interceptedList,
+        pathHistories,
+        pathMasks,
+        endPoints,
+        trueParams,
+    )
+    print("initial loss:", initialLoss)
     optProb = Optimization("path optimization", objfunc)
     numVars = 6
     if positionAndHeadingOnly:
@@ -699,10 +714,21 @@ def find_opt_starting_pursuerX(
     )
 
     initialPursuerXList = []
-    initialHeadings = np.linspace(
-        startHeading1, startHeading1 + 2 * np.pi, numStartHeadings, endpoint=False
-    )
+    # initialHeadings = np.linspace(
+    #     startHeading1, startHeading1 + 2 * np.pi, numStartHeadings, endpoint=False
+    # )
+
+    # create half initial headings cetered around startHeading1 and half around startHeading2 with random noise
+    initialHeadings1 = startHeading1 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
+    initialHeadings2 = startHeading2 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
+    initialHeadings = np.concatenate([initialHeadings1, initialHeadings2])
     initialHeadings = np.mod(initialHeadings + np.pi, 2 * np.pi) - np.pi
+    mean, cov = compute_variance_of_puruser_parameters(previousPursuerXList)
+    initialPositionXs = mean[0] + np.random.normal(0.0, cov[0], numStartHeadings)
+    initialPositionYs = mean[1] + np.random.normal(0.0, cov[1], numStartHeadings)
+    initialSpeeds = mean[3] + np.random.normal(0.0, cov[3], numStartHeadings)
+    initialTurnRadii = mean[4] + np.random.normal(0.0, cov[4], numStartHeadings)
+    initialRanges = mean[5] + np.random.normal(0.0, cov[5], numStartHeadings)
 
     for i in range(numStartHeadings):
         previousPursuerX = previousPursuerXList[i]
@@ -719,21 +745,33 @@ def find_opt_starting_pursuerX(
                 ]
             )
         else:
-            # initialPosition = startPosition
-            initialPosition = previousPursuerX[0:2]
-            initialSpeed = previousPursuerX[3]
-            initialTurnRadius = previousPursuerX[4]
-            initialRange = previousPursuerX[5]
             intialPursuerX = jnp.array(
                 [
-                    initialPosition[0],
-                    initialPosition[1],
+                    initialPositionXs[i],
+                    initialPositionYs[i],
                     initialHeadings[i],
-                    initialSpeed,
-                    initialTurnRadius,
-                    initialRange,
+                    initialSpeeds[i],
+                    initialTurnRadii[i],
+                    initialRanges[i],
                 ]
             )
+            # initialPosition = startPosition
+            # initialPosition = previousPursuerX[0:2]
+            # initialHeading = previousPursuerX[2]
+            # initialSpeed = previousPursuerX[3]
+            # initialTurnRadius = previousPursuerX[4]
+            # initialRange = previousPursuerX[5]
+            # intialPursuerX = jnp.array(
+            #     [
+            #         initialPosition[0],
+            #         initialPosition[1],
+            #         # initialHeadings[i],
+            #         initialHeading,
+            #         initialSpeed,
+            #         initialTurnRadius,
+            #         initialRange,
+            #     ]
+            # )
         initialPursuerXList.append(intialPursuerX)
     return jnp.array(initialPursuerXList)
 
@@ -752,7 +790,7 @@ def learn_ez(
 ):
     jax.config.update("jax_platform_name", "cpu")
     start = time.time()
-    lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.1, 0.0])
+    lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
     upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
     pursuerXList = []
     lossList = []
@@ -800,9 +838,10 @@ def learn_ez(
     lossList = lossList[sorted_indices]
     pursuerXList = pursuerXList[sorted_indices]
     quantificationLossList = quantificationLossList[sorted_indices]
-    quantificationLossList = quantificationLossList / jnp.max(
-        quantificationLossList[lossList == 0.0]
-    )
+    if len(quantificationLossList[lossList <= 1e-6]) != 0:
+        quantificationLossList = quantificationLossList / jnp.max(
+            quantificationLossList[lossList <= 1e-6]
+        )
     # numZero = np.sum(lossList == 0.0)
     # ranks = np.linspace(0, 1, numZero)
     # rankList = np.zeros_like(lossList)
@@ -1438,9 +1477,12 @@ def ranking_to_weights(errors, epsilon=1e-6):
     return 1.0 / (errors + epsilon)
 
 
-def compute_variance_of_puruser_parameters(pursuerXList, ranks):
-    weights = ranking_to_weights(ranks)
-    weights = np.ones_like(weights)  # for now, use uniform weights
+def compute_variance_of_puruser_parameters(pursuerXList, ranks=None):
+    if ranks is None:
+        weights = np.ones(len(pursuerXList))
+    else:
+        weights = ranking_to_weights(ranks)
+        weights = np.ones_like(weights)  # for now, use uniform weights
     pursuerXList = jnp.array(pursuerXList)
     # mean = jnp.mean(pursuerXList, axis=0)
     mean = jnp.average(pursuerXList, axis=0, weights=weights)
@@ -1685,7 +1727,7 @@ def plot_pursuer_parameters_spread(
         )
 
         for i in range(numOptimizerStarts):
-            mask = lossList_history[:, i] == 0.0
+            mask = lossList_history[:, i] <= 1e-6
             c = quantificationLossList_history[:, i][mask]
             max = 1.0
             c = jnp.clip(c, 0.0, max)  # Ensure c is in [0, 1] for color mapping
@@ -1776,7 +1818,7 @@ def plot_pursuer_parameters_spread(
             alpha=0.2,
         )
         for i in range(numOptimizerStarts):
-            mask = lossList_history[:, i] == 0.0
+            mask = lossList_history[:, i] <= 1e-6
             c = quantificationLossList_history[:, i][mask]
             pointSize = 10
             axes[0].scatter(
@@ -1800,14 +1842,14 @@ def plot_pursuer_parameters_spread(
 
 
 def main():
-    pursuerPosition = np.array([1.0, 0.5])
-    pursuerHeading = (-7.0 / 20.0) * np.pi
+    pursuerPosition = np.array([0.0, 0.0])
+    pursuerHeading = (0.0 / 20.0) * np.pi
     pursuerRange = 2.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
     pursuerTurnRadius = 0.4
     agentSpeed = 1.0
-    dt = 0.11
+    dt = 0.01
     searchCircleCenter = np.array([0, 0])
     searchCircleRadius = 3.0
     tmax = (2 * searchCircleRadius) / agentSpeed
@@ -1860,7 +1902,7 @@ def main():
             heading = 0.0001
         else:
             if pursuerXList is not None:
-                pursuerXListZeroLoss = pursuerXList[lossList == 0.0]
+                pursuerXListZeroLoss = pursuerXList[lossList <= 1e-6]
             else:
                 pursuerXListZeroLoss = None
             startPosition, heading = optimize_next_low_priority_path(
@@ -1913,11 +1955,16 @@ def main():
             jnp.array(endPoints),
             jnp.array(endTimes),
             trueParams,
-            pursuerXList,
+            # pursuerXList,
+            pursuerXListZeroLoss,
             numOptimizerStarts,
         )
+        print(np.sum(lossList == 0))
+        if np.sum(lossList == 0) == 0:
+            print("test")
+            break
         mean, cov = compute_variance_of_puruser_parameters(
-            pursuerXList[lossList == 0.0], guantificationLossList[lossList == 0.0]
+            pursuerXList[lossList <= 1e-6], guantificationLossList[lossList <= 1e-6]
         )
         pursuerParameterVariance_history.append(cov)
         pursuerParameterMean_history.append(mean)
@@ -1962,7 +2009,7 @@ def main():
         quantificationLossList_history,
         trueParams,
         numOptimizerStarts,
-        numLowPriorityAgents,
+        len(pursuerParameterMean_history),
     )
 
 
