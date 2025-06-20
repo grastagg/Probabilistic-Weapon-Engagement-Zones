@@ -745,16 +745,16 @@ def find_opt_starting_pursuerX(
     initialHeadings1 = startHeading1 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
     initialHeadings2 = startHeading2 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
     initialHeadings = np.concatenate([initialHeadings1, initialHeadings2])
-    initialHeadings = np.mod(initialHeadings + np.pi, 2 * np.pi) - np.pi
+    # initialHeadings = np.mod(initialHeadings + np.pi, 2 * np.pi) - np.pi
     mean, cov = compute_variance_of_puruser_parameters(previousPursuerXList)
     initialPositionXs = mean[0] + np.random.normal(0.0, cov[0], numStartHeadings)
     initialPositionYs = mean[1] + np.random.normal(0.0, cov[1], numStartHeadings)
     initialSpeeds = mean[3] + np.random.normal(0.0, cov[3], numStartHeadings)
-    initialTurnRadii = mean[4] + np.random.normal(0.0, cov[4], numStartHeadings)
+    initialTurnRadii = mean[4] + np.random.normal(0.0, 3 * cov[4], numStartHeadings)
     initialRanges = mean[5] + np.random.normal(0.0, cov[5], numStartHeadings)
 
     for i in range(numStartHeadings):
-        previousPursuerX = previousPursuerXList[i]
+        # previousPursuerX = previousPursuerXList[i]
         if positionAndHeadingOnly:
             lowerLimit = lowerLimit[:3]
             upperLimit = upperLimit[:3]
@@ -810,6 +810,7 @@ def learn_ez(
     trueParams,
     previousPursuerXList=None,
     numStartHeadings=10,
+    keepLossThreshold=1e-1,
 ):
     jax.config.update("jax_platform_name", "cpu")
     start = time.time()
@@ -852,18 +853,18 @@ def learn_ez(
         lossList.append(loss)
         quantificationLossList.append(quantificationLoss)
 
-    pursuerXList = jnp.array(pursuerXList).squeeze()
-    lossList = jnp.array(lossList).squeeze()
-    quantificationLossList = jnp.array(quantificationLossList).squeeze()
+    pursuerXList = np.array(pursuerXList).squeeze()
+    lossList = np.array(lossList).squeeze()
+    quantificationLossList = np.array(quantificationLossList).squeeze()
 
     # sorted_indices = jnp.argsort(lossList)
-    sorted_indices = jnp.argsort(quantificationLossList)
+    sorted_indices = np.argsort(quantificationLossList)
     lossList = lossList[sorted_indices]
     pursuerXList = pursuerXList[sorted_indices]
     quantificationLossList = quantificationLossList[sorted_indices]
-    if len(quantificationLossList[lossList <= 1e-6]) != 0:
-        quantificationLossList = quantificationLossList / jnp.max(
-            quantificationLossList[lossList <= 1e-6]
+    if len(quantificationLossList[lossList <= keepLossThreshold]) != 0:
+        quantificationLossList = quantificationLossList / np.max(
+            quantificationLossList[lossList <= keepLossThreshold]
         )
     # numZero = np.sum(lossList == 0.0)
     # ranks = np.linspace(0, 1, numZero)
@@ -883,6 +884,8 @@ def learn_ez(
     # pursuerXList = pursuerXList[lossList == 0.0]
     # lossList = lossList[lossList == 0.0]
     print("time to learn ez", time.time() - start)
+
+    # pursuerXList[:, 2] = np.unwrap(pursuerXList[:, 2])
     return pursuerXList, lossList, quantificationLossList
 
 
@@ -1670,6 +1673,7 @@ def plot_pursuer_parameters_spread(
     trueParams,
     numOptimizerStarts,
     numLowPriorityAgents,
+    keepLossThreshold,
 ):
     if not positionAndHeadingOnly:
         fig, axes = plt.subplots(3, 2)
@@ -1750,7 +1754,7 @@ def plot_pursuer_parameters_spread(
         )
 
         for i in range(numOptimizerStarts):
-            mask = lossList_history[:, i] <= 1e-6
+            mask = lossList_history[:, i] <= keepLossThreshold
             c = quantificationLossList_history[:, i][mask]
             max = 1.0
             c = jnp.clip(c, 0.0, max)  # Ensure c is in [0, 1] for color mapping
@@ -1841,7 +1845,7 @@ def plot_pursuer_parameters_spread(
             alpha=0.2,
         )
         for i in range(numOptimizerStarts):
-            mask = lossList_history[:, i] <= 1e-6
+            mask = lossList_history[:, i] <= keepLossThreshold
             c = quantificationLossList_history[:, i][mask]
             pointSize = 10
             axes[0].scatter(
@@ -1865,8 +1869,8 @@ def plot_pursuer_parameters_spread(
 
 
 def main():
-    pursuerPosition = np.array([0.45, -0.7])
-    pursuerHeading = (6.0 / 20.0) * np.pi
+    pursuerPosition = np.array([-0.5, -0.7])
+    pursuerHeading = (0.0 / 20.0) * np.pi
     pursuerRange = 2.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
@@ -1892,7 +1896,7 @@ def main():
     numOptimizerStarts = 50
 
     interceptedList = []
-    numLowPriorityAgents = 20
+    numLowPriorityAgents = 15
     endPoints = []
     endTimes = []
     pathHistories = []
@@ -1918,6 +1922,9 @@ def main():
     singlePursuerX = False
     pursuerXListZeroLoss = None
     i = 0
+
+    keepLossThreshold = 1e-6
+
     while i < numLowPriorityAgents and not singlePursuerX:
         print("iteration:", i)
         if i == 0:
@@ -1925,7 +1932,7 @@ def main():
             heading = 0.0001
         else:
             if pursuerXList is not None:
-                pursuerXListZeroLoss = pursuerXList[lossList <= 1e-6]
+                pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
             else:
                 pursuerXListZeroLoss = None
             startPosition, heading = optimize_next_low_priority_path(
@@ -1981,13 +1988,15 @@ def main():
             # pursuerXList,
             pursuerXListZeroLoss,
             numOptimizerStarts,
+            keepLossThreshold,
         )
         print(np.sum(lossList == 0))
-        if np.sum(lossList == 0) == 0:
+        if np.sum(lossList == 0) <= 1:
             print("test")
             break
         mean, cov = compute_variance_of_puruser_parameters(
-            pursuerXList[lossList <= 1e-6], guantificationLossList[lossList <= 1e-6]
+            pursuerXList[lossList <= keepLossThreshold],
+            guantificationLossList[lossList <= keepLossThreshold],
         )
         pursuerParameterVariance_history.append(cov)
         pursuerParameterMean_history.append(mean)
@@ -2033,6 +2042,7 @@ def main():
         trueParams,
         numOptimizerStarts,
         len(pursuerParameterMean_history),
+        keepLossThreshold,
     )
 
 
