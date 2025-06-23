@@ -1319,7 +1319,7 @@ def plot_pursuer_parameters_spread(
 
 def main():
     pursuerPosition = np.array([-0.5, -0.7])
-    pursuerHeading = (0.0 / 20.0) * np.pi
+    pursuerHeading = (5.0 / 20.0) * np.pi
     pursuerRange = 2.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
@@ -1345,7 +1345,7 @@ def main():
     numOptimizerStarts = 50
 
     interceptedList = []
-    numLowPriorityAgents = 15
+    numLowPriorityAgents = 17
     endPoints = []
     endTimes = []
     pathHistories = []
