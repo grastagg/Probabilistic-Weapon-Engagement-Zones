@@ -447,7 +447,7 @@ def plot_dubins_reachable_set(
     pursuerPosition, pursuerHeading, pursuerRange, radius, ax, colors=["brown"]
 ):
     numPoints = 1000
-    rangeX = 3.0
+    rangeX = 3.1
     x = np.linspace(-rangeX, rangeX, numPoints)
     y = np.linspace(-rangeX, rangeX, numPoints)
     [X, Y] = np.meshgrid(x, y)

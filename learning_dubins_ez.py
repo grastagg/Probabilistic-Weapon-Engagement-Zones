@@ -191,21 +191,29 @@ def send_low_priority_agent(
         headings,
         speed,
     )
+    RS = dubinsEZ.in_dubins_reachable_set(
+        pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, pathHistory
+    )
+    inRS = RS < 0.0  # shape (T,)
+    firstTrueIndex = first_true_index_safe(inRS)
 
-    inEZ = EZ < 0.0  # shape (T,)
-    firstTrueIndex = first_true_index_safe(inEZ)
+    # inEZ = EZ < 0.0  # shape (T,)
+    # firstTrueIndex = first_true_index_safe(inEZ)
     if firstTrueIndex != -1:
-        intercepted, interceptionPoint, interceptionTime = (
-            find_interception_point_and_time(
-                speed,
-                pursuerSpeed,
-                direction,
-                pursuerRange,
-                t,
-                pathHistory,
-                firstTrueIndex,
-            )
-        )
+        intercepted = True
+        interceptionPoint = pathHistory[firstTrueIndex]
+        interceptionTime = t[firstTrueIndex]
+        # intercepted, interceptionPoint, interceptionTime = (
+        #     find_interception_point_and_time(
+        #         speed,
+        #         pursuerSpeed,
+        #         direction,
+        #         pursuerRange,
+        #         t,
+        #         pathHistory,
+        #         firstTrueIndex,
+        #     )
+        # )
         t = np.linspace(0.0, interceptionTime, numPoints)  # shape (T,)
         pathHistory, headings = simulate_trajectory_fn(
             startPosition, heading, speed, interceptionTime, numPoints
@@ -1409,7 +1417,7 @@ def main():
     pursuerXListZeroLoss = None
     i = 0
 
-    keepLossThreshold = 1e-5
+    keepLossThreshold = 1e-1
 
     while i < numLowPriorityAgents and not singlePursuerX:
         print("iteration:", i)
