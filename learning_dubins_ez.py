@@ -15,7 +15,7 @@ import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
 
-positionAndHeadingOnly = True
+positionAndHeadingOnly = False
 knownSpeed = True
 interceptionOnBoundary = True
 
@@ -1522,7 +1522,7 @@ def main():
 
     numOptimizerStarts = 100
     interceptedList = []
-    numLowPriorityAgents = 5
+    numLowPriorityAgents = 6
     endPoints = []
     endTimes = []
     pathHistories = []
@@ -1573,7 +1573,7 @@ def main():
                 searchCenter,
                 searchCircleRadius,
                 num_angles=40,
-                num_headings=32,
+                num_headings=50,
                 speed=agentSpeed,
                 tmax=tmax,
                 num_points=numPoints,
