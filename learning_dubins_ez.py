@@ -15,7 +15,7 @@ import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
 
-positionAndHeadingOnly = True
+positionAndHeadingOnly = False
 interceptionOnBoundary = True
 
 np.random.seed(326)  # for reproducibility
@@ -333,7 +333,7 @@ def dubins_reachable_set_from_pursuerX(pursuerX, goalPosition, trueParams):
     pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange = (
         pursuerX_to_params(pursuerX, trueParams)
     )
-    rs = dubinsEZ.in_dubins_reachable_set(
+    rs = dubinsEZ.in_dubins_reachable_set_augmented(
         pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, goalPosition
     )
     return rs
@@ -1475,14 +1475,14 @@ def get_unique_rows_by_proximity(arr, lossList, rtol=1e-3):
     unique_loss_list = []
     for i, row in enumerate(arr):
         # if not any(np.all(np.isclose(row, u, rtol=rtol)) for u in unique_list):
-        if not any(np.linalg.norm(row - u) < 1e-3 for u in unique_list):
+        if not any(np.linalg.norm(row - u) < 1e-1 for u in unique_list):
             unique_list.append(row)
             unique_loss_list.append(lossList[i])
     return np.array(unique_list), np.array(unique_loss_list)
 
 
 def main():
-    pursuerPosition = np.array([0.5, 0.5])
+    pursuerPosition = np.array([0.0, 0.0])
     pursuerHeading = (0.0 / 20.0) * np.pi
     pursuerRange = 2.0
     pursuerCaptureRadius = 0.0
@@ -1491,7 +1491,7 @@ def main():
     pursuerTurnRadius = 0.4
     dt = 0.01
     searchCircleCenter = np.array([0, 0])
-    searchCircleRadius = 7.0
+    searchCircleRadius = 4.0
     tmax = (2 * searchCircleRadius) / agentSpeed
     trueParams = jnp.array(
         [
@@ -1537,7 +1537,7 @@ def main():
     keepLossThreshold = 1e-5
 
     while i < numLowPriorityAgents and not singlePursuerX:
-        print("iteration:", i)
+        print("num agents:", i + 1)
         if i == 0:
             startPosition = jnp.array([-searchCircleRadius, 0.0001])
             heading = 0.0001
@@ -1558,7 +1558,7 @@ def main():
                 trueParams,
                 searchCenter,
                 searchCircleRadius,
-                num_angles=32,
+                num_angles=40,
                 num_headings=32,
                 speed=agentSpeed,
                 tmax=tmax,
@@ -1601,7 +1601,6 @@ def main():
         pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
         lossListZeroLoss = lossList[lossList <= keepLossThreshold]
         print("num particles", np.sum(lossList <= keepLossThreshold))
-        mean, cov = compute_variance_of_puruser_parameters(pursuerXListZeroLoss)
         pursuerXListZeroLoss, lossListZeroLoss = get_unique_rows_by_proximity(
             pursuerXListZeroLoss, lossListZeroLoss, rtol=1e-1
         )
