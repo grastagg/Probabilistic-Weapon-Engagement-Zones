@@ -16,6 +16,7 @@ import dubinsPEZ
 jax.config.update("jax_enable_x64", True)
 
 positionAndHeadingOnly = True
+interceptionOnBoundary = True
 
 np.random.seed(326)  # for reproducibility
 
@@ -89,16 +90,22 @@ def plot_low_priority_paths_with_ez(
         pathHistory = pathHistories[i]
 
         heading = headings[i]
-        ez = (
-            dubinsEZ_from_pursuerX(
-                pursuerX,
-                pathHistory,
-                heading * np.ones(len(pathHistory)),
-                speeds[i],
-                trueParams,
-            )
-            < 0
+        # ez = (
+        #     dubinsEZ_from_pursuerX(
+        #         pursuerX,
+        #         pathHistory,
+        #         heading * np.ones(len(pathHistory)),
+        #         speeds[i],
+        #         trueParams,
+        #     )
+        #     < 0
+        # )
+        ez = dubins_reachable_set_from_pursuerX(
+            pursuerX,
+            pathHistory,
+            trueParams,
         )
+        ez = ez < 0.0  # shape (T,)
 
         if interceptedList[i]:
             ax.scatter(
@@ -170,26 +177,13 @@ def send_low_priority_agent(
     pursuerSpeed,
     tmax,
     numPoints,
+    numSimulationPoints=500000,
 ):
-    # currentPosition = jnp.array(startPosition)
-    t = jnp.linspace(0.0, tmax, numPoints)  # shape (T,)
+    t = jnp.linspace(0.0, tmax, numSimulationPoints)  # shape (T,)
+    simulationDt = t[1] - t[0]
     direction = jnp.array([jnp.cos(heading), jnp.sin(heading)])  # shape (2,)
-    # displacement = t[:, None] * speed * direction  # shape (T, 2)
-    # pathHistory = currentPosition + displacement  # shape (T, 2)
-    # headings = heading * jnp.ones(numPoints)  # shape (T,)
     pathHistory, headings = simulate_trajectory_fn(
-        startPosition, heading, speed, tmax, numPoints
-    )
-    EZ = dubinsEZ.in_dubins_engagement_zone(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        pathHistory,
-        headings,
-        speed,
+        startPosition, heading, speed, tmax, numSimulationPoints
     )
     RS = dubinsEZ.in_dubins_reachable_set(
         pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, pathHistory
@@ -197,32 +191,36 @@ def send_low_priority_agent(
     inRS = RS < 0.0  # shape (T,)
     firstTrueIndex = first_true_index_safe(inRS)
 
-    # inEZ = EZ < 0.0  # shape (T,)
-    # firstTrueIndex = first_true_index_safe(inEZ)
-    if firstTrueIndex != -1:
+    # if firstTrueIndex != -1:
+    def interception_fn():
         intercepted = True
-        interceptionPoint = pathHistory[firstTrueIndex]
-        interceptionTime = t[firstTrueIndex]
-        # intercepted, interceptionPoint, interceptionTime = (
-        #     find_interception_point_and_time(
-        #         speed,
-        #         pursuerSpeed,
-        #         direction,
-        #         pursuerRange,
-        #         t,
-        #         pathHistory,
-        #         firstTrueIndex,
-        #     )
-        # )
-        t = np.linspace(0.0, interceptionTime, numPoints)  # shape (T,)
-        pathHistory, headings = simulate_trajectory_fn(
+        deltaX = RS[firstTrueIndex - 1] - RS[firstTrueIndex]
+        zeroCrossing = (RS[firstTrueIndex - 1]) / deltaX
+        interceptionPoint = pathHistory[firstTrueIndex - 1] + zeroCrossing * (
+            speed * simulationDt * direction
+        )
+        interceptionTime = t[firstTrueIndex - 1] + zeroCrossing * simulationDt
+        # tNew = np.linspace(0.0, interceptionTime, numPoints)  # shape (T,)
+        pathHistoryNew, headings = simulate_trajectory_fn(
             startPosition, heading, speed, interceptionTime, numPoints
         )
+        return intercepted, interceptionPoint, interceptionTime, pathHistoryNew
 
-    else:
+    # else:
+    def no_interception_fn():
         interceptionPoint = pathHistory[-1]
         interceptionTime = t[-1]
         intercepted = False
+        pathHistoryNew, headings = simulate_trajectory_fn(
+            startPosition, heading, speed, tmax, numPoints
+        )
+        return intercepted, interceptionPoint, interceptionTime, pathHistoryNew
+
+    intercepted, interceptionPoint, interceptionTime, pathHistory = jax.lax.cond(
+        firstTrueIndex != -1,
+        interception_fn,
+        no_interception_fn,
+    )
 
     return intercepted, interceptionPoint, interceptionTime, pathHistory
 
@@ -346,7 +344,7 @@ def smooth_min(x, alpha=10.0):
 
 
 def activation(x, beta=10.0):
-    return jax.nn.relu(x)  # ReLU activation function
+    # return jax.nn.relu(x)  # ReLU activation function
     return jnp.square(jax.nn.relu(x))  # ReLU activation function
     return jnp.log1p(jnp.exp(beta * x)) / beta
     return (jnp.tanh(10.0 * x) + 1.0) / 2.0 * x**2
@@ -358,6 +356,59 @@ def compute_intercept_probability(ez_min, alpha=10.0):
 
 
 @jax.jit
+def learning_loss_on_boundary_function_single(
+    pursuerX,
+    heading,
+    speed,
+    intercepted,
+    pathHistory,
+    interceptedPoint,
+    trueParams,
+    verbose=False,
+):
+    rsEnd = dubins_reachable_set_from_pursuerX(
+        pursuerX,
+        jnp.array([interceptedPoint]),
+        trueParams,
+    ).squeeze()
+    # rsEnd = jnp.where(jnp.isinf(rsEnd), 1000.0, rsEnd)
+    rsAll = dubins_reachable_set_from_pursuerX(pursuerX, pathHistory, trueParams)
+
+    # interceptedLossRSEnd = activation(rsEnd) + activation(-rsEnd)
+    interceptedLossRSEnd = rsEnd**2
+    # interceptedLossRSEnd = jnp.abs(rsEnd)
+    interceptedLossTrajectory = jnp.sum(activation(-rsAll[:-1]))
+    # interceptedLossTrajectory = activation(-jnp.min(rsAll[:-1]))
+
+    interceptedLossRS = interceptedLossTrajectory + interceptedLossRSEnd
+
+    survivedLossRS = jnp.sum(activation(-rsAll))  # loss if survived in RS
+    # survivedLossRS = activation(-jnp.min(rsAll))  # loss if survived in RS
+
+    lossRS = jax.lax.cond(
+        intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
+    )
+
+    # def verbose_func():
+    #     jax.debug.print(
+    #         "endRS: {}, interceptedLossRSEnd: {},interceptedLossTrajectory: {},interceptedLossRS: {}, survivedLossRS: {}, lossRS: {}",
+    #         rsEnd,
+    #         interceptedLossRSEnd,
+    #         interceptedLossTrajectory,
+    #         interceptedLossRS,
+    #         survivedLossRS,
+    #         lossRS,
+    #     )
+    #     return None
+    #
+    # def non_verbose_func():
+    #     return None
+    #
+    # jax.lax.cond(verbose, verbose_func, non_verbose_func)
+    return lossRS
+
+
+@jax.jit
 def learning_loss_function_single(
     pursuerX,
     heading,
@@ -366,6 +417,7 @@ def learning_loss_function_single(
     pathHistory,
     interceptedPoint,
     trueParams,
+    verbose=False,
 ):
     headings = heading * jnp.ones(pathHistory.shape[0])
     ez = dubinsEZ_from_pursuerX(
@@ -402,15 +454,23 @@ def learning_loss_function_single(
         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
     )
     # return rsEnd**2
-    return lossRS + lossEZ  # total loss
+    return lossRS  # + lossEZ  # total loss
 
 
-batched_loss = jax.jit(
-    jax.vmap(
-        learning_loss_function_single,
-        in_axes=(None, 0, 0, 0, 0, 0, None),
+if interceptionOnBoundary:
+    batched_loss = jax.jit(
+        jax.vmap(
+            learning_loss_on_boundary_function_single,
+            in_axes=(None, 0, 0, 0, 0, 0, None, None),
+        )
     )
-)
+else:
+    batched_loss = jax.jit(
+        jax.vmap(
+            learning_loss_function_single,
+            in_axes=(None, 0, 0, 0, 0, 0, None, None),
+        )
+    )
 
 
 @jax.jit
@@ -422,6 +482,7 @@ def total_learning_loss(
     pathHistories,
     interceptedPoints,
     trueParams,
+    verbose=False,
 ):
     # shape (N,)
     losses = batched_loss(
@@ -432,15 +493,16 @@ def total_learning_loss(
         pathHistories,
         interceptedPoints,
         trueParams,
+        verbose,
     )
 
     # total loss = sum over agents
     return jnp.sum(losses) / len(losses)
 
 
-batched_loss_multiple_pursuerX = jax.jit(
-    jax.vmap(total_learning_loss, in_axes=(0, None, None, None, None, None, None, None))
-)
+# batched_loss_multiple_pursuerX = jax.jit(
+#     jax.vmap(total_learning_loss, in_axes=(0, None, None, None, None, None, None, None))
+# )
 
 
 dTotalLossDX = jax.jit(jax.jacfwd(total_learning_loss, argnums=0))
@@ -505,6 +567,7 @@ def run_optimization_hueristic(
             pathHistories,
             endPoints,
             trueParams,
+            verbose=False,
         )
         funcs = {}
         funcs["loss"] = loss
@@ -527,15 +590,15 @@ def run_optimization_hueristic(
         }
         return funcsSens, False
 
-    initialLoss = total_learning_loss(
-        initialPursuerX,
-        headings,
-        speeds,
-        interceptedList,
-        pathHistories,
-        endPoints,
-        trueParams,
-    )
+    # initialLoss = total_learning_loss(
+    #     initialPursuerX,
+    #     headings,
+    #     speeds,
+    #     interceptedList,
+    #     pathHistories,
+    #     endPoints,
+    #     trueParams,
+    # )
     # print("initial loss:", initialLoss)
     optProb = Optimization("path optimization", objfunc)
     numVars = 6
@@ -552,7 +615,7 @@ def run_optimization_hueristic(
     optProb.addObj("loss")
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
-    opt.options["max_iter"] = 50
+    opt.options["max_iter"] = 100
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
@@ -571,6 +634,8 @@ def run_optimization_hueristic(
     #     sol.fStar,
     # )
     # print("Optimization status:", sol.optInform["text"])
+    loss, _ = objfunc(sol.xStar)
+    loss = loss["loss"]
     return pursuerX, loss
 
 
@@ -617,13 +682,14 @@ def find_opt_starting_pursuerX(
     # )
 
     # create half initial headings cetered around startHeading1 and half around startHeading2 with random noise
-    initialHeadings1 = startHeading1 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
-    initialHeadings2 = startHeading2 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
-    initialHeadings = np.concatenate([initialHeadings1, initialHeadings2])
+    # initialHeadings1 = startHeading1 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
+    # initialHeadings2 = startHeading2 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
+    # initialHeadings = np.concatenate([initialHeadings1, initialHeadings2])
 
     mean, cov = compute_variance_of_puruser_parameters(previousPursuerXList)
     initialPositionXs = mean[0] + np.random.normal(0.0, cov[0], numStartHeadings)
     initialPositionYs = mean[1] + np.random.normal(0.0, cov[1], numStartHeadings)
+    initialHeadings = mean[2] + np.random.normal(0.0, cov[2], numStartHeadings)
     if not positionAndHeadingOnly:
         initialSpeeds = mean[3] + np.random.normal(0.0, cov[3], numStartHeadings)
         initialTurnRadii = mean[4] + np.random.normal(0.0, 3 * cov[4], numStartHeadings)
@@ -701,6 +767,9 @@ def learn_ez(
             lowerLimit, upperLimit, numStartHeadings
         )
     else:
+        # initialPursuerXList = latin_hypercube_uniform(
+        #     lowerLimit, upperLimit, numStartHeadings
+        # )
         initialPursuerXList = find_opt_starting_pursuerX(
             interceptedList,
             endPoints,
@@ -785,22 +854,69 @@ def softmin(x, tau=0.5):
     return -tau * jnp.log(jnp.sum(jnp.exp(-x / tau)))
 
 
+def which_lp_path_minimizes_number_of_potential_solutions(
+    angle,
+    heading,
+    pursuerXList,
+    speed,
+    trueParams,
+    center,
+    radius,
+    tmax=10.0,
+    numPoints=100,
+):
+    N = pursuerXList.shape[0]
+
+    # Simulate new path
+    start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
+
+    def intercpetion_point(pursuerX):
+        intercepted, endPoint, endTime, pathHistory = send_low_priority_agent(
+            start_pos,
+            heading,
+            speed,
+            pursuerX[0:2],
+            pursuerX[2],
+            pursuerX[4],
+            0.0,
+            pursuerX[5],
+            pursuerX[3],
+            tmax,
+            numPoints,
+            numSimulationPoints=100,
+        )
+        return endPoint
+
+    interceptedPoints = jax.vmap(intercpetion_point)(pursuerXList)
+
+    def pairwise_disagree(i, j):
+        pi = interceptedPoints[i]
+        pj = interceptedPoints[j]
+
+        # return jnp.linalg.norm(pi - pj)
+        return (~jnp.allclose(pi, pj, atol=0.1)).astype(jnp.float64)
+
+    # indices = jnp.arange(N)
+    pairs = jnp.array([(i, j) for i in range(N) for j in range(i + 1, N)])
+
+    def pair_score(pair):
+        i, j = pair
+        return pairwise_disagree(i, j)
+
+    score = jnp.sum(jax.vmap(pair_score)(pairs))
+    return score
+
+
 def inside_model_disagreement_score(
     angle,
     heading,
     pursuerXList,
-    cov_theta,
     speed,
     trueParams,
     center,
     radius,
     tmax=10.0,
     num_points=100,
-    headings=None,
-    pathHistories=None,
-    interceptedList=None,
-    endPoints=None,
-    speeds=None,
 ):
     N = pursuerXList.shape[0]
     epsilon = 0.1
@@ -882,16 +998,11 @@ def optimize_next_low_priority_path(
     heading_flat = heading_grid.ravel()
 
     scores = jax.vmap(
-        inside_model_disagreement_score,
+        # inside_model_disagreement_score,
+        which_lp_path_minimizes_number_of_potential_solutions,
         in_axes=(
             0,
             0,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
             None,
             None,
             None,
@@ -904,19 +1015,15 @@ def optimize_next_low_priority_path(
         angle_flat,
         heading_flat,
         pursuerXList,
-        None,
         speed,
         trueParams,
         center,
         radius,
         tmax,
         num_points,
-        headings,
-        pathHistories,
-        interceptedList,
-        endPoints,
-        speeds,
     )
+    print("minimum score:", jnp.min(scores))
+    print("maximum score:", jnp.max(scores))
 
     best_idx = jnp.nanargmax(scores)
 
@@ -1227,7 +1334,6 @@ def plot_pursuer_parameters_spread(
             alpha=0.2,
         )
         axes[2, 1].plot(pursuerParameterMean_history[:, 5], "b-")
-        print("test", pursuerParameterVariance_history[:, 5])
         axes[2, 1].fill_between(
             range(len(pursuerParameterMean_history)),
             pursuerParameterMean_history[:, 5]
@@ -1364,9 +1470,20 @@ def plot_pursuer_parameters_spread(
             )
 
 
+def get_unique_rows_by_proximity(arr, lossList, rtol=1e-3):
+    unique_list = []
+    unique_loss_list = []
+    for i, row in enumerate(arr):
+        # if not any(np.all(np.isclose(row, u, rtol=rtol)) for u in unique_list):
+        if not any(np.linalg.norm(row - u) < 1e-3 for u in unique_list):
+            unique_list.append(row)
+            unique_loss_list.append(lossList[i])
+    return np.array(unique_list), np.array(unique_loss_list)
+
+
 def main():
-    pursuerPosition = np.array([0.5, -0.7])
-    pursuerHeading = (-5.0 / 20.0) * np.pi
+    pursuerPosition = np.array([0.5, 0.5])
+    pursuerHeading = (0.0 / 20.0) * np.pi
     pursuerRange = 2.0
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
@@ -1374,7 +1491,7 @@ def main():
     pursuerTurnRadius = 0.4
     dt = 0.01
     searchCircleCenter = np.array([0, 0])
-    searchCircleRadius = 3.0
+    searchCircleRadius = 7.0
     tmax = (2 * searchCircleRadius) / agentSpeed
     trueParams = jnp.array(
         [
@@ -1390,9 +1507,8 @@ def main():
     numPoints = int(tmax / dt) + 1
 
     numOptimizerStarts = 100
-
     interceptedList = []
-    numLowPriorityAgents = 10
+    numLowPriorityAgents = 5
     endPoints = []
     endTimes = []
     pathHistories = []
@@ -1415,9 +1531,10 @@ def main():
     pursuerXList = None
     singlePursuerX = False
     pursuerXListZeroLoss = None
+    lossListZeroLoss = None
     i = 0
 
-    keepLossThreshold = 1e-1
+    keepLossThreshold = 1e-5
 
     while i < numLowPriorityAgents and not singlePursuerX:
         print("iteration:", i)
@@ -1482,19 +1599,33 @@ def main():
             numOptimizerStarts,
         )
         pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
+        lossListZeroLoss = lossList[lossList <= keepLossThreshold]
         print("num particles", np.sum(lossList <= keepLossThreshold))
-        if np.sum(lossList <= keepLossThreshold) == 0:
+        mean, cov = compute_variance_of_puruser_parameters(pursuerXListZeroLoss)
+        pursuerXListZeroLoss, lossListZeroLoss = get_unique_rows_by_proximity(
+            pursuerXListZeroLoss, lossListZeroLoss, rtol=1e-1
+        )
+        print("num unique particles", len(pursuerXListZeroLoss))
+        if len(lossListZeroLoss) == 0:
             break
+        for pursuerX in pursuerXListZeroLoss:
+            loss = total_learning_loss(
+                pursuerX,
+                jnp.array(headings),
+                jnp.array(speeds),
+                jnp.array(interceptedList),
+                jnp.array(pathHistories),
+                jnp.array(endPoints),
+                trueParams,
+                verbose=False,
+            )
         pursuerParameter_history.append(pursuerXList)
         lossList_history.append(lossList)
         mean, cov = compute_variance_of_puruser_parameters(
             pursuerXListZeroLoss,
-            lossList[lossList <= keepLossThreshold],
         )
         pursuerParameterVariance_history.append(cov)
         pursuerParameterMean_history.append(mean)
-        if np.sum(lossList <= keepLossThreshold) <= 1:
-            break
         if i % plotEvery == 0:
             fig1 = plot_all(
                 startPositions,
@@ -1508,7 +1639,7 @@ def main():
                 headings,
                 speeds,
                 pursuerXListZeroLoss,
-                lossList[lossList <= keepLossThreshold],
+                lossListZeroLoss,
                 trueParams,
             )
             fig1.savefig(f"video/{i}.png")
@@ -1517,6 +1648,8 @@ def main():
         plt.close("all")
         i += 1
         singlePursuerX = len(pursuerXList) == 1
+        if len(lossListZeroLoss) <= 1:
+            break
     pursuerParameter_history = jnp.array(pursuerParameter_history)
     lossList_history = jnp.array(lossList_history)
     pursuerParameterMean_history = jnp.array(pursuerParameterMean_history)
