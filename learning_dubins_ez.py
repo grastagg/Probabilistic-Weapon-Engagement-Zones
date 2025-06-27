@@ -15,7 +15,7 @@ import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
 
-positionAndHeadingOnly = False
+positionAndHeadingOnly = True
 knownSpeed = True
 interceptionOnBoundary = True
 
@@ -390,22 +390,6 @@ def learning_loss_on_boundary_function_single(
         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
     )
 
-    # def verbose_func():
-    #     jax.debug.print(
-    #         "endRS: {}, interceptedLossRSEnd: {},interceptedLossTrajectory: {},interceptedLossRS: {}, survivedLossRS: {}, lossRS: {}",
-    #         rsEnd,
-    #         interceptedLossRSEnd,
-    #         interceptedLossTrajectory,
-    #         interceptedLossRS,
-    #         survivedLossRS,
-    #         lossRS,
-    #     )
-    #     return None
-    #
-    # def non_verbose_func():
-    #     return None
-    #
-    # jax.lax.cond(verbose, verbose_func, non_verbose_func)
     return lossRS
 
 
@@ -501,11 +485,6 @@ def total_learning_loss(
     return jnp.sum(losses) / len(losses)
 
 
-# batched_loss_multiple_pursuerX = jax.jit(
-#     jax.vmap(total_learning_loss, in_axes=(0, None, None, None, None, None, None, None))
-# )
-
-
 dTotalLossDX = jax.jit(jax.jacfwd(total_learning_loss, argnums=0))
 
 
@@ -544,20 +523,6 @@ def run_optimization_hueristic(
     upperLimit,
     trueParams,
 ):
-    # print("running optimization heuristic: ", initialPursuerX)
-    # print(
-    #     "objective function true parameters:",
-    #     total_learning_loss(
-    #         trueParams,
-    #         headings,
-    #         speeds,
-    #         interceptedList,
-    #         pathHistories,
-    #         endPoints,
-    #         trueParams,
-    #     ),
-    # )
-
     def objfunc(xDict):
         pursuerX = xDict["pursuerX"]
         loss = total_learning_loss(
@@ -618,13 +583,6 @@ def run_optimization_hueristic(
     sol = opt(optProb, sens=sens)
     pursuerX = sol.xStar["pursuerX"]
     loss = sol.fStar
-    # print(
-    #     "Ran optimization hueristic...",
-    #     sol.xStar["pursuerX"],
-    #     " loss:",
-    #     sol.fStar,
-    # )
-    # print("Optimization status:", sol.optInform["text"])
     loss, _ = objfunc(sol.xStar)
     loss = loss["loss"]
     return pursuerX, loss
@@ -677,7 +635,8 @@ def find_opt_starting_pursuerX(
     # initialHeadings2 = startHeading2 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
     # initialHeadings = np.concatenate([initialHeadings1, initialHeadings2])
 
-    mean, cov = compute_variance_of_puruser_parameters(previousPursuerXList)
+    mean = jnp.mean(previousPursuerXList, axis=0)
+    cov = jnp.cov(previousPursuerXList, rowvar=False).diagonal()
     initialPositionXs = mean[0] + np.random.normal(0.0, cov[0], numStartHeadings)
     initialPositionYs = mean[1] + np.random.normal(0.0, cov[1], numStartHeadings)
     initialHeadings = mean[2] + np.random.normal(0.0, cov[2], numStartHeadings)
@@ -692,11 +651,6 @@ def find_opt_starting_pursuerX(
             )
             initialRanges = mean[5] + np.random.normal(0.0, cov[5], numStartHeadings)
     for i in range(numStartHeadings):
-        # previousPursuerX = previousPursuerXList[i]
-        if positionAndHeadingOnly:
-            lowerLimit = lowerLimit[:3]
-            upperLimit = upperLimit[:3]
-
         if positionAndHeadingOnly:
             intialPursuerX = jnp.array(
                 [
@@ -716,23 +670,17 @@ def find_opt_starting_pursuerX(
                         initialRanges[i],
                     ]
                 )
-            # initialPosition = startPosition
-            # initialPosition = previousPursuerX[0:2]
-            # initialHeading = previousPursuerX[2]
-            # initialSpeed = previousPursuerX[3]
-            # initialTurnRadius = previousPursuerX[4]
-            # initialRange = previousPursuerX[5]
-            # intialPursuerX = jnp.array(
-            #     [
-            #         initialPosition[0],
-            #         initialPosition[1],
-            #         # initialHeadings[i],
-            #         initialHeading,
-            #         initialSpeed,
-            #         initialTurnRadius,
-            #         initialRange,
-            #     ]
-            # )
+            else:
+                intialPursuerX = jnp.array(
+                    [
+                        initialPositionXs[i],
+                        initialPositionYs[i],
+                        initialHeadings[i],
+                        initialSpeeds[i],
+                        initialTurnRadii[i],
+                        initialRanges[i],
+                    ]
+                )
         initialPursuerXList.append(intialPursuerX)
     return jnp.array(initialPursuerXList)
 
@@ -751,8 +699,6 @@ def learn_ez(
 ):
     jax.config.update("jax_platform_name", "cpu")
     start = time.time()
-    # lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
-    # upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
     lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
     upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
     if knownSpeed:
@@ -768,9 +714,6 @@ def learn_ez(
             lowerLimit, upperLimit, numStartHeadings
         )
     else:
-        # initialPursuerXList = latin_hypercube_uniform(
-        #     lowerLimit, upperLimit, numStartHeadings
-        # )
         initialPursuerXList = find_opt_starting_pursuerX(
             interceptedList,
             endPoints,
@@ -779,7 +722,6 @@ def learn_ez(
             upperLimit,
             numStartHeadings,
         )
-    # for i in range(len(initialPursuerXList)):
     for i in tqdm.tqdm(range(len(initialPursuerXList))):
         pursuerX, loss = run_optimization_hueristic(
             headings,
@@ -799,17 +741,11 @@ def learn_ez(
     pursuerXList = np.array(pursuerXList).squeeze()
     lossList = np.array(lossList).squeeze()
 
-    # sorted_indices = jnp.argsort(lossList)
     sorted_indices = np.argsort(lossList)
     lossList = lossList[sorted_indices]
     pursuerXList = pursuerXList[sorted_indices]
-
     print("loss", lossList)
-    # only return ones with zero loss
-    # pursuerXList = pursuerXList[lossList == 0.0]
-    # lossList = lossList[lossList == 0.0]
     print("time to learn ez", time.time() - start)
-
     # pursuerXList[:, 2] = np.unwrap(pursuerXList[:, 2])
     return pursuerXList, lossList
 
@@ -897,7 +833,6 @@ def which_lp_path_minimizes_number_of_potential_solutions(
         # return jnp.linalg.norm(pi - pj)
         return (~jnp.allclose(pi, pj, atol=0.1)).astype(jnp.float64)
 
-    # indices = jnp.arange(N)
     pairs = jnp.array([(i, j) for i in range(N) for j in range(i + 1, N)])
 
     def pair_score(pair):
@@ -920,7 +855,6 @@ def inside_model_disagreement_score(
     num_points=100,
 ):
     N = pursuerXList.shape[0]
-    epsilon = 0.1
 
     # Simulate new path
     start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
@@ -976,9 +910,11 @@ def optimize_next_low_priority_path(
 ):
     jax.config.update("jax_platform_name", "gpu")
     start = time.time()
-    randomPath = False
+    randomPath = True
+    upperTheta = jnp.pi + jnp.pi / 4
+    lowerTheta = jnp.pi - jnp.pi / 4
     if randomPath:
-        best_angle = np.random.uniform(-np.pi, np.pi)
+        best_angle = np.random.uniform(lowerTheta, upperTheta)
         best_start_pos = center + radius * jnp.array(
             [jnp.cos(best_angle), jnp.sin(best_angle)]
         )
@@ -986,13 +922,12 @@ def optimize_next_low_priority_path(
             center[1] - best_start_pos[1],  # Δy
             center[0] - best_start_pos[0],  # Δx
         )
-        best_heading = headingToCenter + np.random.normal(0.0, 0.5)
+        best_heading = headingToCenter + np.random.normal(0.0, 0.2)
         return best_start_pos, best_heading
     print("Optimizing next low-priority path...")
 
     # Generate candidate start positions and headings
-    # angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
-    angles = jnp.linspace(-jnp.pi, jnp.pi, num_angles, endpoint=False)
+    angles = jnp.linspace(lowerTheta, upperTheta, num_angles, endpoint=False)
     headingsSac = jnp.linspace(-jnp.pi, jnp.pi, num_headings)
     angle_grid, heading_grid = jnp.meshgrid(angles, headingsSac)
     angle_flat = angle_grid.ravel()
@@ -1036,71 +971,6 @@ def optimize_next_low_priority_path(
 
     print("time to optimize next low-priority path:", time.time() - start)
     return best_start_pos, best_heading
-
-
-def weighted_cov(X, weights, unbiased=False):
-    """
-    Compute the weighted covariance matrix of dataset X with given weights.
-
-    Parameters:
-    -----------
-    X : ndarray of shape (n_samples, n_features)
-        The data matrix.
-    weights : ndarray of shape (n_samples,)
-        The weights for each observation. Can be unnormalized.
-    unbiased : bool
-        If True, use the unbiased (Bessel-corrected) estimate.
-
-    Returns:
-    --------
-    cov : ndarray of shape (n_features, n_features)
-        The weighted covariance matrix.
-    """
-    X = np.asarray(X)
-    weights = np.asarray(weights)
-
-    if X.ndim == 1:
-        X = X[:, np.newaxis]
-
-    assert (
-        X.shape[0] == weights.shape[0]
-    ), "Weights and data must match in number of samples"
-
-    w_sum = np.sum(weights)
-    mean = np.average(X, axis=0, weights=weights)
-
-    X_centered = X - mean
-    weighted_outer = (weights[:, np.newaxis] * X_centered).T @ X_centered
-
-    if unbiased:
-        w_squared_sum = np.sum(weights**2)
-        eff_dof = w_sum - w_squared_sum / w_sum
-        cov = weighted_outer / eff_dof
-    else:
-        cov = weighted_outer / w_sum
-
-    return cov
-
-
-def ranking_to_weights(errors, epsilon=1e-6):
-    errors = np.asarray(errors)
-    return 1.0 / (errors + epsilon)
-
-
-def compute_variance_of_puruser_parameters(pursuerXList, ranks=None):
-    if ranks is None:
-        weights = np.ones(len(pursuerXList))
-    else:
-        weights = ranking_to_weights(ranks)
-        weights = np.ones_like(weights)  # for now, use uniform weights
-    pursuerXList = jnp.array(pursuerXList)
-    # mean = jnp.mean(pursuerXList, axis=0)
-    mean = jnp.average(pursuerXList, axis=0, weights=weights)
-    # cov = jnp.cov(pursuerXList, rowvar=False)
-    cov = weighted_cov(pursuerXList, weights, unbiased=False)
-    print("Mean pursuer parameters:\n", mean)
-    print("Covariance of pursuer parameters:\n", cov.diagonal())
-    return mean, cov.diagonal()
 
 
 def plot_true_and_learned_pursuer(
@@ -1259,229 +1129,95 @@ def plot_pursuer_parameters_spread(
     numLowPriorityAgents,
     keepLossThreshold,
 ):
+    beta = 3.0
+    xData = np.arange(1, len(pursuerParameter_history) + 1)  # Start at 1
+
     if not positionAndHeadingOnly:
-        if knownSpeed:
-            fig, axes = plt.subplots(3, 2)
-            axes[2, 1].set_xlabel("Num Sacrificial Agents")
-            axes[2, 0].set_xlabel("Num Sacrificial Agents")
-            # set tick values of x axis
-            axes[0, 0].set_xticks(range(numLowPriorityAgents))
-            axes[0, 1].set_xticks(range(numLowPriorityAgents))
-            axes[1, 0].set_xticks(range(numLowPriorityAgents))
-            # axes[1, 1].set_xticks(range(numLowPriorityAgents))
-            axes[2, 0].set_xticks(range(numLowPriorityAgents))
-            axes[2, 1].set_xticks(range(numLowPriorityAgents))
-            axes[0, 0].set_title("Pursuer X Position")
-            axes[0, 0].plot(
-                np.ones(len(pursuerParameter_history)) * trueParams[0], "r--"
-            )
-            axes[0, 1].set_title("Pursuer Y Position")
-            axes[0, 1].plot(
-                np.ones(len(pursuerParameter_history)) * trueParams[1], "r--"
-            )
-            axes[1, 0].set_title("Pursuer Heading")
-            axes[1, 0].plot(
-                np.ones(len(pursuerParameter_history)) * trueParams[2], "r--"
-            )
-            # axes[1, 1].set_title("Pursuer Speed")
-            # axes[1, 1].plot(
-            #     np.ones(len(pursuerParameter_history)) * trueParams[3], "r--"
-            # )
-            axes[2, 0].set_title("Pursuer Turn Radius")
-            axes[2, 0].plot(
-                np.ones(len(pursuerParameter_history)) * trueParams[4], "r--"
-            )
-            axes[2, 1].set_title("Pursuer Range")
-            axes[2, 1].plot(
-                np.ones(len(pursuerParameter_history)) * trueParams[5], "r--"
-            )
-            # plot mean and variance of pursuer parameters
-            beta = 3.0
-            axes[0, 0].plot(pursuerParameterMean_history[:, 0], "b-")
-            axes[0, 0].fill_between(
-                range(len(pursuerParameterMean_history)),
-                pursuerParameterMean_history[:, 0]
-                - beta * jnp.sqrt(pursuerParameterVariance_history[:, 0]),
-                pursuerParameterMean_history[:, 0]
-                + beta * jnp.sqrt(pursuerParameterVariance_history[:, 0]),
+        # (title, index in estimated params, index in trueParams)
+        param_info = [
+            ("Pursuer X Position", 0, 0),
+            ("Pursuer Y Position", 1, 1),
+            ("Pursuer Heading", 2, 2),
+            # ("Pursuer Speed", 3, 3),  # omitted
+            ("Pursuer Turn Radius", 3, 4),
+            ("Pursuer Range", 4, 5),
+        ]
+        fig, axes = plt.subplots(3, 2, figsize=(10, 8), sharex=True)
+        axes = axes.flatten()
+
+        for idx, (title, lidx, tidx) in enumerate(param_info):
+            ax = axes[idx]
+            ax.set_title(title)
+            ax.set_xticks(xData)
+            ax.axhline(trueParams[tidx], color="r", linestyle="--", label="True Value")
+            mean = pursuerParameterMean_history[:, lidx]
+            std = jnp.sqrt(pursuerParameterVariance_history[:, lidx])
+            ax.plot(xData, mean, "b-", label="Mean")
+            ax.fill_between(
+                xData,
+                mean - beta * std,
+                mean + beta * std,
                 color="b",
                 alpha=0.2,
-            )
-            axes[0, 1].plot(pursuerParameterMean_history[:, 1], "b-")
-            axes[0, 1].fill_between(
-                range(len(pursuerParameterMean_history)),
-                pursuerParameterMean_history[:, 1]
-                - beta * jnp.sqrt(pursuerParameterVariance_history[:, 1]),
-                pursuerParameterMean_history[:, 1]
-                + beta * jnp.sqrt(pursuerParameterVariance_history[:, 1]),
-                color="b",
-                alpha=0.2,
-            )
-            axes[1, 0].plot(pursuerParameterMean_history[:, 2], "b-")
-            axes[1, 0].fill_between(
-                range(len(pursuerParameterMean_history)),
-                pursuerParameterMean_history[:, 2]
-                - beta * jnp.sqrt(pursuerParameterVariance_history[:, 2]),
-                pursuerParameterMean_history[:, 2]
-                + beta * jnp.sqrt(pursuerParameterVariance_history[:, 2]),
-                color="b",
-                alpha=0.2,
-            )
-            # axes[1, 1].plot(pursuerParameterMean_history[:, 3], "b-")
-            # axes[1, 1].fill_between(
-            #     range(len(pursuerParameterMean_history)),
-            #     pursuerParameterMean_history[:, 3]
-            #     - beta * jnp.sqrt(pursuerParameterVariance_history[:, 3]),
-            #     pursuerParameterMean_history[:, 3]
-            #     + beta * jnp.sqrt(pursuerParameterVariance_history[:, 3]),
-            #     color="b",
-            #     alpha=0.2,
-            # )
-            axes[2, 0].plot(pursuerParameterMean_history[:, 3], "b-")
-            axes[2, 0].fill_between(
-                range(len(pursuerParameterMean_history)),
-                pursuerParameterMean_history[:, 3]
-                - beta * jnp.sqrt(pursuerParameterVariance_history[:, 3]),
-                pursuerParameterMean_history[:, 3]
-                + beta * jnp.sqrt(pursuerParameterVariance_history[:, 3]),
-                color="b",
-                alpha=0.2,
-            )
-            axes[2, 1].plot(pursuerParameterMean_history[:, 4], "b-")
-            axes[2, 1].fill_between(
-                range(len(pursuerParameterMean_history)),
-                pursuerParameterMean_history[:, 4]
-                - beta * pursuerParameterVariance_history[:, 4],
-                pursuerParameterMean_history[:, 4]
-                + beta * pursuerParameterVariance_history[:, 5],
-                color="b",
-                alpha=0.2,
+                label="±3σ",
             )
 
             for i in range(numOptimizerStarts):
                 mask = lossList_history[:, i] <= keepLossThreshold
-                c = lossList_history[:, i][mask]
-                max = keepLossThreshold
-                c = jnp.clip(c, 0.0, max)  # Ensure c is in [0, 1] for color mapping
-                pointSize = 10
-                axes[0, 0].scatter(
-                    np.arange(numLowPriorityAgents)[mask],
-                    pursuerParameter_history[:, i, 0][mask],
+                c = jnp.clip(lossList_history[:, i][mask], 0.0, keepLossThreshold)
+                ax.scatter(
+                    xData[mask],
+                    pursuerParameter_history[:, i, lidx][mask],
                     c=c,
+                    s=10,
                     vmin=0.0,
-                    vmax=max,
-                    s=pointSize,
+                    vmax=keepLossThreshold,
                 )
-                axes[0, 1].scatter(
-                    np.arange(numLowPriorityAgents)[mask],
-                    pursuerParameter_history[:, i, 1][mask],
-                    c=c,
-                    vmin=0.0,
-                    vmax=max,
-                    s=pointSize,
-                )
-                axes[1, 0].scatter(
-                    np.arange(numLowPriorityAgents)[mask],
-                    pursuerParameter_history[:, i, 2][mask],
-                    c=c,
-                    vmin=0.0,
-                    vmax=max,
-                    s=pointSize,
-                )
-                # axes[1, 1].scatter(
-                #     np.arange(numLowPriorityAgents)[mask],
-                #     pursuerParameter_history[:, i, 3][mask],
-                #     c=c,
-                #     vmin=0.0,
-                #     vmax=max,
-                #     s=pointSize,
-                # )
-                axes[2, 0].scatter(
-                    np.arange(numLowPriorityAgents)[mask],
-                    pursuerParameter_history[:, i, 3][mask],
-                    c=c,
-                    vmin=0.0,
-                    vmax=max,
-                    s=pointSize,
-                )
-                axes[2, 1].scatter(
-                    np.arange(numLowPriorityAgents)[mask],
-                    pursuerParameter_history[:, i, 4][mask],
-                    c=c,
-                    vmin=0.0,
-                    vmax=max,
-                    s=pointSize,
-                )
+
+        axes[-2].set_xlabel("Num Sacrificial Agents")
+        axes[-1].set_xlabel("Num Sacrificial Agents")
+        axes[0].legend()
+        fig.tight_layout()
+
     else:
-        fig, axes = plt.subplots(3)
-        xData = np.arange(1, len(pursuerParameter_history) + 1)
-        axes[0].set_title("Pursuer X Position")
-        axes[0].plot(
-            xData, np.ones(len(pursuerParameter_history)) * trueParams[0], "r--"
-        )
-        axes[1].set_title("Pursuer Y Position")
-        axes[1].plot(
-            xData, np.ones(len(pursuerParameter_history)) * trueParams[1], "r--"
-        )
-        axes[2].set_title("Pursuer Heading")
-        axes[2].plot(
-            xData, np.ones(len(pursuerParameter_history)) * trueParams[2], "r--"
-        )
-        axes[2].set_xlabel("Num Sacrificial Agents")
-        axes[0].set_xticks(xData)
-        axes[1].set_xticks(xData)
-        axes[2].set_xticks(xData)
-        axes[0].plot(xData, pursuerParameterMean_history[:, 0], "b-")
-        beta = 3.0
-        axes[0].fill_between(
-            xData,
-            pursuerParameterMean_history[:, 0]
-            - beta * jnp.sqrt(pursuerParameterVariance_history[:, 0]),
-            pursuerParameterMean_history[:, 0]
-            + beta * jnp.sqrt(pursuerParameterVariance_history[:, 0]),
-            color="b",
-            alpha=0.2,
-        )
-        axes[1].plot(xData, pursuerParameterMean_history[:, 1], "b-")
-        axes[1].fill_between(
-            xData,
-            pursuerParameterMean_history[:, 1]
-            - beta * jnp.sqrt(pursuerParameterVariance_history[:, 1]),
-            pursuerParameterMean_history[:, 1]
-            + beta * jnp.sqrt(pursuerParameterVariance_history[:, 1]),
-            color="b",
-            alpha=0.2,
-        )
-        axes[2].plot(xData, pursuerParameterMean_history[:, 2], "b-")
-        axes[2].fill_between(
-            xData,
-            pursuerParameterMean_history[:, 2] - pursuerParameterVariance_history[:, 2],
-            pursuerParameterMean_history[:, 2] + pursuerParameterVariance_history[:, 2],
-            color="b",
-            alpha=0.2,
-        )
-        for i in range(numOptimizerStarts):
-            mask = lossList_history[:, i] <= keepLossThreshold
-            c = lossList_history[:, i][mask]
-            pointSize = 10
-            axes[0].scatter(
-                xData[mask],
-                pursuerParameter_history[:, i, 0][mask],
-                c=c,
-                s=pointSize,
+        param_info = [
+            ("Pursuer X Position", 0, 0),
+            ("Pursuer Y Position", 1, 1),
+            ("Pursuer Heading", 2, 2),
+        ]
+        fig, axes = plt.subplots(3, 1, figsize=(8, 6), sharex=True)
+
+        for ax, (title, lidx, tidx) in zip(axes, param_info):
+            ax.set_title(title)
+            ax.set_xticks(xData)
+            ax.axhline(trueParams[tidx], color="r", linestyle="--", label="True Value")
+            mean = pursuerParameterMean_history[:, lidx]
+            std = jnp.sqrt(pursuerParameterVariance_history[:, lidx])
+            ax.plot(xData, mean, "b-", label="Mean")
+            ax.fill_between(
+                xData,
+                mean - beta * std,
+                mean + beta * std,
+                color="b",
+                alpha=0.2,
+                label="±3σ",
             )
-            axes[1].scatter(
-                xData[mask],
-                pursuerParameter_history[:, i, 1][mask],
-                c=c,
-                s=pointSize,
-            )
-            axes[2].scatter(
-                xData[mask],
-                pursuerParameter_history[:, i, 2][mask],
-                c=c,
-                s=pointSize,
-            )
+
+            for i in range(numOptimizerStarts):
+                mask = lossList_history[:, i] <= keepLossThreshold
+                c = jnp.clip(lossList_history[:, i][mask], 0.0, keepLossThreshold)
+                ax.scatter(
+                    xData[mask],
+                    pursuerParameter_history[:, i, lidx][mask],
+                    c=c,
+                    s=10,
+                    vmin=0.0,
+                    vmax=keepLossThreshold,
+                )
+
+        axes[-1].set_xlabel("Num Sacrificial Agents")
+        axes[0].legend()
+        fig.tight_layout()
 
 
 def get_unique_rows_by_proximity(arr, lossList, rtol=1e-3):
@@ -1496,6 +1232,7 @@ def get_unique_rows_by_proximity(arr, lossList, rtol=1e-3):
 
 
 def main():
+    # === Setup true pursuer parameters ===
     pursuerPosition = np.array([0.0, 0.0])
     pursuerHeading = (10.0 / 20.0) * np.pi
     pursuerRange = 2.0
@@ -1504,6 +1241,7 @@ def main():
     agentSpeed = 1.0
     pursuerTurnRadius = 0.4
     dt = 0.01
+
     searchCircleCenter = np.array([0, 0])
     searchCircleRadius = 4.0
     tmax = (2 * searchCircleRadius) / agentSpeed
@@ -1519,10 +1257,12 @@ def main():
     )
 
     numPoints = int(tmax / dt) + 1
-
     numOptimizerStarts = 100
-    interceptedList = []
+    keepLossThreshold = 1e-5
     numLowPriorityAgents = 6
+
+    # === Initialize histories ===
+    interceptedList = []
     endPoints = []
     endTimes = []
     pathHistories = []
@@ -1530,38 +1270,34 @@ def main():
     headings = []
     speeds = []
 
-    # agents = uniform_circular_entry_points_with_heading_noise(
-    #     searchCircleCenter,
-    #     searchCircleRadius,
-    #     numLowPriorityAgents,
-    #     heading_noise_std=0.5,
-    # )
     plotEvery = 1
-    pursuerParameterRMSE_history = []
     pursuerParameter_history = []
     pursuerParameterMean_history = []
     pursuerParameterVariance_history = []
+    pursuerParameterMean_history = []
     lossList_history = []
+
     pursuerXList = None
-    singlePursuerX = False
     pursuerXListZeroLoss = None
     lossListZeroLoss = None
-    i = 0
 
-    keepLossThreshold = 1e-5
+    i = 0
+    singlePursuerX = False
 
     while i < numLowPriorityAgents and not singlePursuerX:
         print("num agents:", i + 1)
+
+        # === Choose next path ===
         if i == 0:
             startPosition = jnp.array([-searchCircleRadius, 0.0001])
             heading = 0.0001
         else:
-            if pursuerXListZeroLoss is None:
-                searchCenter = searchCircleCenter
-            else:
-                searchCenter = jnp.mean(pursuerXListZeroLoss[:, :2], axis=0)
+            searchCenter = (
+                jnp.mean(pursuerXListZeroLoss[:, :2], axis=0)
+                if pursuerXListZeroLoss is not None
+                else searchCircleCenter
+            )
             startPosition, heading = optimize_next_low_priority_path(
-                # pursuerXList,
                 pursuerXListZeroLoss,
                 jnp.array(headings),
                 jnp.array(speeds),
@@ -1579,9 +1315,11 @@ def main():
                 num_points=numPoints,
             )
 
+        # === Send agent and record result ===
         startPositions.append(startPosition)
         headings.append(heading)
         speeds.append(agentSpeed)
+
         intercepted, endPoint, endTime, pathHistory = send_low_priority_agent(
             startPosition,
             heading,
@@ -1599,7 +1337,9 @@ def main():
         endPoints.append(endPoint)
         endTimes.append(endTime)
         pathHistories.append(pathHistory)
-        (pursuerXList, lossList) = learn_ez(
+
+        # === Learn from updated dataset ===
+        pursuerXList, lossList = learn_ez(
             jnp.array(headings),
             jnp.array(speeds),
             jnp.array(interceptedList),
@@ -1607,38 +1347,40 @@ def main():
             jnp.array(endPoints),
             jnp.array(endTimes),
             trueParams,
-            # pursuerXList,
             keepLossThreshold,
             pursuerXListZeroLoss,
             numOptimizerStarts,
         )
+
+        # === Post-process samples ===
         pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
         lossListZeroLoss = lossList[lossList <= keepLossThreshold]
-        print("num particles", np.sum(lossList <= keepLossThreshold))
+        print("num particles", len(pursuerXListZeroLoss))
+
         pursuerXListZeroLoss, lossListZeroLoss = get_unique_rows_by_proximity(
             pursuerXListZeroLoss, lossListZeroLoss, rtol=1e-1
         )
         print("num unique particles", len(pursuerXListZeroLoss))
+
         if len(lossListZeroLoss) == 0:
+            print("no model found")
             break
-        for pursuerX in pursuerXListZeroLoss:
-            loss = total_learning_loss(
-                pursuerX,
-                jnp.array(headings),
-                jnp.array(speeds),
-                jnp.array(interceptedList),
-                jnp.array(pathHistories),
-                jnp.array(endPoints),
-                trueParams,
-                verbose=False,
-            )
+
+        mean = jnp.mean(pursuerXListZeroLoss, axis=0)
+        if len(lossListZeroLoss) == 1:
+            cov = jnp.zeros_like(mean)
+        else:
+            cov = jnp.cov(pursuerXListZeroLoss, rowvar=False).diagonal()
+        print("mean pursuer parameters", mean)
+        print("cov pursuer parameters", cov)
+        pursuerParameterMean_history.append(mean)
+        pursuerParameterVariance_history.append(cov)
+
+        # === Store parameter estimates ===
         pursuerParameter_history.append(pursuerXList)
         lossList_history.append(lossList)
-        mean, cov = compute_variance_of_puruser_parameters(
-            pursuerXListZeroLoss,
-        )
-        pursuerParameterVariance_history.append(cov)
-        pursuerParameterMean_history.append(mean)
+
+        # === Optional plot for video ===
         if i % plotEvery == 0:
             fig1 = plot_all(
                 startPositions,
@@ -1660,15 +1402,19 @@ def main():
 
         plt.close("all")
         i += 1
+
         singlePursuerX = len(pursuerXList) == 1
         if len(lossListZeroLoss) <= 1:
             break
+
+    # === Final plot ===
     pursuerParameter_history = jnp.array(pursuerParameter_history)
     lossList_history = jnp.array(lossList_history)
     pursuerParameterMean_history = jnp.array(pursuerParameterMean_history)
     pursuerParameterVariance_history = jnp.array(
         pursuerParameterVariance_history
     ).squeeze()
+
     plot_pursuer_parameters_spread(
         pursuerParameter_history,
         pursuerParameterMean_history,
