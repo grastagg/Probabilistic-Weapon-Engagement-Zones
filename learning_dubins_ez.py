@@ -1,5 +1,5 @@
-import re
 import tqdm
+import sys
 import time
 import jax
 import getpass
@@ -9,15 +9,18 @@ import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
 from pyDOE import lhs  # or pyDOE2
+import os
+import json
 
 import dubinsEZ
 import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
 
-positionAndHeadingOnly = True
+positionAndHeadingOnly = False
 knownSpeed = True
 interceptionOnBoundary = True
+randomPath = False
 
 np.random.seed(326)  # for reproducibility
 
@@ -30,8 +33,8 @@ def plot_low_priority_paths(
     ax.set_ylabel("Y", fontsize=24)
     ax.tick_params(labelsize=18)
     # set x and y limits
-    ax.set_xlim(-3.0, 3.0)
-    ax.set_ylim(-3.0, 3.0)
+    ax.set_xlim(-5.0, 5.0)
+    ax.set_ylim(-5.0, 5.0)
 
     interceptedCounter = 0
     survivedCounter = 0
@@ -488,29 +491,6 @@ def total_learning_loss(
 dTotalLossDX = jax.jit(jax.jacfwd(total_learning_loss, argnums=0))
 
 
-def centroid_and_principal_axis(points):
-    points = np.asarray(points)
-    centroid = np.mean(points, axis=0)
-    centered = points - centroid
-    cov = (centered.T @ centered) / len(points)
-    eigvals, eigvecs = np.linalg.eigh(cov)
-    principal_axis = eigvecs[:, np.argmin(eigvals)]  # largest eigenvalue
-
-    return centroid, principal_axis
-
-
-def find_initial_position_and_heading(interceptedList, endPoints):
-    interceptedPoints = endPoints[interceptedList]
-    centroid, principal_axis = centroid_and_principal_axis(interceptedPoints)
-    heading = np.arctan2(principal_axis[1], principal_axis[0])
-    negHeading = np.arctan2(-principal_axis[1], -principal_axis[0])
-    if np.isnan(heading):
-        heading = 0.0
-        negHeading = 0.0
-        centroid = np.array([0.0, 0.0])
-    return centroid, heading, negHeading
-
-
 def run_optimization_hueristic(
     headings,
     speeds,
@@ -523,6 +503,22 @@ def run_optimization_hueristic(
     upperLimit,
     trueParams,
 ):
+    if positionAndHeadingOnly:
+        lowerLimitSub = np.array([0.1, 0.1, 0])
+        lowerLimitSub = np.array([0.1, 0.1, 0])
+    else:
+        lowerLimitSub = np.array([0.1, 0.1, 0, 0, 0])
+        lowerLimitSub = np.array([0.1, 0.1, 0, 0, 0])
+    initialLoss = total_learning_loss(
+        initialPursuerX,
+        headings,
+        speeds,
+        interceptedList,
+        pathHistories,
+        endPoints,
+        trueParams,
+    )
+
     def objfunc(xDict):
         pursuerX = xDict["pursuerX"]
         loss = total_learning_loss(
@@ -565,10 +561,10 @@ def run_optimization_hueristic(
         nVars=numVars,
         varType="c",
         value=initialPursuerX,
-        lower=lowerLimit,
-        upper=upperLimit,
+        lower=lowerLimit - lowerLimitSub,
+        upper=upperLimit + lowerLimitSub,
     )
-    optProb.addObj("loss")
+    optProb.addObj("loss", scale=initialLoss)
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
     opt.options["max_iter"] = 100
@@ -582,9 +578,18 @@ def run_optimization_hueristic(
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
     pursuerX = sol.xStar["pursuerX"]
-    loss = sol.fStar
-    loss, _ = objfunc(sol.xStar)
-    loss = loss["loss"]
+    # loss = sol.fStar
+    # loss, _ = objfunc(sol.xStar)
+    loss = total_learning_loss(
+        pursuerX,
+        headings,
+        speeds,
+        interceptedList,
+        pathHistories,
+        endPoints,
+        trueParams,
+    )
+    # loss = loss["loss"]
     return pursuerX, loss
 
 
@@ -621,10 +626,6 @@ def find_opt_starting_pursuerX(
     upperLimit,
     numStartHeadings=10,
 ):
-    startPosition, startHeading1, startHeading2 = find_initial_position_and_heading(
-        interceptedList, endPoints
-    )
-
     initialPursuerXList = []
     # initialHeadings = np.linspace(
     #     startHeading1, startHeading1 + 2 * np.pi, numStartHeadings, endpoint=False
@@ -696,19 +697,13 @@ def learn_ez(
     keepLossThreshold,
     previousPursuerXList=None,
     numStartHeadings=10,
+    lowerLimit=None,
+    upperLimit=None,
 ):
-    jax.config.update("jax_platform_name", "cpu")
+    # jax.config.update("jax_platform_name", "cpu")
     start = time.time()
-    lowerLimit = jnp.array([-2.0, -2.0, -jnp.pi, 0.0, 0.0, 0.0])
-    upperLimit = jnp.array([2.0, 2.0, jnp.pi, 5.0, 2.0, 5.0])
-    if knownSpeed:
-        lowerLimit = lowerLimit[jnp.array([0, 1, 2, 4, 5])]
-        upperLimit = upperLimit[jnp.array([0, 1, 2, 4, 5])]
     pursuerXList = []
     lossList = []
-    if positionAndHeadingOnly:
-        lowerLimit = lowerLimit[:3]
-        upperLimit = upperLimit[:3]
     if previousPursuerXList is None:
         initialPursuerXList = latin_hypercube_uniform(
             lowerLimit, upperLimit, numStartHeadings
@@ -723,6 +718,7 @@ def learn_ez(
             numStartHeadings,
         )
     for i in tqdm.tqdm(range(len(initialPursuerXList))):
+        # for i in range(len(initialPursuerXList)):
         pursuerX, loss = run_optimization_hueristic(
             headings,
             speeds,
@@ -744,7 +740,7 @@ def learn_ez(
     sorted_indices = np.argsort(lossList)
     lossList = lossList[sorted_indices]
     pursuerXList = pursuerXList[sorted_indices]
-    print("loss", lossList)
+    print("lossList:", lossList)
     print("time to learn ez", time.time() - start)
     # pursuerXList[:, 2] = np.unwrap(pursuerXList[:, 2])
     return pursuerXList, lossList
@@ -822,16 +818,29 @@ def which_lp_path_minimizes_number_of_potential_solutions(
             numPoints,
             numSimulationPoints=100,
         )
-        return endPoint
+        return endPoint, intercepted
 
-    interceptedPoints = jax.vmap(intercpetion_point)(pursuerXList)
+    interceptedPoints, intercepteds = jax.vmap(intercpetion_point)(pursuerXList)
 
     def pairwise_disagree(i, j):
         pi = interceptedPoints[i]
         pj = interceptedPoints[j]
+        intercepted_i = intercepteds[i]
+        intercepted_j = intercepteds[j]
 
+        # norm = jnp.linalg.norm(pi - pj)
+        # return jnp.where(jnp.logical_and(intercepted_i, intercepted_j), norm, 0.0)
+        #
+        # jax.debug.print(
+        #     "pi: {pi}, pj: {pj}, norm(pi - pj) = {norm}",
+        #     pi=pi,
+        #     pj=pj,
+        #     norm=jnp.linalg.norm(pi - pj),
+        # )
+        # return jnp.linalg.norm(pi - pj) <= 0.1
         # return jnp.linalg.norm(pi - pj)
-        return (~jnp.allclose(pi, pj, atol=0.1)).astype(jnp.float64)
+        return (jnp.linalg.norm(pi - pj) > 0.05).astype(jnp.float64)
+        # return (~jnp.allclose(pi, pj, atol=0.5)).astype(jnp.float64)
 
     pairs = jnp.array([(i, j) for i in range(N) for j in range(i + 1, N)])
 
@@ -901,18 +910,17 @@ def optimize_next_low_priority_path(
     endTimes,
     trueParams,
     center,
-    radius=3.0,
-    num_angles=1,
-    num_headings=1,
-    speed=1.0,
-    tmax=10.0,
-    num_points=100,
+    radius,
+    num_angles,
+    num_headings,
+    speed,
+    tmax,
+    num_points,
 ):
     jax.config.update("jax_platform_name", "gpu")
     start = time.time()
-    randomPath = True
-    upperTheta = jnp.pi + jnp.pi / 4
-    lowerTheta = jnp.pi - jnp.pi / 4
+    upperTheta = jnp.pi + jnp.pi  # / 4
+    lowerTheta = jnp.pi - jnp.pi  # / 4
     if randomPath:
         best_angle = np.random.uniform(lowerTheta, upperTheta)
         best_start_pos = center + radius * jnp.array(
@@ -1044,8 +1052,8 @@ def plot_all(
     trueParams,
 ):
     fig, ax = plt.subplots(figsize=(20, 20))
-    ax.set_xlim(-3.0, 3.0)
-    ax.set_ylim(-3.0, 3.0)
+    ax.set_xlim(-5.0, 5.0)
+    ax.set_ylim(-5.0, 5.0)
     plot_low_priority_paths(
         startPositions, interceptedList, endPoints, pathHistories, ax
     )
@@ -1070,8 +1078,8 @@ def plot_all(
         # pick ax
         ax = axes[i]
 
-        ax.set_xlim(-3.0, 3.0)
-        ax.set_ylim(-3.0, 3.0)
+        ax.set_xlim(-5.0, 5.0)
+        ax.set_ylim(-5.0, 5.0)
         pursuerX = pursuerXList[i].squeeze()
         plot_low_priority_paths_with_ez(
             headings,
@@ -1114,8 +1122,6 @@ def plot_all(
             pursuerHeadingLearned1,
             ax,
         )
-        # use loss as title
-        ax.set_title(f"Loss: {lossList[i]:.4f}", fontsize=12)
     return fig1
 
 
@@ -1220,74 +1226,114 @@ def plot_pursuer_parameters_spread(
         fig.tight_layout()
 
 
+# def get_unique_rows_by_proximity(arr, lossList, rtol=1e-3):
+#     unique_list = []
+#     unique_loss_list = []
+#     for i, row in enumerate(arr):
+#         # if not any(np.all(np.isclose(row, u, rtol=rtol)) for u in unique_list):
+#         if not any(np.linalg.norm(row - u) < 1e-1 for u in unique_list):
+#             unique_list.append(row)
+#             unique_loss_list.append(lossList[i])
+#     return np.array(unique_list), np.array(unique_loss_list)
 def get_unique_rows_by_proximity(arr, lossList, rtol=1e-3):
     unique_list = []
     unique_loss_list = []
+
     for i, row in enumerate(arr):
-        # if not any(np.all(np.isclose(row, u, rtol=rtol)) for u in unique_list):
-        if not any(np.linalg.norm(row - u) < 1e-1 for u in unique_list):
+        is_unique = True
+        for u in unique_list:
+            # Compute Euclidean distance, but use wrapped difference for angle (3rd element)
+            diff = row - u
+            diff[2] = angle_diff(row[2], u[2])
+            if np.linalg.norm(diff) < 1e-1:
+                is_unique = False
+                break
+        if is_unique:
             unique_list.append(row)
             unique_loss_list.append(lossList[i])
+
     return np.array(unique_list), np.array(unique_loss_list)
 
 
-def main():
-    # === Setup true pursuer parameters ===
-    pursuerPosition = np.array([0.0, 0.0])
-    pursuerHeading = (10.0 / 20.0) * np.pi
-    pursuerRange = 2.0
-    pursuerCaptureRadius = 0.0
-    pursuerSpeed = 2.0
-    agentSpeed = 1.0
-    pursuerTurnRadius = 0.4
-    dt = 0.01
+def angle_diff(theta1, theta2):
+    """Compute smallest difference between two angles in radians."""
+    return np.arctan2(np.sin(theta1 - theta2), np.cos(theta1 - theta2))
 
-    searchCircleCenter = np.array([0, 0])
-    searchCircleRadius = 4.0
-    tmax = (2 * searchCircleRadius) / agentSpeed
-    trueParams = jnp.array(
-        [
-            pursuerPosition[0],
-            pursuerPosition[1],
-            pursuerHeading,
-            pursuerSpeed,
-            pursuerTurnRadius,
-            pursuerRange,
-        ]
+
+def compute_abs_error_history(mean_history, true_params, parameterMask):
+    trueParams_np = true_params[parameterMask]
+    errors = np.abs(mean_history - trueParams_np)
+
+    # Correct heading error if heading is included (assume index 2 in full params)
+    heading_index = (
+        np.flatnonzero(parameterMask)[2] if np.sum(parameterMask) > 2 else None
     )
 
+    if heading_index is not None:
+        for i in range(mean_history.shape[0]):
+            errors[i, 2] = np.abs(angle_diff(mean_history[i, 2], trueParams_np[2]))
+
+    return errors
+
+
+def compute_rmse_history(mean_history, true_params, parameterMask):
+    trueParams_np = true_params[parameterMask]
+    errors = mean_history - trueParams_np  # shape: (T, D)
+
+    # Correct heading error if heading is included (assume index 2 in full params)
+    heading_index = (
+        np.flatnonzero(parameterMask)[2] if np.sum(parameterMask) > 2 else None
+    )
+
+    if heading_index is not None:
+        for i in range(mean_history.shape[0]):
+            errors[i, 2] = angle_diff(mean_history[i, 2], trueParams_np[2])
+
+    rmse_history = np.sqrt(np.mean(errors**2, axis=1))
+    return rmse_history
+
+
+def run_simulation_with_random_pursuer(
+    lower_bounds_all,
+    upper_bounds_all,
+    parameterMask,
+    seed=0,
+    numLowPriorityAgents=6,
+    numOptimizerStarts=100,
+    keepLossThreshold=1e-5,
+    plotEvery=1,
+    dataDir="results",
+    saveDir="run",
+    plot=False,
+):
+    rng = np.random.default_rng(seed)
+    trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
+
+    pursuerPosition = np.array([trueParams[0], trueParams[1]])
+    pursuerHeading = trueParams[2]
+    pursuerSpeed = trueParams[3]
+    pursuerTurnRadius = trueParams[4]
+    pursuerRange = trueParams[5]
+    pursuerCaptureRadius = 0.0
+    agentSpeed = 1.0
+    dt = 0.009
+    searchCircleCenter = np.array([0, 0])
+    searchCircleRadius = upper_bounds_all[5] + upper_bounds_all[0]
+    tmax = (2 * searchCircleRadius) / agentSpeed
     numPoints = int(tmax / dt) + 1
-    numOptimizerStarts = 100
-    keepLossThreshold = 1e-5
-    numLowPriorityAgents = 6
 
-    # === Initialize histories ===
-    interceptedList = []
-    endPoints = []
-    endTimes = []
-    pathHistories = []
-    startPositions = []
-    headings = []
-    speeds = []
+    # Init histories
+    interceptedList, endPoints, endTimes = [], [], []
+    pathHistories, startPositions, headings, speeds = [], [], [], []
+    pursuerParameter_history, pursuerParameterMean_history = [], []
+    pursuerParameterVariance_history, lossList_history = [], []
 
-    plotEvery = 1
-    pursuerParameter_history = []
-    pursuerParameterMean_history = []
-    pursuerParameterVariance_history = []
-    pursuerParameterMean_history = []
-    lossList_history = []
-
-    pursuerXList = None
     pursuerXListZeroLoss = None
-    lossListZeroLoss = None
-
     i = 0
     singlePursuerX = False
 
     while i < numLowPriorityAgents and not singlePursuerX:
         print("num agents:", i + 1)
-
-        # === Choose next path ===
         if i == 0:
             startPosition = jnp.array([-searchCircleRadius, 0.0001])
             heading = 0.0001
@@ -1297,6 +1343,8 @@ def main():
                 if pursuerXListZeroLoss is not None
                 else searchCircleCenter
             )
+            # searchCenter = searchCircleCenter
+            print("searchCenter:", searchCenter)
             startPosition, heading = optimize_next_low_priority_path(
                 pursuerXListZeroLoss,
                 jnp.array(headings),
@@ -1308,14 +1356,18 @@ def main():
                 trueParams,
                 searchCenter,
                 searchCircleRadius,
-                num_angles=40,
-                num_headings=50,
+                # num_angles=5,
+                # num_headings=2,
+                num_angles=45,
+                num_headings=45,
                 speed=agentSpeed,
                 tmax=tmax,
                 num_points=numPoints,
             )
+            print("startPosition:", startPosition)
+            print("heading:", heading)
 
-        # === Send agent and record result ===
+        # Send agent
         startPositions.append(startPosition)
         headings.append(heading)
         speeds.append(agentSpeed)
@@ -1338,7 +1390,7 @@ def main():
         endTimes.append(endTime)
         pathHistories.append(pathHistory)
 
-        # === Learn from updated dataset ===
+        # Learn
         pursuerXList, lossList = learn_ez(
             jnp.array(headings),
             jnp.array(speeds),
@@ -1350,39 +1402,37 @@ def main():
             keepLossThreshold,
             pursuerXListZeroLoss,
             numOptimizerStarts,
+            lowerLimit=lower_bounds_all[parameterMask],
+            upperLimit=upper_bounds_all[parameterMask],
         )
 
-        # === Post-process samples ===
+        # Filter good fits
         pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
         lossListZeroLoss = lossList[lossList <= keepLossThreshold]
-        print("num particles", len(pursuerXListZeroLoss))
+        if len(lossListZeroLoss) == 0:
+            print("No good models found.")
+            break
 
         pursuerXListZeroLoss, lossListZeroLoss = get_unique_rows_by_proximity(
             pursuerXListZeroLoss, lossListZeroLoss, rtol=1e-1
         )
-        print("num unique particles", len(pursuerXListZeroLoss))
+        print("num unique models:", len(pursuerXListZeroLoss))
 
-        if len(lossListZeroLoss) == 0:
-            print("no model found")
-            break
-
+        # Track stats
         mean = jnp.mean(pursuerXListZeroLoss, axis=0)
         if len(lossListZeroLoss) == 1:
             cov = jnp.zeros_like(mean)
         else:
             cov = jnp.cov(pursuerXListZeroLoss, rowvar=False).diagonal()
-        print("mean pursuer parameters", mean)
-        print("cov pursuer parameters", cov)
+
         pursuerParameterMean_history.append(mean)
         pursuerParameterVariance_history.append(cov)
-
-        # === Store parameter estimates ===
         pursuerParameter_history.append(pursuerXList)
         lossList_history.append(lossList)
 
-        # === Optional plot for video ===
-        if i % plotEvery == 0:
-            fig1 = plot_all(
+        # Plot
+        if i % plotEvery == 0 and plot:
+            fig = plot_all(
                 startPositions,
                 interceptedList,
                 endPoints,
@@ -1397,36 +1447,194 @@ def main():
                 lossListZeroLoss,
                 trueParams,
             )
-            fig1.savefig(f"video/{i}.png")
-            plt.close(fig1)
+            fig.savefig(f"video/{i}.png")
+            plt.close(fig)
+            # close all figures to save memory
+            plt.close("all")
 
-        plt.close("all")
         i += 1
-
         singlePursuerX = len(pursuerXList) == 1
         if len(lossListZeroLoss) <= 1:
             break
 
-    # === Final plot ===
-    pursuerParameter_history = jnp.array(pursuerParameter_history)
-    lossList_history = jnp.array(lossList_history)
-    pursuerParameterMean_history = jnp.array(pursuerParameterMean_history)
-    pursuerParameterVariance_history = jnp.array(
-        pursuerParameterVariance_history
-    ).squeeze()
+    # === Final processing ===
+    mean_history = np.array(pursuerParameterMean_history)
+    trueParams_np = np.array(trueParams)
 
-    plot_pursuer_parameters_spread(
-        pursuerParameter_history,
-        pursuerParameterMean_history,
-        pursuerParameterVariance_history,
-        lossList_history,
-        trueParams,
-        numOptimizerStarts,
-        len(pursuerParameterMean_history),
-        keepLossThreshold,
+    # abs_error_history = np.abs(mean_history - trueParams_np[parameterMask])
+    print("mean_estimates", mean_history)
+    print("trueParams_np", trueParams_np[parameterMask])
+    # rmse_history = np.sqrt(
+    #     np.mean((mean_history - trueParams_np[parameterMask]) ** 2, axis=1)
+    # )
+    rmse_history = compute_rmse_history(mean_history, trueParams_np, parameterMask)
+    abs_error_history = compute_abs_error_history(
+        mean_history, trueParams_np, parameterMask
+    )
+    if plot:
+        plot_pursuer_parameters_spread(
+            np.array(pursuerParameter_history),
+            np.array(pursuerParameterMean_history),
+            np.array(pursuerParameterVariance_history),
+            np.array(lossList_history),
+            trueParams,
+            numOptimizerStarts,
+            len(pursuerParameterMean_history),
+            keepLossThreshold,
+        )
+
+    result = {
+        "true_params": trueParams_np.tolist(),
+        "interceptedList": np.array(interceptedList).tolist(),
+        "mean_estimates": mean_history.tolist(),
+        "cov_estimates": np.array(pursuerParameterVariance_history).tolist(),
+        "absolute_errors": abs_error_history.tolist(),
+        "rmse_history": rmse_history.tolist(),
+    }
+
+    os.makedirs(saveDir, exist_ok=True)
+    os.makedirs(f"{dataDir}/{saveDir}", exist_ok=True)
+    with open(f"{dataDir}/{saveDir}/{seed}_results.json", "w") as f:
+        json.dump(result, f, indent=2)
+
+    return result
+
+
+def main():
+    # Parse command-line seed
+    if len(sys.argv) != 2:
+        sys.exit(1)
+
+    seed = int(sys.argv[1])
+    # seed = 25
+
+    # Define parameter bounds
+    lowerBoundsAll = np.array([-2.0, -2.0, -np.pi, 1.0, 0.2, 2.0])
+    upperBoundsAll = np.array([2.0, 2.0, np.pi, 3.0, 1.5, 3.0])
+
+    # Determine which parameters are learnable
+    if positionAndHeadingOnly:
+        parameterMask = np.array([True, True, True, False, False, False])
+    elif knownSpeed:
+        parameterMask = np.array([True, True, True, False, True, True])
+    else:
+        parameterMask = np.array([True, True, True, True, True, True])
+
+    lowerBounds = lowerBoundsAll[parameterMask]
+    upperBounds = upperBoundsAll[parameterMask]
+
+    print(f"Running simulation with seed {seed}")
+    run_simulation_with_random_pursuer(
+        lowerBoundsAll,
+        upperBoundsAll,
+        parameterMask,
+        seed=seed,
+        numLowPriorityAgents=10,
+        numOptimizerStarts=100,
+        keepLossThreshold=1e-4,
+        plotEvery=1,
+        dataDir="results",
+        # saveDir="knownShapeAndSpeed",
+        saveDir="knownSpeed",
+        plot=True,
     )
 
 
+def plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
+    """
+    Plot median, IQR, and min/max for RMSE and absolute errors in a 2x2 grid.
+    """
+    rmse_histories = []
+    abs_error_histories = []
+    flagged_files = []
+
+    for filename in os.listdir(results_dir):
+        if filename.endswith("_results.json"):
+            filepath = os.path.join(results_dir, filename)
+            with open(filepath, "r") as f:
+                data = json.load(f)
+                rmse = data.get("rmse_history", [])
+                abs_err = data.get("absolute_errors", [])
+
+                if len(rmse) == 0 or len(abs_err) == 0:
+                    continue
+
+                # Pad RMSE
+                rmse_padded = rmse[:max_steps]
+                if len(rmse_padded) < max_steps:
+                    rmse_padded += [rmse_padded[-1]] * (max_steps - len(rmse_padded))
+                rmse_histories.append(rmse_padded)
+
+                if epsilon is not None and rmse_padded[-1] > epsilon:
+                    flagged_files.append((filename, rmse_padded[-1]))
+
+                # Pad absolute error
+                abs_err_padded = abs_err[:max_steps]
+                if len(abs_err_padded) < max_steps:
+                    abs_err_padded += [abs_err_padded[-1]] * (
+                        max_steps - len(abs_err_padded)
+                    )
+                abs_error_histories.append(abs_err_padded)
+
+    if not rmse_histories or not abs_error_histories:
+        print("No valid data found in directory.")
+        return
+
+    # Convert to arrays
+    rmse_array = np.array(rmse_histories)
+    abs_error_array = np.array(abs_error_histories)  # shape: (N, max_steps, 3)
+    x = np.arange(1, max_steps + 1)
+
+    # RMSE stats
+    median_rmse = np.median(rmse_array, axis=0)
+    q1_rmse = np.percentile(rmse_array, 25, axis=0)
+    q3_rmse = np.percentile(rmse_array, 75, axis=0)
+    min_rmse = np.min(rmse_array, axis=0)
+    max_rmse = np.max(rmse_array, axis=0)
+
+    # Abs error stats
+    median_abs = np.median(abs_error_array, axis=0)
+    q1_abs = np.percentile(abs_error_array, 25, axis=0)
+    q3_abs = np.percentile(abs_error_array, 75, axis=0)
+    min_abs = np.min(abs_error_array, axis=0)
+    max_abs = np.max(abs_error_array, axis=0)
+
+    # === Plot ===
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    colors = ["tab:blue", "tab:green", "tab:orange", "tab:red"]
+    labels = ["RMSE", "x error", "y error", "heading error"]
+    stat_data = [
+        (median_rmse, q1_rmse, q3_rmse, min_rmse, max_rmse),
+        (median_abs[:, 0], q1_abs[:, 0], q3_abs[:, 0], min_abs[:, 0], max_abs[:, 0]),
+        (median_abs[:, 1], q1_abs[:, 1], q3_abs[:, 1], min_abs[:, 1], max_abs[:, 1]),
+        (median_abs[:, 2], q1_abs[:, 2], q3_abs[:, 2], min_abs[:, 2], max_abs[:, 2]),
+    ]
+
+    for ax, (median, q1, q3, minv, maxv), label, color in zip(
+        axes.flat, stat_data, labels, colors
+    ):
+        ax.plot(x, median, label="Median", color=color)
+        ax.fill_between(x, q1, q3, color=color, alpha=0.2, label="IQR")
+        ax.plot(x, minv, linestyle=":", color=color, label="Min/Max")
+        ax.plot(x, maxv, linestyle=":", color=color)
+        ax.set_title(label)
+
+        ax.set_xlabel("Num Sacrificial Agents")
+        ax.set_ylabel("Error")
+        ax.grid(True)
+        ax.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    if flagged_files:
+        print(f"\nFiles with final RMSE > {epsilon}:")
+        for fname, val in flagged_files:
+            print(f"  {fname}: RMSE = {val:.4f}")
+
+
 if __name__ == "__main__":
+    # results_dir = "results/knownShapeAndSpeed"
+    # plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=0.1)
     main()
     plt.show()

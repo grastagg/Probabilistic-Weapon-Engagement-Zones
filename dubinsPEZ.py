@@ -91,25 +91,6 @@ new_in_dubins_engagement_zone3 = jax.jit(
 )
 
 
-# with ko as target:
-# in_dubins_engagement_zone = jax.jit(
-#     jax.vmap(
-#         dubinsEZ.in_dubins_engagement_zone_single,
-#         in_axes=(
-#             None,  # pursuerPosition
-#             0,  # pursuerHeading
-#             None,  # minimumTurnRadius
-#             None,  # captureRadius
-#             None,  # pursuerRange
-#             None,  # pursuerSpeed
-#             None,  # evaderPosition
-#             None,  # evaderHeading
-#             None,  # evaderSpeed
-#         ),  # Vectorizing over evaderPosition & evaderHeading
-#     )
-# )
-
-
 def mc_dubins_pez_single(
     evaderPosition,
     evaderHeading,

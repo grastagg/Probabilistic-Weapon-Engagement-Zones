@@ -180,7 +180,7 @@ def plotEngagementZone(
         Y,
         engagementZonePlot.reshape((50, 50)),
         levels=[0],
-        colors=["red"],
+        colors=["green"],
         linewidths=2,
     )
     ax.scatter(pursuerPosition[0], pursuerPosition[1], color="red")
