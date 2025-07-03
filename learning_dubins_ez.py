@@ -1,4 +1,5 @@
 import tqdm
+from functools import partial
 import sys
 import time
 import jax
@@ -133,7 +134,7 @@ def plot_low_priority_paths_with_ez(
                 vmin=0.0,
                 vmax=1.0,
             )
-    ax.scatter(pursuerX[0], pursuerX[1], color="blue", marker="o")
+    # ax.scatter(pursuerX[0], pursuerX[1], color="blue", marker="o")
 
 
 def is_inside_region(point, xbound, ybounds):
@@ -169,6 +170,8 @@ def find_interception_point_and_time(
     return (intercepted, interceptionPoint, interceptionTime)
 
 
+# @jax.jit
+@partial(jax.jit, static_argnames=("tmax", "numPoints", "numSimulationPoints"))
 def send_low_priority_agent(
     startPosition,
     heading,
@@ -226,6 +229,14 @@ def send_low_priority_agent(
         no_interception_fn,
     )
 
+    # jax.debug.print(
+    #     "turn radius: {turn_radius},start position: {startPosition}, heading: {heading}, intercepted: {intercepted}, interceptionPoint: {interceptionPoint}",
+    #     turn_radius=minimumTurnRadius,
+    #     startPosition=startPosition,
+    #     heading=heading,
+    #     intercepted=intercepted,
+    #     interceptionPoint=interceptionPoint,
+    # )
     return intercepted, interceptionPoint, interceptionTime, pathHistory
 
 
@@ -788,7 +799,8 @@ def softmin(x, tau=0.5):
 
 
 def which_lp_path_minimizes_number_of_potential_solutions(
-    angle,
+    # angle,
+    start_pos,
     heading,
     pursuerXList,
     speed,
@@ -797,26 +809,34 @@ def which_lp_path_minimizes_number_of_potential_solutions(
     radius,
     tmax=10.0,
     numPoints=100,
+    diff_threshold=0.3,
 ):
     N = pursuerXList.shape[0]
 
     # Simulate new path
-    start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
+    # start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
 
     def intercpetion_point(pursuerX):
+        (
+            pursuerPosition,
+            pursuerHeading,
+            pursuerSpeed,
+            minimumTurnRadius,
+            pursuerRange,
+        ) = pursuerX_to_params(pursuerX, trueParams)
         intercepted, endPoint, endTime, pathHistory = send_low_priority_agent(
             start_pos,
             heading,
             speed,
-            pursuerX[0:2],
-            pursuerX[2],
-            pursuerX[4],
+            pursuerPosition,
+            pursuerHeading,
+            minimumTurnRadius,
             0.0,
-            pursuerX[5],
-            pursuerX[3],
+            pursuerRange,
+            pursuerSpeed,
             tmax,
             numPoints,
-            numSimulationPoints=100,
+            numSimulationPoints=1000,
         )
         return endPoint, intercepted
 
@@ -831,16 +851,10 @@ def which_lp_path_minimizes_number_of_potential_solutions(
         # norm = jnp.linalg.norm(pi - pj)
         # return jnp.where(jnp.logical_and(intercepted_i, intercepted_j), norm, 0.0)
         #
-        # jax.debug.print(
-        #     "pi: {pi}, pj: {pj}, norm(pi - pj) = {norm}",
-        #     pi=pi,
-        #     pj=pj,
-        #     norm=jnp.linalg.norm(pi - pj),
-        # )
-        # return jnp.linalg.norm(pi - pj) <= 0.1
-        # return jnp.linalg.norm(pi - pj)
-        return (jnp.linalg.norm(pi - pj) > 0.05).astype(jnp.float64)
-        # return (~jnp.allclose(pi, pj, atol=0.5)).astype(jnp.float64)
+        # Only compare if both intercepted
+        both_intercepted = jnp.logical_and(intercepted_i, intercepted_j)
+        too_far_apart = jnp.linalg.norm(pi - pj) > diff_threshold
+        return jnp.where(both_intercepted, jnp.linalg.norm(pi - pj), jnp.nan)
 
     pairs = jnp.array([(i, j) for i in range(N) for j in range(i + 1, N)])
 
@@ -848,7 +862,7 @@ def which_lp_path_minimizes_number_of_potential_solutions(
         i, j = pair
         return pairwise_disagree(i, j)
 
-    score = jnp.sum(jax.vmap(pair_score)(pairs))
+    score = jnp.max(jax.vmap(pair_score)(pairs))
     return score
 
 
@@ -896,8 +910,67 @@ def inside_model_disagreement_score(
         i, j = pair
         return pairwise_disagree(i, j)
 
-    score = jnp.sum(jax.vmap(pair_score)(pairs))
+    score = jnp.max(jax.vmap(pair_score)(pairs))
     return score
+
+
+def generate_headings_toward_center(
+    radius, num_angles, num_headings, delta, center=(0.0, 0.0), plot=True
+):
+    """
+    Generate heading directions pointing toward the center ± delta from points on a circle.
+
+    Args:
+        radius (float): Radius of the circle.
+        num_angles (int): Number of angular positions around the circle.
+        num_headings (int): Number of heading deviations per point.
+        delta (float): Max deviation (in radians) from heading toward center.
+        center (tuple): (x, y) of the center to point towards.
+        plot (bool): If True, show a matplotlib plot.
+
+    Returns:
+        positions: (N, 2) array of positions on the circle
+        headings:  (N,) array of headings from each position
+    """
+    # Sample angles around circle
+    angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
+    cx, cy = center
+
+    # Positions on circle
+    x = radius * jnp.cos(angles) + cx
+    y = radius * jnp.sin(angles) + cy
+    positions = jnp.stack([x, y], axis=-1)  # (num_angles, 2)
+
+    # Compute headings toward center
+    headings_to_center = jnp.arctan2(cy - y, cx - x)  # shape: (num_angles,)
+
+    # Deviations from center-heading
+    heading_offsets = jnp.linspace(
+        -delta, delta, num_headings
+    )  # shape: (num_headings,)
+
+    # Broadcast to generate all combinations
+    positions_expanded = jnp.repeat(positions, num_headings, axis=0)
+    headings_expanded = jnp.repeat(headings_to_center[:, None], num_headings, axis=1)
+    headings_expanded = (headings_expanded + heading_offsets[None, :]).ravel()
+
+    if plot:
+        plt.figure(figsize=(6, 6))
+        plt.plot(cx, cy, "ro", label="Center")
+        for i in range(positions_expanded.shape[0]):
+            px, py = positions_expanded[i]
+            dx = px + jnp.cos(headings_expanded[i])
+            dy = py + jnp.sin(headings_expanded[i])
+            plt.plot([px, dx], [py, dy], c="r", alpha=0.7)
+        plt.gca().set_aspect("equal")
+        plt.title("Headings Toward Center ± δ")
+        plt.xlabel("x")
+        plt.ylabel("y")
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
+    return positions_expanded, headings_expanded
 
 
 def optimize_next_low_priority_path(
@@ -935,48 +1008,61 @@ def optimize_next_low_priority_path(
     print("Optimizing next low-priority path...")
 
     # Generate candidate start positions and headings
-    angles = jnp.linspace(lowerTheta, upperTheta, num_angles, endpoint=False)
-    headingsSac = jnp.linspace(-jnp.pi, jnp.pi, num_headings)
-    angle_grid, heading_grid = jnp.meshgrid(angles, headingsSac)
-    angle_flat = angle_grid.ravel()
-    heading_flat = heading_grid.ravel()
-
-    scores = jax.vmap(
-        # inside_model_disagreement_score,
-        which_lp_path_minimizes_number_of_potential_solutions,
-        in_axes=(
-            0,
-            0,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
-    )(
-        angle_flat,
-        heading_flat,
-        pursuerXList,
-        speed,
-        trueParams,
-        center,
-        radius,
-        tmax,
-        num_points,
+    # angles = jnp.linspace(lowerTheta, upperTheta, num_angles, endpoint=False)
+    # headingsSac = jnp.linspace(-jnp.pi, jnp.pi, num_headings)
+    # angle_grid, heading_grid = jnp.meshgrid(angles, headingsSac)
+    # angle_flat = angle_grid.ravel()
+    # heading_flat = heading_grid.ravel()
+    positions, headings = generate_headings_toward_center(
+        radius, num_angles, num_headings, 0.5, center=center, plot=False
     )
-    print("minimum score:", jnp.min(scores))
-    print("maximum score:", jnp.max(scores))
+
+    diff_threshold = 10.0
+    loop = True
+    while loop:
+        scores = jax.vmap(
+            # inside_model_disagreement_score,
+            which_lp_path_minimizes_number_of_potential_solutions,
+            in_axes=(
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        )(
+            # angle_flat,
+            # heading_flat,
+            positions,
+            headings,
+            pursuerXList,
+            speed,
+            trueParams,
+            center,
+            radius,
+            tmax,
+            num_points,
+            diff_threshold,
+        )
+        max_score = jnp.max(scores)
+        min_score = jnp.min(scores)
+        print("minimum score:", jnp.nanmin(scores))
+        print("maximum score:", jnp.nanmax(scores))
+        loop = max_score == min_score
+        diff_threshold /= 2
 
     best_idx = jnp.nanargmax(scores)
 
-    best_angle = angle_flat[best_idx]
-    best_heading = heading_flat[best_idx]
-    best_start_pos = center + radius * jnp.array(
-        [jnp.cos(best_angle), jnp.sin(best_angle)]
-    )
+    best_start_pos = positions[best_idx]
+    best_heading = headings[best_idx]
 
+    print("best start position:", best_start_pos)
+    print("best heading:", best_heading)
     print("time to optimize next low-priority path:", time.time() - start)
     return best_start_pos, best_heading
 
@@ -1070,13 +1156,18 @@ def plot_all(
     numPlots = len(pursuerXList)
     # make 2 rows and ceil(numPlots/2) columns
     # numPlots = 10
-    numPlots = min(numPlots, 4)
+    numPlots = min(numPlots, 10)
     plt.legend()
-    fig1, axes = make_axes(numPlots)
+    # fig1, axes = make_axes(numPlots)
 
-    for i in range(numPlots):
+    fig, ax = plt.subplots()
+    # colors = ["blue", "orange", "red", "purple", "brown", "pink", "gray"]
+
+    alpha = 1.0 / len(pursuerXList)
+    # for i in range(numPlots):
+    for i in range(len(pursuerXList)):
         # pick ax
-        ax = axes[i]
+        # ax = axes[i]
 
         ax.set_xlim(-5.0, 5.0)
         ax.set_ylim(-5.0, 5.0)
@@ -1114,15 +1205,17 @@ def plot_all(
             minimumTurnRadiusLearned1,
             ax,
             colors=["red"],
+            # colors=[colors[i % len(colors)]],
+            alpha=0.1,
         )
-        plot_true_and_learned_pursuer(
-            pursuerPosition,
-            pursuerHeading,
-            pursuerPositionLearned1,
-            pursuerHeadingLearned1,
-            ax,
-        )
-    return fig1
+        # plot_true_and_learned_pursuer(
+        #     pursuerPosition,
+        #     pursuerHeading,
+        #     pursuerPositionLearned1,
+        #     pursuerHeadingLearned1,
+        #     ax,
+        # )
+    return fig
 
 
 def plot_pursuer_parameters_spread(
@@ -1344,7 +1437,6 @@ def run_simulation_with_random_pursuer(
                 else searchCircleCenter
             )
             # searchCenter = searchCircleCenter
-            print("searchCenter:", searchCenter)
             startPosition, heading = optimize_next_low_priority_path(
                 pursuerXListZeroLoss,
                 jnp.array(headings),
@@ -1355,17 +1447,16 @@ def run_simulation_with_random_pursuer(
                 jnp.array(endTimes),
                 trueParams,
                 searchCenter,
+                # [0, 0],
                 searchCircleRadius,
-                # num_angles=5,
-                # num_headings=2,
-                num_angles=45,
-                num_headings=45,
+                num_angles=30,
+                num_headings=30,
+                # num_angles=4,
+                # num_headings=3,
                 speed=agentSpeed,
                 tmax=tmax,
                 num_points=numPoints,
             )
-            print("startPosition:", startPosition)
-            print("heading:", heading)
 
         # Send agent
         startPositions.append(startPosition)
@@ -1443,7 +1534,8 @@ def run_simulation_with_random_pursuer(
                 pursuerTurnRadius,
                 headings,
                 speeds,
-                pursuerXListZeroLoss,
+                # pursuerXListZeroLoss,
+                pursuerXList[lossList <= keepLossThreshold],
                 lossListZeroLoss,
                 trueParams,
             )
@@ -1600,14 +1692,37 @@ def plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
     max_abs = np.max(abs_error_array, axis=0)
 
     # === Plot ===
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-    colors = ["tab:blue", "tab:green", "tab:orange", "tab:red"]
-    labels = ["RMSE", "x error", "y error", "heading error"]
-    stat_data = [
-        (median_rmse, q1_rmse, q3_rmse, min_rmse, max_rmse),
-        (median_abs[:, 0], q1_abs[:, 0], q3_abs[:, 0], min_abs[:, 0], max_abs[:, 0]),
-        (median_abs[:, 1], q1_abs[:, 1], q3_abs[:, 1], min_abs[:, 1], max_abs[:, 1]),
-        (median_abs[:, 2], q1_abs[:, 2], q3_abs[:, 2], min_abs[:, 2], max_abs[:, 2]),
+    if positionAndHeadingOnly:
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        labels = ["RMSE", "x error", "y error", "heading error"]
+        colors = ["tab:blue", "tab:green", "tab:orange", "tab:red"]
+    else:
+        fig, axes = plt.subplots(3, 2, figsize=(12, 8))
+        labels = [
+            "RMSE",
+            "x error",
+            "y error",
+            "heading error",
+            "turn radius error",
+            "range error",
+        ]
+        colors = [
+            "tab:blue",
+            "tab:green",
+            "tab:orange",
+            "tab:red",
+            "tab:purple",
+            "tab:brown",
+        ]
+    stat_data = [(median_rmse, q1_rmse, q3_rmse, min_rmse, max_rmse)] + [
+        (
+            median_abs[:, i],
+            q1_abs[:, i],
+            q3_abs[:, i],
+            min_abs[:, i],
+            max_abs[:, i],
+        )
+        for i in range(abs_error_array.shape[2])
     ]
 
     for ax, (median, q1, q3, minv, maxv), label, color in zip(
@@ -1633,8 +1748,189 @@ def plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
             print(f"  {fname}: RMSE = {val:.4f}")
 
 
+def plot_box_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
+    """
+    Plot box and whisker plots for RMSE and absolute errors in a grid.
+    Matches labels and layout from original median-based plot.
+    """
+    rmse_histories = []
+    abs_error_histories = []
+    flagged_files = []
+
+    for filename in os.listdir(results_dir):
+        if filename.endswith("_results.json"):
+            filepath = os.path.join(results_dir, filename)
+            with open(filepath, "r") as f:
+                data = json.load(f)
+                rmse = data.get("rmse_history", [])
+                abs_err = data.get("absolute_errors", [])
+
+                if len(rmse) == 0 or len(abs_err) == 0:
+                    continue
+
+                # Pad RMSE
+                rmse_padded = rmse[:max_steps]
+                if len(rmse_padded) < max_steps:
+                    rmse_padded += [rmse_padded[-1]] * (max_steps - len(rmse_padded))
+                rmse_histories.append(rmse_padded)
+
+                if epsilon is not None and rmse_padded[-1] > epsilon:
+                    flagged_files.append((filename, rmse_padded[-1]))
+
+                # Pad absolute error
+                abs_err_padded = abs_err[:max_steps]
+                if len(abs_err_padded) < max_steps:
+                    abs_err_padded += [abs_err_padded[-1]] * (
+                        max_steps - len(abs_err_padded)
+                    )
+                abs_error_histories.append(abs_err_padded)
+
+    if not rmse_histories or not abs_error_histories:
+        print("No valid data found in directory.")
+        return
+
+    rmse_array = np.array(rmse_histories)
+    abs_error_array = np.array(abs_error_histories)  # shape: (N, max_steps, D)
+    x = np.arange(1, max_steps + 1)
+
+    if positionAndHeadingOnly:
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        labels = ["RMSE", "x error", "y error", "heading error"]
+    else:
+        fig, axes = plt.subplots(3, 2, figsize=(12, 10))
+        labels = [
+            "RMSE",
+            "x error",
+            "y error",
+            "heading error",
+            "turn radius error",
+            "range error",
+        ]
+
+    # RMSE + each abs error dimension boxplot
+    all_data = [rmse_array] + [
+        abs_error_array[:, :, i] for i in range(abs_error_array.shape[2])
+    ]
+    print("labels", labels)
+
+    for ax, data, label in zip(axes.flat, all_data, labels):
+        ax.boxplot(data, positions=x)
+        ax.set_title(label)
+        ax.set_xlabel("Num Sacrificial Agents")
+        ax.set_ylabel("Error")
+        ax.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
+    if flagged_files:
+        print(f"\nFiles with final RMSE > {epsilon}:")
+        for fname, val in flagged_files:
+            print(f"  {fname}: RMSE = {val:.4f}")
+
+
+def plot_filtered_box_rmse_and_abs_errors(
+    results_dir, max_steps=6, epsilon=None, positionAndHeadingOnly=True
+):
+    """
+    Plot box-and-whisker plots for RMSE and absolute errors from JSON files,
+    filtering entries using interceptedList.
+    """
+    rmse_histories = []
+    abs_error_histories = []
+    flagged_files = []
+
+    for filename in os.listdir(results_dir):
+        if filename.endswith("_results.json"):
+            filepath = os.path.join(results_dir, filename)
+            with open(filepath, "r") as f:
+                data = json.load(f)
+
+            rmse_all = data.get("rmse_history", [])
+            abs_err_all = data.get("absolute_errors", [])
+            intercepted_list = data.get("interceptedList", [])
+
+            # Validate structure
+            if not (len(rmse_all) == len(abs_err_all) == len(intercepted_list)):
+                continue
+
+            # Filter by interceptedList
+            rmse_filtered = [
+                rmse_all[i] for i in range(len(intercepted_list)) if intercepted_list[i]
+            ]
+            abs_err_filtered = [
+                abs_err_all[i]
+                for i in range(len(intercepted_list))
+                if intercepted_list[i]
+            ]
+
+            # Pad to max_steps
+            rmse_padded = rmse_filtered[:max_steps]
+            if len(rmse_padded) < max_steps:
+                rmse_padded += [rmse_padded[-1]] * (max_steps - len(rmse_padded))
+            rmse_histories.append(rmse_padded)
+
+            if epsilon is not None and rmse_all[-1] > epsilon:
+                flagged_files.append((filename, rmse_all[-1]))
+
+            abs_err_padded = abs_err_filtered[:max_steps]
+            if len(abs_err_padded) < max_steps:
+                abs_err_padded += [abs_err_padded[-1]] * (
+                    max_steps - len(abs_err_padded)
+                )
+            abs_error_histories.append(abs_err_padded)
+
+    if not rmse_histories or not abs_error_histories:
+        print("No valid data found.")
+        return
+
+    # Convert to arrays
+    rmse_array = np.array(rmse_histories)  # shape: (N, max_steps)
+    abs_error_array = np.array(abs_error_histories)  # shape: (N, max_steps, D)
+    x = np.arange(1, max_steps + 1)
+
+    if positionAndHeadingOnly:
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        labels = ["RMSE", "x error", "y error", "heading error"]
+    else:
+        fig, axes = plt.subplots(3, 2, figsize=(12, 10))
+        labels = [
+            "RMSE",
+            "x error",
+            "y error",
+            "heading error",
+            "turn radius error",
+            "range error",
+        ]
+
+    # Combine RMSE and each abs error component
+    all_data = [rmse_array] + [
+        abs_error_array[:, :, i] for i in range(abs_error_array.shape[2])
+    ]
+
+    for ax, data, label in zip(axes.flat, all_data, labels):
+        steps = data.shape[1]
+        x = np.arange(1, steps + 1)
+        ax.boxplot(data, positions=x)
+        ax.set_title(label)
+        ax.set_xlabel("Num Sacrificial Agents")
+        ax.set_ylabel("Error")
+        ax.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
+    if flagged_files:
+        print(f"\nFiles with final RMSE > {epsilon}:")
+        for fname, val in flagged_files:
+            print(f"  {fname}: RMSE = {val:.4f}")
+
+
 if __name__ == "__main__":
     # results_dir = "results/knownShapeAndSpeed"
-    # plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=0.1)
+    results_dir = "results/knownSpeed"
+    # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
+    # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
+    # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
     main()
     plt.show()

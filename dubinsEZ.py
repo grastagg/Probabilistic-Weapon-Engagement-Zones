@@ -568,7 +568,13 @@ def plot_dubins_path(
 
 
 def plot_dubins_reachable_set(
-    pursuerPosition, pursuerHeading, pursuerRange, radius, ax, colors=["brown"]
+    pursuerPosition,
+    pursuerHeading,
+    pursuerRange,
+    radius,
+    ax,
+    colors=["brown"],
+    alpha=1.0,
 ):
     numPoints = 1000
     rangeX = 5.0
@@ -591,7 +597,7 @@ def plot_dubins_reachable_set(
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
 
-    ax.contour(X, Y, Z <= 0.0, colors=colors, levels=[0], zorder=10000)
+    ax.contour(X, Y, Z <= 0.0, colors=colors, levels=[0], zorder=10000, alpha=alpha)
     # ax.contourf(X, Y, Z, levels=np.linspace(0, pursuerRange, 100), alpha=0.5)
     contour_proxy = plt.plot(
         [0], [0], color=colors[0], linestyle="-", label="Reachable Set"
