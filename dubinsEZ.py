@@ -15,7 +15,7 @@ import jax.numpy as jnp
 
 
 jax.config.update("jax_enable_x64", True)
-jax.config.update("jax_platform_name", "gpu")
+# jax.config.update("jax_platform_name", "gpu")
 
 print(jax.devices())
 print(jax.default_backend())
@@ -335,23 +335,34 @@ def in_dubins_reachable_set_augmented_single(
     straitRightLength, _ = find_dubins_path_length_right_strait(
         startPosition, startHeading, goalPosition, turnRadius
     )
-    straitRightLength = jnp.where(
-        jnp.isinf(straitRightLength),
+    distanceToRightArc = (
         distance_to_arc(goalPosition, rightCenter, turnRadius, theta1Right, theta2Right)
-        + pursuerRange,
-        straitRightLength,
+        + pursuerRange
     )
+    distanceToLeftArc = (
+        distance_to_arc(goalPosition, leftCenter, turnRadius, theta1Left, theta2Left)
+        + pursuerRange
+    )
+
+    # straitRightLength = jnp.where(
+    #     jnp.isinf(straitRightLength),
+    #     distance_to_arc(goalPosition, rightCenter, turnRadius, theta1Right, theta2Right)
+    #     + pursuerRange,
+    #     straitRightLength,
+    # )
     straitLeftLength, _ = find_dubins_path_length_left_strait(
         startPosition, startHeading, goalPosition, turnRadius
     )
-    straitLeftLength = jnp.where(
-        jnp.isinf(straitLeftLength),
-        distance_to_arc(goalPosition, leftCenter, turnRadius, theta1Left, theta2Left)
-        + pursuerRange,
-        straitLeftLength,
+    # straitLeftLength = jnp.where(
+    #     jnp.isinf(straitLeftLength),
+    #     distance_to_arc(goalPosition, leftCenter, turnRadius, theta1Left, theta2Left)
+    #     + pursuerRange,
+    #     straitLeftLength,
+    # )
+    lengths = jnp.array(
+        [straitRightLength, straitLeftLength, distanceToRightArc, distanceToLeftArc]
     )
-    lengths = jnp.array([straitRightLength, straitLeftLength])
-    dubinsPathLength = jnp.min(lengths)
+    dubinsPathLength = jnp.nanmin(lengths)
 
     rs = dubinsPathLength - pursuerRange
     return rs
@@ -914,31 +925,31 @@ def main_EZ():
     #     evaderSpeed,
     #     ax,
     # )
-    plot_theta_and_vectors_left_turn(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        pursuerRange,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-        ax,
-    )
+    # plot_theta_and_vectors_left_turn(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     pursuerSpeed,
+    #     minimumTurnRadius,
+    #     pursuerRange,
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     ax,
+    # )
     plot_dubins_reachable_set(
         pursuerPosition, pursuerHeading, pursuerRange, minimumTurnRadius, ax
     )
-    plot_dubins_EZ(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        evaderHeading,
-        evaderSpeed,
-        ax,
-    )
+    # plot_dubins_EZ(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     pursuerSpeed,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     ax,
+    # )
     plt.xlabel("X", fontsize=20)
     plt.ylabel("Y", fontsize=20)
     # set tick fonhtsize

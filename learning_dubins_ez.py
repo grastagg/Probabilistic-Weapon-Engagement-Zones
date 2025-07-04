@@ -1,4 +1,5 @@
 import tqdm
+from joblib import Parallel, delayed
 from functools import partial
 import sys
 import time
@@ -12,11 +13,14 @@ import matplotlib.pyplot as plt
 from pyDOE import lhs  # or pyDOE2
 import os
 import json
+from scipy.optimize import minimize
 
 import dubinsEZ
 import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax.config.update("jax_platform_name", "gpu")")
+#
 
 positionAndHeadingOnly = False
 knownSpeed = True
@@ -500,6 +504,72 @@ def total_learning_loss(
 
 
 dTotalLossDX = jax.jit(jax.jacfwd(total_learning_loss, argnums=0))
+totalLossHessian = jax.jit(jax.jacfwd(dTotalLossDX, argnums=0))
+
+
+def run_optimization_hueristic_scipy(
+    headings,
+    speeds,
+    interceptedList,
+    pathHistories,
+    endPoints,
+    endTimes,  # unused, included for compatibility
+    initialPursuerX,
+    lowerLimit,
+    upperLimit,
+    trueParams,
+):
+    # Use same logic to define bounds
+    global positionAndHeadingOnly
+    if positionAndHeadingOnly:
+        lowerLimitSub = np.array([0.1, 0.1, 0])
+    else:
+        lowerLimitSub = np.array([0.1, 0.1, 0, 0, 0])
+
+    lower = lowerLimit - lowerLimitSub
+    upper = upperLimit + lowerLimitSub
+    bounds = list(zip(lower, upper))
+
+    # Define the objective and gradient for scipy
+    def loss_fn(x):
+        return float(
+            total_learning_loss(
+                x,
+                headings,
+                speeds,
+                interceptedList,
+                pathHistories,
+                endPoints,
+                trueParams,
+            )
+        )
+
+    def grad_fn(x):
+        return np.array(
+            dTotalLossDX(
+                x,
+                headings,
+                speeds,
+                interceptedList,
+                pathHistories,
+                endPoints,
+                trueParams,
+            )
+        )
+
+    # Run the optimization
+    res = minimize(
+        fun=loss_fn,
+        jac=grad_fn,
+        x0=initialPursuerX,
+        bounds=bounds,
+        method="trust-constr",
+        options={"gtol": 1e-8, "maxiter": 200, "disp": False},
+    )
+
+    pursuerX = res.x
+    loss = res.fun
+    return pursuerX, loss
 
 
 def run_optimization_hueristic(
@@ -548,7 +618,7 @@ def run_optimization_hueristic(
 
     def sens(xDict, funcs):
         pursuerX = xDict["pursuerX"]
-        dX = dTotalLossDX(
+        grad_x = dTotalLossDX(
             pursuerX,
             headings,
             speeds,
@@ -557,9 +627,24 @@ def run_optimization_hueristic(
             endPoints,
             trueParams,
         )
+        # hess_x = totalLossHessian(
+        #     pursuerX,
+        #     headings,
+        #     speeds,
+        #     interceptedList,
+        #     pathHistories,
+        #     endPoints,
+        #     trueParams,
+        # )
+        #
+        # funcsSens = {
+        #     "loss": {"pursuerX": grad_x},
+        #     "sens_hess": {"loss": {"pursuerX": {"pursuerX": hess_x}}},
+        # }
+        # return funcsSens, False
         funcsSens = {}
         funcsSens["loss"] = {
-            "pursuerX": dX,
+            "pursuerX": grad_x,
         }
         return funcsSens, False
 
@@ -584,7 +669,11 @@ def run_optimization_hueristic(
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
+    opt.options["hessian_approximation"] = "exact"
+    # opt.setOption("hessian_approximation", "exact")  # Use your Hessian
+
     # opt.options["derivative_test"] = "first-order"
+    # opt.options["derivative_test"] = "second-order"
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
@@ -728,6 +817,7 @@ def learn_ez(
             upperLimit,
             numStartHeadings,
         )
+
     for i in tqdm.tqdm(range(len(initialPursuerXList))):
         # for i in range(len(initialPursuerXList)):
         pursuerX, loss = run_optimization_hueristic(
@@ -744,6 +834,27 @@ def learn_ez(
         )
         pursuerXList.append(pursuerX)
         lossList.append(loss)
+
+    # def run_single(initialPursuerX):
+    #     pursuerX, loss = run_optimization_hueristic(
+    #         headings,
+    #         speeds,
+    #         interceptedList,
+    #         pathHistories,
+    #         endPoints,
+    #         endTimes,
+    #         initialPursuerX,
+    #         lowerLimit,
+    #         upperLimit,
+    #         trueParams,
+    #     )
+    #     return pursuerX, loss
+    #
+    # results = Parallel(n_jobs=20)(
+    #     delayed(run_single)(initialPursuerX)
+    #     for initialPursuerX in tqdm.tqdm(initialPursuerXList)
+    # )
+    # pursuerXList, lossList = zip(*results)
 
     pursuerXList = np.array(pursuerXList).squeeze()
     lossList = np.array(lossList).squeeze()
@@ -1409,7 +1520,7 @@ def run_simulation_with_random_pursuer(
     pursuerRange = trueParams[5]
     pursuerCaptureRadius = 0.0
     agentSpeed = 1.0
-    dt = 0.009
+    dt = 0.001
     searchCircleCenter = np.array([0, 0])
     searchCircleRadius = upper_bounds_all[5] + upper_bounds_all[0]
     tmax = (2 * searchCircleRadius) / agentSpeed
@@ -1455,7 +1566,7 @@ def run_simulation_with_random_pursuer(
                 # num_headings=3,
                 speed=agentSpeed,
                 tmax=tmax,
-                num_points=numPoints,
+                num_points=numPoints // 10,
             )
 
         # Send agent
@@ -1623,7 +1734,7 @@ def main():
         seed=seed,
         numLowPriorityAgents=10,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-4,
+        keepLossThreshold=1e-5,
         plotEvery=1,
         dataDir="results",
         # saveDir="knownShapeAndSpeed",
@@ -1933,4 +2044,4 @@ if __name__ == "__main__":
     # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
     # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
     main()
-    plt.show()
+    # plt.show()
