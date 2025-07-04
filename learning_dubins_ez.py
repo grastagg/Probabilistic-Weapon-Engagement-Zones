@@ -1739,7 +1739,7 @@ def main():
         dataDir="results",
         # saveDir="knownShapeAndSpeed",
         saveDir="knownSpeed",
-        plot=True,
+        plot=False,
     )
 
 
@@ -2039,9 +2039,9 @@ def plot_filtered_box_rmse_and_abs_errors(
 
 if __name__ == "__main__":
     # results_dir = "results/knownShapeAndSpeed"
-    results_dir = "results/knownSpeed"
-    # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
-    # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
-    # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
+    # results_dir = "results/knownSpeed"
+    # # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
+    # # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
+    # # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
     main()
     # plt.show()
