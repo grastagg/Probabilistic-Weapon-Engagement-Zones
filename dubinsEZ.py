@@ -888,13 +888,13 @@ def plot_theta_and_vectors_left_turn(
 
 
 def main_EZ():
-    pursuerPosition = np.array([0, 0])
+    pursuerPosition = np.array([1.96, 0.14])
 
-    pursuerHeading = (1 / 4) * np.pi
+    pursuerHeading = 0
     pursuerSpeed = 1
 
-    pursuerRange = 1
-    minimumTurnRadius = 0.4
+    pursuerRange = 2.51
+    minimumTurnRadius = 1.08
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 0.5

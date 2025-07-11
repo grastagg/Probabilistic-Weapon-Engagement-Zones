@@ -1,7 +1,5 @@
 #!/bin/bash
 
-for SEED in {48..500}; do
-  # for SEED in 1; do
-  echo "Running seed $SEED"
+for SEED in 40 64 68 333 433 381 348 106 46 330 384 336 93; do
   python learning_dubins_ez.py $SEED
 done
