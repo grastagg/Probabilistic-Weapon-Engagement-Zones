@@ -1420,7 +1420,7 @@ def main():
             (-np.pi, np.pi),  # evaderHeadingRange
             (0.5, 2),  # evaderSpeedRange
         )
-        numberOfSamples = 10000000
+        numberOfSamples = 15000000
         create_input_output_data_full(numberOfSamples, *rng_args)
         # generate_data where all but heading var is 0
         # rng_args = (
@@ -1440,7 +1440,7 @@ def main():
         # numberOfSamples = 1
         # create_input_output_data_full(numberOfSamples, *rng_args)
 
-    trainModel = False
+    trainModel = True
     if trainModel:
         X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
         y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
@@ -1553,6 +1553,6 @@ if __name__ == "__main__":
     # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")[:numberOfSamples]
     # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
     # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
-    compute_loss_linear_pez(X_test, y_test, saveFig=False)
-    # main()
+    # compute_loss_linear_pez(X_test, y_test, saveFig=False)
+    main()
     # plt.show()
