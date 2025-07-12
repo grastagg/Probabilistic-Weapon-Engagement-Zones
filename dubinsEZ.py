@@ -307,12 +307,8 @@ def compute_theta1_theta2_right(center, point_on_circle, arc_length, radius):
 
 
 @jax.jit
-def in_dubins_reachable_set_augmented_single(
-    startPosition,
-    startHeading,
-    turnRadius,
-    pursuerRange,
-    goalPosition,
+def find_dubins_path_length_augmented(
+    startPosition, startHeading, turnRadius, pursuerRange, goalPosition
 ):
     rightCenter = jnp.array(
         [
@@ -363,7 +359,20 @@ def in_dubins_reachable_set_augmented_single(
         [straitRightLength, straitLeftLength, distanceToRightArc, distanceToLeftArc]
     )
     dubinsPathLength = jnp.nanmin(lengths)
+    return dubinsPathLength
 
+
+@jax.jit
+def in_dubins_reachable_set_augmented_single(
+    startPosition,
+    startHeading,
+    turnRadius,
+    pursuerRange,
+    goalPosition,
+):
+    dubinsPathLength = find_dubins_path_length_augmented(
+        startPosition, startHeading, turnRadius, pursuerRange, goalPosition
+    )
     rs = dubinsPathLength - pursuerRange
     return rs
 
@@ -405,10 +414,58 @@ def in_dubins_engagement_zone_single(
     return ez
 
 
+@jax.jit
+def in_dubins_engagement_zone_augmented_single(
+    startPosition,
+    startHeading,
+    turnRadius,
+    captureRadius,
+    pursuerRange,
+    pursuerSpeed,
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+):
+    speedRatio = evaderSpeed / pursuerSpeed
+
+    # Compute goal positions
+    direction = jnp.array(
+        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
+    )  # Heading unit vector
+    goalPositions = evaderPosition + speedRatio * pursuerRange * direction
+    # dubinsPathLengths = find_shortest_dubins_path(
+    #     startPosition, startHeading, goalPositions, turnRadius
+    # )
+    dubinsPathLengths = find_dubins_path_length_augmented(
+        startPosition, startHeading, turnRadius, pursuerRange, goalPositions
+    )
+
+    ez = dubinsPathLengths - pursuerRange
+    return ez
+
+
 # Vectorized function using vmap
 in_dubins_engagement_zone = jax.jit(
     jax.vmap(
         in_dubins_engagement_zone_single,
+        in_axes=(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0,
+            0,
+            None,
+        ),  # Vectorizing over evaderPosition & evaderHeading
+    )
+)
+
+# Vectorized function using vmap
+in_dubins_engagement_zone_agumented = jax.jit(
+    jax.vmap(
+        in_dubins_engagement_zone_augmented_single,
         in_axes=(
             None,
             None,
@@ -498,7 +555,7 @@ def plot_dubins_EZ(
     ax,
 ):
     numPoints = 1000
-    rangeX = 1.2
+    rangeX = 3.2
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -507,19 +564,16 @@ def plot_dubins_EZ(
     Y = Y.flatten()
     evaderHeadings = np.ones_like(X) * evaderHeading
 
-    ZTrue = (
-        in_dubins_engagement_zone(
-            pursuerPosition,
-            pursuerHeading,
-            minimumTurnRadius,
-            captureRadius,
-            pursuerRange,
-            pursuerSpeed,
-            jnp.array([X, Y]).T,
-            evaderHeadings,
-            evaderSpeed,
-        )
-        < 0
+    ZTrue = in_dubins_engagement_zone_agumented(
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        pursuerSpeed,
+        jnp.array([X, Y]).T,
+        evaderHeadings,
+        evaderSpeed,
     )
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
@@ -530,6 +584,9 @@ def plot_dubins_EZ(
     colors = ["green"]
     colors = ["red"]
     ax.contour(X, Y, ZTrue, levels=[0], colors=colors, zorder=10000)
+    ax.contourf(
+        X, Y, ZTrue, levels=np.linspace(np.min(ZTrue), np.max(ZTrue), 100), alpha=0.5
+    )
     contour_proxy = plt.plot([0], [0], color=colors[0], linestyle="-", label="CSBEZ")
     # add label so it can be added to legend
 
@@ -888,13 +945,13 @@ def plot_theta_and_vectors_left_turn(
 
 
 def main_EZ():
-    pursuerPosition = np.array([1.96, 0.14])
+    pursuerPosition = np.array([0, 0])
 
     pursuerHeading = 0
-    pursuerSpeed = 1
+    pursuerSpeed = 2
 
-    pursuerRange = 2.51
-    minimumTurnRadius = 1.08
+    pursuerRange = 2
+    minimumTurnRadius = 0.5
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 0.5
@@ -915,7 +972,6 @@ def main_EZ():
     # )
     #
     fig, ax = plt.subplots(figsize=(8, 8))
-    pursuerRange = 1.0
     # plotEngagementZone(
     #     evaderHeading,
     #     pursuerPosition,
@@ -939,17 +995,17 @@ def main_EZ():
     plot_dubins_reachable_set(
         pursuerPosition, pursuerHeading, pursuerRange, minimumTurnRadius, ax
     )
-    # plot_dubins_EZ(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     pursuerSpeed,
-    #     minimumTurnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     ax,
-    # )
+    plot_dubins_EZ(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        evaderHeading,
+        evaderSpeed,
+        ax,
+    )
     plt.xlabel("X", fontsize=20)
     plt.ylabel("Y", fontsize=20)
     # set tick fonhtsize
