@@ -584,9 +584,9 @@ def plot_dubins_EZ(
     colors = ["green"]
     colors = ["red"]
     ax.contour(X, Y, ZTrue, levels=[0], colors=colors, zorder=10000)
-    ax.contourf(
-        X, Y, ZTrue, levels=np.linspace(np.min(ZTrue), np.max(ZTrue), 100), alpha=0.5
-    )
+    # ax.contourf(
+    #     X, Y, ZTrue, levels=np.linspace(np.min(ZTrue), np.max(ZTrue), 100), alpha=0.5
+    # )
     contour_proxy = plt.plot([0], [0], color=colors[0], linestyle="-", label="CSBEZ")
     # add label so it can be added to legend
 

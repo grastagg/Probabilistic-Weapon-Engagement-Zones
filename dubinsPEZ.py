@@ -16,7 +16,7 @@ from scipy.stats import zmap
 
 import dubinsEZ
 import fast_pursuer
-import nueral_network_EZ
+# import nueral_network_EZ
 
 
 jax.config.update("jax_enable_x64", True)
