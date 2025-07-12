@@ -17,12 +17,14 @@ from scipy.optimize import minimize
 
 import dubinsEZ
 import dubinsPEZ
+from evader_pursuer_plot import draw_airplane
 
 jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax.config.update("jax_platform_name", "gpu")")
 #
 
 positionAndHeadingOnly = False
+
 knownSpeed = True
 interceptionOnBoundary = True
 randomPath = False
@@ -31,12 +33,12 @@ np.random.seed(326)  # for reproducibility
 
 
 def plot_low_priority_paths(
-    startPositions, interceptedList, endPoints, pathHistories, ax
+    startPositions, headings, interceptedList, endPoints, pathHistories, ax
 ):
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("X", fontsize=24)
-    ax.set_ylabel("Y", fontsize=24)
-    ax.tick_params(labelsize=18)
+    ax.set_xlabel("X", fontsize=18)
+    ax.set_ylabel("Y", fontsize=18, rotation=0)
+    ax.tick_params(labelsize=12)
     # set x and y limits
     ax.set_xlim(-5.0, 5.0)
     ax.set_ylim(-5.0, 5.0)
@@ -49,29 +51,39 @@ def plot_low_priority_paths(
             ax.scatter(
                 endPoints[i][0],
                 endPoints[i][1],
-                color="red",
+                color="black",
                 marker="x",
+                zorder=1000000,
+                s=100,
             )
             if interceptedCounter == 0:
                 ax.plot(
                     pathHistory[:, 0],
                     pathHistory[:, 1],
-                    c="r",
+                    c="blue",
                     label="Intercepted",
                 )
             else:
                 ax.plot(
                     pathHistory[:, 0],
                     pathHistory[:, 1],
-                    c="r",
+                    c="blue",
                 )
             interceptedCounter += 1
         else:
+            heading = headings[i]
+            draw_airplane(
+                ax,
+                pathHistory[-1, :],
+                "blue",
+                0.5,
+                angle=heading - np.pi / 2,
+            )
             if survivedCounter == 0:
                 ax.plot(
                     pathHistory[:, 0],
                     pathHistory[:, 1],
-                    c="g",
+                    c="blue",
                     label="Survived",
                 )
             else:
@@ -1107,53 +1119,74 @@ def inside_model_disagreement_score(
 
 
 def generate_headings_toward_center(
-    radius, num_angles, num_headings, delta, center=(0.0, 0.0), plot=True
+    radius,
+    num_angles,
+    num_headings,
+    delta,
+    center=(0.0, 0.0),
+    theta1=0.0,
+    theta2=2 * jnp.pi,
+    plot=True,
 ):
     """
-    Generate heading directions pointing toward the center ± delta from points on a circle.
+    Generate heading directions pointing toward the center ± delta from points on an arc.
 
     Args:
         radius (float): Radius of the circle.
-        num_angles (int): Number of angular positions around the circle.
+        num_angles (int): Number of angular positions along the arc.
         num_headings (int): Number of heading deviations per point.
         delta (float): Max deviation (in radians) from heading toward center.
-        center (tuple): (x, y) of the center to point towards.
+        center (tuple): (x, y) of the center to point toward.
+        theta1 (float): Start angle of arc (in radians, counterclockwise).
+        theta2 (float): End angle of arc (in radians, counterclockwise).
         plot (bool): If True, show a matplotlib plot.
 
     Returns:
-        positions: (N, 2) array of positions on the circle
-        headings:  (N,) array of headings from each position
+        positions: (num_angles * num_headings, 2) array of positions on the arc
+        headings:  (num_angles * num_headings,) array of headings from each position
     """
-    # Sample angles around circle
-    angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
     cx, cy = center
 
-    # Positions on circle
+    # Normalize angles into [0, 2π)
+    theta1 = jnp.mod(theta1, 2 * jnp.pi)
+    theta2 = jnp.mod(theta2, 2 * jnp.pi)
+
+    # Ensure counterclockwise sweep
+    if theta2 <= theta1:
+        theta2 += 2 * jnp.pi
+
+    # Sample angles along the arc
+    angles = jnp.linspace(theta1, theta2, num_angles)
+
+    # Compute positions on arc
     x = radius * jnp.cos(angles) + cx
     y = radius * jnp.sin(angles) + cy
-    positions = jnp.stack([x, y], axis=-1)  # (num_angles, 2)
+    positions = jnp.stack([x, y], axis=-1)  # shape: (num_angles, 2)
 
     # Compute headings toward center
     headings_to_center = jnp.arctan2(cy - y, cx - x)  # shape: (num_angles,)
 
-    # Deviations from center-heading
+    # Heading deviations
     heading_offsets = jnp.linspace(
         -delta, delta, num_headings
     )  # shape: (num_headings,)
 
     # Broadcast to generate all combinations
-    positions_expanded = jnp.repeat(positions, num_headings, axis=0)
+    positions_expanded = jnp.repeat(positions, num_headings, axis=0)  # (N*M, 2)
     headings_expanded = jnp.repeat(headings_to_center[:, None], num_headings, axis=1)
-    headings_expanded = (headings_expanded + heading_offsets[None, :]).ravel()
+    headings_expanded = (headings_expanded + heading_offsets[None, :]).ravel()  # (N*M,)
 
     if plot:
         plt.figure(figsize=(6, 6))
         plt.plot(cx, cy, "ro", label="Center")
+
         for i in range(positions_expanded.shape[0]):
             px, py = positions_expanded[i]
-            dx = px + jnp.cos(headings_expanded[i])
-            dy = py + jnp.sin(headings_expanded[i])
-            plt.plot([px, dx], [py, dy], c="r", alpha=0.7)
+            heading = headings_expanded[i]
+            dx = jnp.cos(heading)
+            dy = jnp.sin(heading)
+            plt.arrow(px, py, dx * 0.2, dy * 0.2, head_width=0.05, color="r", alpha=0.7)
+
         plt.gca().set_aspect("equal")
         plt.title("Headings Toward Center ± δ")
         plt.xlabel("x")
@@ -1163,6 +1196,65 @@ def generate_headings_toward_center(
         plt.show()
 
     return positions_expanded, headings_expanded
+
+
+# def generate_headings_toward_center(
+#     radius, num_angles, num_headings, delta, center=(0.0, 0.0), plot=True
+# ):
+#     """
+#     Generate heading directions pointing toward the center ± delta from points on a circle.
+#
+#     Args:
+#         radius (float): Radius of the circle.
+#         num_angles (int): Number of angular positions around the circle.
+#         num_headings (int): Number of heading deviations per point.
+#         delta (float): Max deviation (in radians) from heading toward center.
+#         center (tuple): (x, y) of the center to point towards.
+#         plot (bool): If True, show a matplotlib plot.
+#
+#     Returns:
+#         positions: (N, 2) array of positions on the circle
+#         headings:  (N,) array of headings from each position
+#     """
+#     # Sample angles around circle
+#     angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
+#     cx, cy = center
+#
+#     # Positions on circle
+#     x = radius * jnp.cos(angles) + cx
+#     y = radius * jnp.sin(angles) + cy
+#     positions = jnp.stack([x, y], axis=-1)  # (num_angles, 2)
+#
+#     # Compute headings toward center
+#     headings_to_center = jnp.arctan2(cy - y, cx - x)  # shape: (num_angles,)
+#
+#     # Deviations from center-heading
+#     heading_offsets = jnp.linspace(
+#         -delta, delta, num_headings
+#     )  # shape: (num_headings,)
+#
+#     # Broadcast to generate all combinations
+#     positions_expanded = jnp.repeat(positions, num_headings, axis=0)
+#     headings_expanded = jnp.repeat(headings_to_center[:, None], num_headings, axis=1)
+#     headings_expanded = (headings_expanded + heading_offsets[None, :]).ravel()
+#
+#     if plot:
+#         plt.figure(figsize=(6, 6))
+#         plt.plot(cx, cy, "ro", label="Center")
+#         for i in range(positions_expanded.shape[0]):
+#             px, py = positions_expanded[i]
+#             dx = px + jnp.cos(headings_expanded[i])
+#             dy = py + jnp.sin(headings_expanded[i])
+#             plt.plot([px, dx], [py, dy], c="r", alpha=0.7)
+#         plt.gca().set_aspect("equal")
+#         plt.title("Headings Toward Center ± δ")
+#         plt.xlabel("x")
+#         plt.ylabel("y")
+#         plt.grid(True)
+#         plt.legend()
+#         plt.show()
+#
+#     return positions_expanded, headings_expanded
 
 
 def optimize_next_low_priority_path(
@@ -1184,8 +1276,8 @@ def optimize_next_low_priority_path(
 ):
     jax.config.update("jax_platform_name", "gpu")
     start = time.time()
-    upperTheta = jnp.pi + jnp.pi  # / 4
-    lowerTheta = jnp.pi - jnp.pi  # / 4
+    upperTheta = jnp.pi + jnp.pi
+    lowerTheta = jnp.pi - jnp.pi
     if randomPath:
         best_angle = np.random.uniform(lowerTheta, upperTheta)
         best_start_pos = center + radius * jnp.array(
@@ -1206,7 +1298,14 @@ def optimize_next_low_priority_path(
     # angle_flat = angle_grid.ravel()
     # heading_flat = heading_grid.ravel()
     positions, headings = generate_headings_toward_center(
-        radius, num_angles, num_headings, 0.5, center=center, plot=False
+        radius,
+        num_angles,
+        num_headings,
+        0.5,
+        center=center,
+        theta1=lowerTheta,
+        theta2=upperTheta,
+        plot=False,
     )
 
     diff_threshold = 10.0
@@ -1364,7 +1463,7 @@ def plot_all(
     ax.set_xlim(-5.0, 5.0)
     ax.set_ylim(-5.0, 5.0)
     plot_low_priority_paths(
-        startPositions, interceptedList, endPoints, pathHistories, ax
+        startPositions, headings, interceptedList, endPoints, pathHistories, ax
     )
     dubinsEZ.plot_dubins_reachable_set(
         pursuerPosition,
@@ -1387,6 +1486,14 @@ def plot_all(
     # colors = ["blue", "orange", "red", "purple", "brown", "pink", "gray"]
 
     alpha = 1.0 / len(pursuerXList)
+    dubinsEZ.plot_dubins_reachable_set(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerRange,
+        pursuerTurnRadius,
+        ax,
+        colors=["red"],
+    )
     # for i in range(numPlots):
     for i in range(len(pursuerXList)):
         # pick ax
@@ -1395,25 +1502,17 @@ def plot_all(
         ax.set_xlim(-5.0, 5.0)
         ax.set_ylim(-5.0, 5.0)
         pursuerX = pursuerXList[i].squeeze()
-        plot_low_priority_paths_with_ez(
-            headings,
-            speeds,
-            startPositions,
-            interceptedList,
-            endPoints,
-            pathHistories,
-            pursuerX,
-            trueParams,
-            ax,
-        )
-        dubinsEZ.plot_dubins_reachable_set(
-            pursuerPosition,
-            pursuerHeading,
-            pursuerRange,
-            pursuerTurnRadius,
-            ax,
-            colors=["green"],
-        )
+        # plot_low_priority_paths_with_ez(
+        #     headings,
+        #     speeds,
+        #     startPositions,
+        #     interceptedList,
+        #     endPoints,
+        #     pathHistories,
+        #     pursuerX,
+        #     trueParams,
+        #     ax,
+        # )
         (
             pursuerPositionLearned1,
             pursuerHeadingLearned1,
@@ -1427,7 +1526,7 @@ def plot_all(
             pursuerRangeLearned1,
             minimumTurnRadiusLearned1,
             ax,
-            colors=["red"],
+            colors=["magenta"],
             # colors=[colors[i % len(colors)]],
             alpha=0.1,
         )
@@ -1438,6 +1537,10 @@ def plot_all(
         #     pursuerHeadingLearned1,
         #     ax,
         # )
+    plot_low_priority_paths(
+        startPositions, headings, interceptedList, endPoints, pathHistories, ax
+    )
+    plt.tight_layout()
     return fig
 
 
@@ -1616,11 +1719,12 @@ def run_simulation_with_random_pursuer(
     seed=0,
     numLowPriorityAgents=6,
     numOptimizerStarts=200,
-    keepLossThreshold=1e-5,
+    keepLossThreshold=1e-8,
     plotEvery=1,
     dataDir="results",
     saveDir="run",
     plot=False,
+    saveData=False,
 ):
     rng = np.random.default_rng(seed)
     trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
@@ -1634,7 +1738,7 @@ def run_simulation_with_random_pursuer(
     agentSpeed = 1.0
     dt = 0.001
     searchCircleCenter = np.array([0, 0])
-    searchCircleRadius = upper_bounds_all[5] + upper_bounds_all[0]
+    searchCircleRadius = upper_bounds_all[5] + upper_bounds_all[0] + 2
     tmax = (2 * searchCircleRadius) / agentSpeed
     numPoints = int(tmax / dt) + 1
 
@@ -1647,6 +1751,10 @@ def run_simulation_with_random_pursuer(
     pursuerXListZeroLoss = None
     i = 0
     singlePursuerX = False
+
+    pltIndex = 0
+    animationTimeStep = 0.1
+    # animationTimeStep = 0.5
 
     while i < numLowPriorityAgents and not singlePursuerX:
         print("num agents:", i + 1)
@@ -1703,6 +1811,65 @@ def run_simulation_with_random_pursuer(
         endPoints.append(endPoint)
         endTimes.append(endTime)
         pathHistories.append(pathHistory)
+        numAnimationSteps = int(endTime / animationTimeStep) + 1
+        animationDistanceStep = agentSpeed * animationTimeStep
+        print("runing animiation steps:", numAnimationSteps)
+        for a in range(numAnimationSteps):
+            interceptedList[-1] = False  # reset intercepted for animation
+            endTimes[-1] = a * animationTimeStep
+
+            pathHistorytemp, _ = simulate_trajectory_fn(
+                startPosition,
+                heading,
+                agentSpeed,
+                a * animationTimeStep,
+                numPoints,
+            )
+            pathHistories[-1] = pathHistorytemp
+            endPoints[-1] = pathHistorytemp[-1]
+            # Learn
+            pursuerXList_temp, lossList_temp = learn_ez(
+                jnp.array(headings),
+                jnp.array(speeds),
+                jnp.array(interceptedList),
+                jnp.array(pathHistories),
+                jnp.array(endPoints),
+                jnp.array(endTimes),
+                trueParams,
+                keepLossThreshold,
+                pursuerXListZeroLoss,
+                numOptimizerStarts,
+                lowerLimit=lower_bounds_all[parameterMask],
+                upperLimit=upper_bounds_all[parameterMask],
+                interceptedPathWeight=1.0,
+            )
+            # Plot
+            if i % plotEvery == 0 and plot:
+                fig = plot_all(
+                    startPositions,
+                    interceptedList,
+                    endPoints,
+                    pathHistories,
+                    pursuerPosition,
+                    pursuerHeading,
+                    pursuerRange,
+                    pursuerTurnRadius,
+                    headings,
+                    speeds,
+                    # pursuerXListZeroLoss,
+                    pursuerXList_temp[lossList_temp <= keepLossThreshold],
+                    lossList_temp[lossList_temp <= keepLossThreshold],
+                    trueParams,
+                )
+                fig.savefig(f"video/{pltIndex}.png")
+                plt.close(fig)
+                # close all figures to save memory
+                plt.close("all")
+                pltIndex += 1
+        interceptedList[-1] = intercepted  # reset intercepted for next iteration
+        endPoints[-1] = endPoint
+        endTimes[-1] = endTime
+        pathHistories[-1] = pathHistory
 
         # Learn
         pursuerXList, lossList = learn_ez(
@@ -1788,10 +1955,11 @@ def run_simulation_with_random_pursuer(
                 lossListZeroLoss,
                 trueParams,
             )
-            fig.savefig(f"video/{i}.png")
+            fig.savefig(f"video/{pltIndex}.png")
             plt.close(fig)
             # close all figures to save memory
             plt.close("all")
+            pltIndex += 1
 
         i += 1
         singlePursuerX = len(pursuerXList) == 1
@@ -1833,10 +2001,12 @@ def run_simulation_with_random_pursuer(
         "rmse_history": rmse_history.tolist(),
     }
 
-    os.makedirs(saveDir, exist_ok=True)
-    os.makedirs(f"{dataDir}/{saveDir}", exist_ok=True)
-    with open(f"{dataDir}/{saveDir}/{seed}_results.json", "w") as f:
-        json.dump(result, f, indent=2)
+    if saveData:
+        print("Saving results...")
+        os.makedirs(saveDir, exist_ok=True)
+        os.makedirs(f"{dataDir}/{saveDir}", exist_ok=True)
+        with open(f"{dataDir}/{saveDir}/{seed}_results.json", "w") as f:
+            json.dump(result, f, indent=2)
 
     return result
 
@@ -1878,6 +2048,7 @@ def main():
         # saveDir="knownShapeAndSpeed",
         saveDir="knownSpeed",
         plot=True,  # Set to True to enable plotting
+        saveData=False,  # Set to True to save results
     )
 
 
@@ -2182,10 +2353,10 @@ def plot_filtered_box_rmse_and_abs_errors(
 
 
 if __name__ == "__main__":
-    results_dir = "results/knownShapeAndSpeed"
+    # results_dir = "results/knownShapeAndSpeed"
     # results_dir = "results/knownSpeed"
-    plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
+    # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
     # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
     # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
-    # main()
-    # plt.show()
+    main()
+    plt.show()
