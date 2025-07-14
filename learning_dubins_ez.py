@@ -1729,7 +1729,7 @@ def run_simulation_with_random_pursuer(
     rng = np.random.default_rng(seed)
     trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
 
-    pursuerPosition = np.array([trueParams[0], trueParams[1]])
+    pursuerPosition = np.array([trueParams[0] + 2, trueParams[1]])
     pursuerHeading = trueParams[2]
     pursuerSpeed = trueParams[3]
     pursuerTurnRadius = trueParams[4]
