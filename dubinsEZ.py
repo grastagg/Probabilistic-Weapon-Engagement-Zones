@@ -1,5 +1,4 @@
 from jax.lax import random_gamma_grad
-from matplotlib.patches import FancyArrowPatch
 import numpy as np
 import time
 import matplotlib.pyplot as plt
@@ -141,7 +140,7 @@ def find_dubins_path_length_right_strait(
     totalLength = arcLength + straightLineLength
     totalLength = jnp.where(jnp.isnan(totalLength), jnp.inf, totalLength)
 
-    return totalLength, tangentPoint
+    return totalLength, theta
 
 
 find_dubins_path_length_right_strait_vec = jax.vmap(
@@ -175,7 +174,7 @@ def find_dubins_path_length_left_strait(
     totalLength = arcLength + straightLineLength
     totalLength = jnp.where(jnp.isnan(totalLength), jnp.inf, totalLength)
 
-    return totalLength, tangentPoint
+    return totalLength, theta
 
 
 find_dubins_path_length_left_strait_vec = jax.vmap(
@@ -276,6 +275,46 @@ def distance_to_arc(point, center, radius, theta1, theta2):
     return jnp.where(in_arc, dist_to_arc, dist_to_endpoints)
 
 
+@jax.jit
+def normalize_angle(theta):
+    return (theta + 2 * jnp.pi) % (2 * jnp.pi)
+
+
+#
+# @jax.jit
+# def angle_in_arc(theta_p, theta1, theta2):
+#     theta_p = normalize_angle(theta_p)
+#     theta1 = normalize_angle(theta1)
+#     theta2 = normalize_angle(theta2)
+#     if_angle_wraps = theta2 < theta1
+#     return jnp.where(
+#         if_angle_wraps,
+#         jnp.logical_or(theta_p >= theta1, theta_p <= theta2),
+#         jnp.logical_and(theta_p >= theta1, theta_p <= theta2),
+#     )
+#
+#
+@jax.jit
+def signed_distance_to_arc(point, center, radius, theta1, theta2):
+    vec = point - center
+    r_p = jnp.linalg.norm(vec)
+    theta_p = jnp.arctan2(vec[1], vec[0])
+
+    in_arc = angle_in_arc(theta_p, theta1, theta2)
+
+    # Signed distance: positive inside (r_p < radius), negative outside (r_p > radius)
+    signed_radial = radius - r_p
+
+    # Distance to nearest endpoint (only used when point is outside angular bounds)
+    arc1 = center + radius * jnp.array([jnp.cos(theta1), jnp.sin(theta1)])
+    arc2 = center + radius * jnp.array([jnp.cos(theta2), jnp.sin(theta2)])
+    dist_to_endpoints = jnp.minimum(
+        jnp.linalg.norm(point - arc1), jnp.linalg.norm(point - arc2)
+    )
+
+    return jnp.where(in_arc, signed_radial, -dist_to_endpoints)
+
+
 def compute_theta1_theta2_left(center, point_on_circle, arc_length, radius):
     # Compute angle from center to the point
     vec = point_on_circle - center
@@ -306,6 +345,34 @@ def compute_theta1_theta2_right(center, point_on_circle, arc_length, radius):
     return theta2, theta1
 
 
+def signed_distance_to_circle(point, center, radius):
+    """
+    Computes the signed distance from a point to the boundary of a circle.
+
+    Positive inside, zero on the boundary, negative outside.
+
+    Args:
+        point (array-like): Coordinates of the point (x, y).
+        center (array-like): Coordinates of the circle center (cx, cy).
+        radius (float): Radius of the circle.
+
+    Returns:
+        float: Signed distance to the circle.
+    """
+    point = jnp.asarray(point)
+    center = jnp.asarray(center)
+    distance_to_center = jnp.linalg.norm(point - center)
+    signed_distance = radius - distance_to_center
+    return signed_distance
+
+
+@jax.jit
+def side_of_vector(A, B, P):
+    v = B - A
+    w = P - A
+    return v[0] * w[1] - v[1] * w[0]
+
+
 @jax.jit
 def find_dubins_path_length_augmented(
     startPosition, startHeading, turnRadius, pursuerRange, goalPosition
@@ -328,38 +395,122 @@ def find_dubins_path_length_augmented(
     theta1Right, theta2Right = compute_theta1_theta2_right(
         rightCenter, startPosition, pursuerRange, turnRadius
     )
-    straitRightLength, _ = find_dubins_path_length_right_strait(
-        startPosition, startHeading, goalPosition, turnRadius
+    distanceToRightArc = distance_to_arc(
+        goalPosition, rightCenter, turnRadius, theta1Right, theta2Right
     )
-    distanceToRightArc = (
-        distance_to_arc(goalPosition, rightCenter, turnRadius, theta1Right, theta2Right)
-        + pursuerRange
+    distanceToRightArcSigned = signed_distance_to_arc(
+        goalPosition, rightCenter, turnRadius, theta1Right, theta2Right
     )
-    distanceToLeftArc = (
-        distance_to_arc(goalPosition, leftCenter, turnRadius, theta1Left, theta2Left)
-        + pursuerRange
+    distanceToLeftArcSigned = signed_distance_to_arc(
+        goalPosition, leftCenter, turnRadius, theta1Left, theta2Left
+    )
+    distanceToLeftArc = distance_to_arc(
+        goalPosition, leftCenter, turnRadius, theta1Left, theta2Left
     )
 
-    # straitRightLength = jnp.where(
-    #     jnp.isinf(straitRightLength),
-    #     distance_to_arc(goalPosition, rightCenter, turnRadius, theta1Right, theta2Right)
-    #     + pursuerRange,
-    #     straitRightLength,
-    # )
-    straitLeftLength, _ = find_dubins_path_length_left_strait(
+    straitLeftLength, arcLeft = find_dubins_path_length_left_strait(
         startPosition, startHeading, goalPosition, turnRadius
     )
-    # straitLeftLength = jnp.where(
-    #     jnp.isinf(straitLeftLength),
-    #     distance_to_arc(goalPosition, leftCenter, turnRadius, theta1Left, theta2Left)
-    #     + pursuerRange,
-    #     straitLeftLength,
-    # )
-    lengths = jnp.array(
-        [straitRightLength, straitLeftLength, distanceToRightArc, distanceToLeftArc]
+    straitRightLength, arcRight = find_dubins_path_length_right_strait(
+        startPosition, startHeading, goalPosition, turnRadius
     )
-    dubinsPathLength = jnp.nanmin(lengths)
-    return dubinsPathLength
+    straitLeftLength -= pursuerRange
+    straitRightLength -= pursuerRange
+
+    bothNegLeft = jnp.logical_and(straitLeftLength < 0, distanceToLeftArcSigned < 0)
+
+    def both_left_neg():
+        return jnp.where(
+            jnp.abs(straitLeftLength) < jnp.abs(distanceToLeftArcSigned),
+            straitLeftLength,
+            distanceToLeftArcSigned,
+        )
+
+    def not_both_left_neg():
+        return jnp.min(
+            jnp.array([distanceToLeftArc, straitLeftLength, straitRightLength])
+        )
+
+    leftLength = jax.lax.cond(bothNegLeft, both_left_neg, not_both_left_neg)
+
+    bothNegRight = jnp.logical_and(straitRightLength < 0, distanceToRightArcSigned < 0)
+
+    def both_right_neg():
+        return jnp.where(
+            jnp.abs(straitRightLength) < jnp.abs(distanceToRightArcSigned),
+            straitRightLength,
+            distanceToRightArcSigned,
+        )
+
+    def not_both_right_neg():
+        return jnp.min(
+            jnp.array([distanceToRightArc, straitLeftLength, straitRightLength])
+        )
+
+    rightLength = jax.lax.cond(bothNegRight, both_right_neg, not_both_right_neg)
+
+    side = side_of_vector(
+        startPosition,
+        startPosition + jnp.array([jnp.cos(startHeading), jnp.sin(startHeading)]),
+        goalPosition,
+    )
+    right = side < 0.0
+    return jnp.where(right, rightLength, leftLength)
+
+    # lengths = jnp.array([rightLength, leftLength])
+    #
+    # dubinsPathLength = jnp.nanmin(lengths)
+    # return dubinsPathLength
+
+
+#
+# @jax.jit
+# def find_dubins_path_length_augmented(
+#     startPosition, startHeading, turnRadius, pursuerRange, goalPosition
+# ):
+#     rightCenter = jnp.array(
+#         [
+#             startPosition[0] + turnRadius * jnp.sin(startHeading),
+#             startPosition[1] - turnRadius * jnp.cos(startHeading),
+#         ]
+#     )
+#     leftCenter = jnp.array(
+#         [
+#             startPosition[0] - turnRadius * jnp.sin(startHeading),
+#             startPosition[1] + turnRadius * jnp.cos(startHeading),
+#         ]
+#     )
+#     theta1Left, theta2Left = compute_theta1_theta2_left(
+#         leftCenter, startPosition, pursuerRange, turnRadius
+#     )
+#     theta1Right, theta2Right = compute_theta1_theta2_right(
+#         rightCenter, startPosition, pursuerRange, turnRadius
+#     )
+#     straitRightLength, arcRight = find_dubins_path_length_right_strait(
+#         startPosition, startHeading, goalPosition, turnRadius
+#     )
+#     # straighPath = straitRightLength - arcRight * turnRadius
+#     # turnPath = arcRight * turnRadius
+#     # straitRightLength = straighPath + turnPath / straitRightLength * pursuerRange
+#     distanceToRightArc = (
+#         distance_to_arc(goalPosition, rightCenter, turnRadius, theta1Right, theta2Right)
+#         + pursuerRange
+#     )
+#     distanceToLeftArc = (
+#         distance_to_arc(goalPosition, leftCenter, turnRadius, theta1Left, theta2Left)
+#         + pursuerRange
+#     )
+#     straitLeftLength, arcLeft = find_dubins_path_length_left_strait(
+#         startPosition, startHeading, goalPosition, turnRadius
+#     )
+#     # straighPath = straitLeftLength - arcLeft * turnRadius
+#     # turnPath = arcLeft * turnRadius
+#     # straitLeftLength = straighPath + turnPath / straitLeftLength * pursuerRange
+#     lengths = jnp.array(
+#         [straitRightLength, straitLeftLength, distanceToRightArc, distanceToLeftArc]
+#     )
+#     dubinsPathLength = jnp.nanmin(lengths)
+#     return dubinsPathLength
 
 
 @jax.jit
@@ -373,7 +524,7 @@ def in_dubins_reachable_set_augmented_single(
     dubinsPathLength = find_dubins_path_length_augmented(
         startPosition, startHeading, turnRadius, pursuerRange, goalPosition
     )
-    rs = dubinsPathLength - pursuerRange
+    rs = dubinsPathLength  # - pursuerRange
     return rs
 
 
@@ -406,12 +557,16 @@ def in_dubins_engagement_zone_single(
         [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
     )  # Heading unit vector
     goalPositions = evaderPosition + speedRatio * pursuerRange * direction
-    dubinsPathLengths = find_shortest_dubins_path(
-        startPosition, startHeading, goalPositions, turnRadius
+    # dubinsPathLengths = find_shortest_dubins_path(
+    #     startPosition, startHeading, goalPositions, turnRadius
+    # )
+    dubinsPathLengths = find_dubins_path_length_augmented(
+        startPosition, startHeading, turnRadius, pursuerRange, goalPositions
     )
+    return dubinsPathLengths
 
-    ez = dubinsPathLengths - pursuerRange
-    return ez
+    # ez = dubinsPathLengths - pursuerRange
+    # return ez
 
 
 @jax.jit
@@ -666,7 +821,9 @@ def plot_dubins_reachable_set(
     Y = Y.reshape(numPoints, numPoints)
 
     ax.contour(X, Y, Z <= 0.0, colors=colors, levels=[0], zorder=10000, alpha=alpha)
-    # ax.contourf(X, Y, Z, levels=np.linspace(0, pursuerRange, 100), alpha=0.5)
+    # c = ax.contourf(X, Y, Z, levels=np.linspace(-1, 1, 101), alpha=0.5)
+    # c = ax.pcolormesh(X, Y, Z, alpha=0.5, cmap="coolwarm", vmin=-1, vmax=1)
+    # cbar = plt.colorbar(c, ax=ax)
     contour_proxy = plt.plot(
         [0], [0], color=colors[0], linestyle="-", label="Reachable Set"
     )
@@ -995,17 +1152,17 @@ def main_EZ():
     plot_dubins_reachable_set(
         pursuerPosition, pursuerHeading, pursuerRange, minimumTurnRadius, ax
     )
-    plot_dubins_EZ(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        evaderHeading,
-        evaderSpeed,
-        ax,
-    )
+    # plot_dubins_EZ(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     pursuerSpeed,
+    #     minimumTurnRadius,
+    #     captureRadius,
+    #     pursuerRange,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     ax,
+    # )
     plt.xlabel("X", fontsize=20)
     plt.ylabel("Y", fontsize=20)
     # set tick fonhtsize
