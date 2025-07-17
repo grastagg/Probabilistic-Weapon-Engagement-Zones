@@ -26,6 +26,13 @@ positionAndHeadingOnly = True
 knownSpeed = True
 interceptionOnBoundary = True
 randomPath = False
+noisyMeasurementsFlag = True
+if positionAndHeadingOnly:
+    parameterMask = np.array([True, True, True, False, False, False])
+elif knownSpeed:
+    parameterMask = np.array([True, True, True, False, True, True])
+else:
+    parameterMask = np.array([True, True, True, True, True, True])
 
 np.random.seed(326)  # for reproducibility
 
@@ -53,32 +60,32 @@ def plot_low_priority_paths(
                 marker="x",
             )
             if interceptedCounter == 0:
-                ax.plot(
+                ax.scatter(
                     pathHistory[:, 0],
                     pathHistory[:, 1],
                     c="blue",
                     label="Intercepted",
+                    s=5,
                 )
             else:
                 ax.scatter(
                     pathHistory[:, 0],
                     pathHistory[:, 1],
                     c="blue",
+                    s=5,
                 )
             interceptedCounter += 1
         else:
             if survivedCounter == 0:
-                ax.plot(
-                    pathHistory[:, 0],
-                    pathHistory[:, 1],
-                    c="g",
-                    label="Survived",
+                ax.scatter(
+                    pathHistory[:, 0], pathHistory[:, 1], c="g", label="Survived", s=5
                 )
             else:
-                ax.plot(
+                ax.scatter(
                     pathHistory[:, 0],
                     pathHistory[:, 1],
                     c="g",
+                    s=5,
                 )
             survivedCounter += 1
 
@@ -113,7 +120,9 @@ def plot_low_priority_paths_with_ez(
             pursuerX,
             pathHistory,
             trueParams,
+            verbose=True,
         )
+        print("min rs", ez.min())
         ez = ez < 0.0  # shape (T,)
 
         if interceptedList[i]:
@@ -127,9 +136,9 @@ def plot_low_priority_paths_with_ez(
                 pathHistory[:, 0],
                 pathHistory[:, 1],
                 c=ez,
-                vmin=0.0,
-                vmax=1.0,
+                s=5,
             )
+            cb = plt.colorbar(c, ax=ax)
         else:
             c = ax.scatter(
                 pathHistory[:, 0],
@@ -340,18 +349,45 @@ def dubinsEZ_from_pursuerX(
     return ez
 
 
-def dubins_reachable_set_from_pursuerX(pursuerX, goalPosition, trueParams):
+def dubins_reachable_set_from_pursuerX(
+    pursuerX, goalPosition, trueParams, verbose=False
+):
     pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange = (
         pursuerX_to_params(pursuerX, trueParams)
     )
     rs = dubinsEZ.in_dubins_reachable_set_augmented(
         pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, goalPosition
     )
+
+    def verbose_print():
+        jax.debug.print(
+            "pursuerPosition {}, puysuerHeading {}, minimumTurnRadius {}, pursuerRange {}, goalPosition {}, rs {}",
+            pursuerPosition,
+            pursuerHeading,
+            minimumTurnRadius,
+            pursuerRange,
+            goalPosition,
+            rs,
+        )
+
+    jax.lax.cond(verbose, verbose_print, lambda: None)
+
     return rs
 
 
 def smooth_min(x, alpha=10.0):
     return -jnp.log(jnp.sum(jnp.exp(-alpha * x))) / alpha
+
+
+# Define the components
+def g(t, k):
+    h = 1 / (1 + jnp.exp(-k * t))
+    return t**2 * h
+
+
+# Full function y(x)
+def new_activation(x, c=2.96, p=0.33, k=10):
+    return g(x - c, k) + g(-x - c, k) + p * x**2
 
 
 def activation(x):
@@ -383,20 +419,20 @@ def learning_loss_on_boundary_function_single(
         jnp.array([interceptedPoint]),
         trueParams,
     ).squeeze()
-    # rsEnd = jnp.where(jnp.isinf(rsEnd), 1000.0, rsEnd)
     rsAll = dubins_reachable_set_from_pursuerX(pursuerX, pathHistory, trueParams)
 
     interceptedLossRSEnd = activation(rsEnd - flattenLearingLossAmount) + activation(
         -rsEnd - flattenLearingLossAmount
     )
-    # interceptedLossRSEnd = rsEnd**2
-    # interceptedLossRSEnd = jnp.abs(rsEnd)
-    # interceptedLossTrajectory = activation(-jnp.min(rsAll[:-1]))
+    # interceptedLossRSEnd = new_activation(
+    #     rsEnd, flattenLearingLossAmount
+    # ) + new_activation(-rsEnd, flattenLearingLossAmount)
     interceptedLossTrajectory = jnp.max(
         activation(-rsAll[:-4] - flattenLearingLossAmount)
-    )  # loss if intercepted in trajectory
-    # interceptedLossTrajectory = 0.0
-
+    )
+    # interceptedLossTrajectory = jnp.max(
+    #     new_activation(-rsAll[:-4], flattenLearingLossAmount)
+    # )
     interceptedLossRS = (
         interceptedPathWeight * interceptedLossTrajectory + interceptedLossRSEnd
     )
@@ -404,7 +440,6 @@ def learning_loss_on_boundary_function_single(
     survivedLossRS = jnp.sum(
         activation(-rsAll - flattenLearingLossAmount)
     )  # loss if survived in RS
-    # survivedLossRS = activation(-jnp.min(rsAll))  # loss if survived in RS
 
     lossRS = jax.lax.cond(
         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
@@ -639,9 +674,12 @@ def run_optimization_hueristic(
             verbose=verbose,
         )
         print("initial loss:", initialLoss)
-        print("true pursuerX:", trueParams[0:3])
+        print(
+            "true pursuerX:",
+            trueParams[parameterMask],
+        )
         lossTrue = total_learning_loss(
-            trueParams[0:3],
+            trueParams[parameterMask],
             headings,
             speeds,
             interceptedList,
@@ -1439,6 +1477,20 @@ def plot_all(
 
     alpha = 1.0 / len(pursuerXList)
     # for i in range(numPlots):
+    plot_low_priority_paths(
+        startPositions, interceptedList, endPoints, pathHistories, ax
+    )
+    # plot_low_priority_paths_with_ez(
+    #     headings,
+    #     speeds,
+    #     startPositions,
+    #     interceptedList,
+    #     endPoints,
+    #     pathHistories,
+    #     trueParams[parameterMask],
+    #     trueParams,
+    #     ax,
+    # )
     for i in range(len(pursuerXList)):
         # pick ax
         # ax = axes[i]
@@ -1446,20 +1498,6 @@ def plot_all(
         ax.set_xlim(-5.0, 5.0)
         ax.set_ylim(-5.0, 5.0)
         pursuerX = pursuerXList[i].squeeze()
-        plot_low_priority_paths(
-            startPositions, interceptedList, endPoints, pathHistories, ax
-        )
-        # plot_low_priority_paths_with_ez(
-        #     headings,
-        #     speeds,
-        #     startPositions,
-        #     interceptedList,
-        #     endPoints,
-        #     pathHistories,
-        #     pursuerX,
-        #     trueParams,
-        #     ax,
-        # )
         dubinsEZ.plot_dubins_reachable_set(
             pursuerPosition,
             pursuerHeading,
@@ -1699,12 +1737,18 @@ def run_simulation_with_random_pursuer(
     tmax = (2 * searchCircleRadius) / agentSpeed
     numPoints = int(tmax / dt) + 1
 
-    lowPriorityAgentPositionCov = np.array([[0.0000001, 0.0], [0.0, 0.0000001]])
-    flattenLearingLossAmount = find_learning_loss_flatten_amount(
-        lowPriorityAgentPositionCov, beta=3.0
-    )
-    lossThreshAmount = activation(flattenLearingLossAmount)
-    # flattenLearingLossAmount = 0.0  # For now, no flattening
+    if noisyMeasurementsFlag:
+        lowPriorityAgentPositionCov = np.array([[0.001, 0.0], [0.0, 0.001]])
+        flattenLearingLossAmount = find_learning_loss_flatten_amount(
+            lowPriorityAgentPositionCov, beta=3.0
+        )
+        keepLossThreshold = 1e-2
+        maxStdDevThreshold = 0.15
+    else:
+        lowPriorityAgentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
+        flattenLearingLossAmount = 0.0
+        maxStdDevThreshold = 0.1
+    # flattenLearingLossAmount = 0.0
     print("flattenLearingLossAmount:", flattenLearingLossAmount)
 
     # Init histories
@@ -1843,6 +1887,7 @@ def run_simulation_with_random_pursuer(
         print("trueParams", trueParams)
         print("mean:", mean)
         print("cov:", cov)
+        print("std dev", np.sqrt(cov))
 
         pursuerParameterMean_history.append(mean)
         pursuerParameterVariance_history.append(cov)
@@ -1873,7 +1918,10 @@ def run_simulation_with_random_pursuer(
             plt.close("all")
 
         i += 1
-        singlePursuerX = len(pursuerXList) == 1
+        # singlePursuerX = len(pursuerXList) == 1
+        print("max std dev:", np.sqrt(cov).max())
+        singlePursuerX = np.sqrt(cov).max() < maxStdDevThreshold
+        print("singlePursuerX:", singlePursuerX)
         if len(lossListZeroLoss) <= 1:
             break
 
@@ -1934,12 +1982,6 @@ def main():
     upperBoundsAll = np.array([2.0, 2.0, np.pi, 3.0, 1.5, 3.0])
 
     # Determine which parameters are learnable
-    if positionAndHeadingOnly:
-        parameterMask = np.array([True, True, True, False, False, False])
-    elif knownSpeed:
-        parameterMask = np.array([True, True, True, False, True, True])
-    else:
-        parameterMask = np.array([True, True, True, True, True, True])
 
     lowerBounds = lowerBoundsAll[parameterMask]
     upperBounds = upperBoundsAll[parameterMask]
@@ -1955,10 +1997,10 @@ def main():
         keepLossThreshold=1e-4,
         plotEvery=1,
         dataDir="results",
-        saveDir="knownShapeAndSpeedUncertainty",
+        saveDir="knownShapeAndSpeedWithNois",
         # saveDir="knownSpeed",
         plot=True,  # Set to True to enable plotting
-        saveData=False,  # Set to True to save results
+        saveData=True,  # Set to True to save results
     )
 
 
@@ -2263,10 +2305,11 @@ def plot_filtered_box_rmse_and_abs_errors(
 
 
 if __name__ == "__main__":
-    results_dir = "results/knownShapeAndSpeed"
+    # results_dir = "results/knownShapeAndSpeed"
     # results_dir = "results/knownSpeed"
-    plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
-    plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
+    # results_dir = "results/knownShapeAndSpeedWithNois"
+    # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
+    # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
     # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
-    # main()
-    # plt.show()
+    main()
+    plt.show()
