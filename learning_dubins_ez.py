@@ -22,11 +22,13 @@ jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax.config.update("jax_platform_name", "gpu")")
 #
 
-positionAndHeadingOnly = True
+positionAndHeadingOnly = False
 knownSpeed = True
 interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = True
+saveResults = True
+plotAllFlag = False
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
 elif knownSpeed:
@@ -41,8 +43,8 @@ def plot_low_priority_paths(
     startPositions, interceptedList, endPoints, pathHistories, ax
 ):
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("X", fontsize=24)
-    ax.set_ylabel("Y", fontsize=24)
+    ax.set_xlabel("X", fontsize=34)
+    ax.set_ylabel("Y", fontsize=34)
     ax.tick_params(labelsize=18)
     # set x and y limits
     ax.set_xlim(-5.0, 5.0)
@@ -58,6 +60,8 @@ def plot_low_priority_paths(
                 endPoints[i][1],
                 color="blue",
                 marker="x",
+                s=250,
+                zorder=10000,
             )
             if interceptedCounter == 0:
                 ax.scatter(
@@ -65,14 +69,14 @@ def plot_low_priority_paths(
                     pathHistory[:, 1],
                     c="blue",
                     label="Intercepted",
-                    s=5,
+                    s=10,
                 )
             else:
                 ax.scatter(
                     pathHistory[:, 0],
                     pathHistory[:, 1],
                     c="blue",
-                    s=5,
+                    s=10,
                 )
             interceptedCounter += 1
         else:
@@ -120,9 +124,8 @@ def plot_low_priority_paths_with_ez(
             pursuerX,
             pathHistory,
             trueParams,
-            verbose=True,
+            verbose=False,
         )
-        print("min rs", ez.min())
         ez = ez < 0.0  # shape (T,)
 
         if interceptedList[i]:
@@ -427,7 +430,7 @@ def learning_loss_on_boundary_function_single(
     # interceptedLossRSEnd = new_activation(
     #     rsEnd, flattenLearingLossAmount
     # ) + new_activation(-rsEnd, flattenLearingLossAmount)
-    interceptedLossTrajectory = jnp.max(
+    interceptedLossTrajectory = jnp.sum(
         activation(-rsAll[:-4] - flattenLearingLossAmount)
     )
     # interceptedLossTrajectory = jnp.max(
@@ -566,11 +569,14 @@ def run_optimization_hueristic_scipy(
     interceptedList,
     pathHistories,
     endPoints,
-    endTimes,  # unused, included for compatibility
+    endTimes,
     initialPursuerX,
     lowerLimit,
     upperLimit,
     trueParams,
+    interceptedPathWeight=1.0,
+    flattenLearingLossAmount=0.0,
+    verbose=False,
 ):
     # Use same logic to define bounds
     global positionAndHeadingOnly
@@ -594,6 +600,8 @@ def run_optimization_hueristic_scipy(
                 pathHistories,
                 endPoints,
                 trueParams,
+                interceptedPathWeight=interceptedPathWeight,
+                flattenLearingLossAmount=flattenLearingLossAmount,
             )
         )
 
@@ -607,6 +615,8 @@ def run_optimization_hueristic_scipy(
                 pathHistories,
                 endPoints,
                 trueParams,
+                interceptedPathWeight=interceptedPathWeight,
+                flattenLearingLossAmount=flattenLearingLossAmount,
             )
         )
 
@@ -622,6 +632,7 @@ def run_optimization_hueristic_scipy(
 
     pursuerX = res.x
     loss = res.fun
+    print("gradient at optimal", grad_fn(pursuerX))
     return pursuerX, loss
 
 
@@ -765,6 +776,7 @@ def run_optimization_hueristic(
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
+    # opt.options["hessian_approximation"] = "limited-memory"
     # opt.options["hessian_approximation"] = "exact"
     # opt.setOption("hessian_approximation", "exact")  # Use your Hessian
 
@@ -784,6 +796,8 @@ def run_optimization_hueristic(
         pathHistories,
         endPoints,
         trueParams,
+        flattenLearingLossAmount=flattenLearingLossAmount,
+        verbose=False,
     )
     # loss = loss["loss"]
     return pursuerX, loss
@@ -817,36 +831,59 @@ def latin_hypercube_uniform(lowerLimit, upperLimit, numSamples):
 def find_opt_starting_pursuerX(
     interceptedList,
     endPoints,
-    previousPursuerXList,
     lowerLimit,
     upperLimit,
+    previousPursuerX,
+    mean,
+    cov,
+    angleMean,
+    angleKappa,
     numStartHeadings=10,
+    useGaussianSampling=False,
 ):
     initialPursuerXList = []
-    # initialHeadings = np.linspace(
-    #     startHeading1, startHeading1 + 2 * np.pi, numStartHeadings, endpoint=False
-    # )
+    print("num previous pursuerX:", previousPursuerX.shape[0])
 
-    # create half initial headings cetered around startHeading1 and half around startHeading2 with random noise
-    # initialHeadings1 = startHeading1 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
-    # initialHeadings2 = startHeading2 + np.random.normal(0.0, 0.3, numStartHeadings // 2)
-    # initialHeadings = np.concatenate([initialHeadings1, initialHeadings2])
-
-    mean = jnp.mean(previousPursuerXList, axis=0)
-    cov = jnp.cov(previousPursuerXList, rowvar=False).diagonal()
-    cov = jnp.sqrt(cov)
-    initialPositionXs = mean[0] + np.random.normal(0.0, cov[0], numStartHeadings)
-    initialPositionYs = mean[1] + np.random.normal(0.0, cov[1], numStartHeadings)
-    initialHeadings = mean[2] + np.random.normal(0.0, cov[2], numStartHeadings)
+    if useGaussianSampling:
+        std = np.sqrt(cov)
+        initialPositionXs = mean[0] + np.random.normal(0.0, std[0], numStartHeadings)
+        initialPositionYs = mean[1] + np.random.normal(0.0, std[1], numStartHeadings)
+        initialHeadings = mean[2] + np.random.normal(0.0, std[2], numStartHeadings)
+        # initialHeadings = np.random.vonmises(angleMean, angleKappa, numStartHeadings)
+    else:
+        jitter = 0.02
+        initialPositionXs = np.random.choice(
+            previousPursuerX[:, 0], size=numStartHeadings, replace=True
+        ) + np.random.normal(0.0, jitter, numStartHeadings)
+        initialPositionYs = np.random.choice(
+            previousPursuerX[:, 1], size=numStartHeadings, replace=True
+        ) + np.random.normal(0.0, jitter, numStartHeadings)
+        initialHeadings = np.random.choice(
+            previousPursuerX[:, 2], size=numStartHeadings, replace=True
+        ) + np.random.normal(0.0, jitter, numStartHeadings)
     if not positionAndHeadingOnly:
         if knownSpeed:
-            initialTurnRadii = mean[3] + np.random.normal(0.0, cov[3], numStartHeadings)
-            initialRanges = mean[4] + np.random.normal(0.0, cov[4], numStartHeadings)
+            if useGaussianSampling:
+                initialTurnRadii = mean[3] + np.random.normal(
+                    0.0, std[3], numStartHeadings
+                )
+                initialRanges = mean[4] + np.random.normal(
+                    0.0, std[4], numStartHeadings
+                )
+            else:
+                initialTurnRadii = np.random.choice(
+                    previousPursuerX[:, 3], size=numStartHeadings, replace=True
+                ) + np.random.normal(0.0, jitter, numStartHeadings)
+                initialRanges = (
+                    np.random.choice(
+                        previousPursuerX[:, 4], size=numStartHeadings, replace=True
+                    )
+                    + np.random.normal(0.0, jitter, numStartHeadings)
+                )  # initialTurnRadii = mean[3] + np.random.normal(0.0, std[3], numStartHeadings)
+            # initialRanges = mean[4] + np.random.normal(0.0, std[4], numStartHeadings)
         else:
-            initialSpeeds = mean[3] + np.random.normal(0.0, cov[3], numStartHeadings)
-            initialTurnRadii = mean[4] + np.random.normal(
-                0.0, 3 * cov[4], numStartHeadings
-            )
+            initialSpeeds = mean[3] + np.random.normal(0.0, std[3], numStartHeadings)
+            initialTurnRadii = mean[4] + np.random.normal(0.0, std[4], numStartHeadings)
             initialRanges = mean[5] + np.random.normal(0.0, cov[5], numStartHeadings)
     for i in range(numStartHeadings):
         if positionAndHeadingOnly:
@@ -891,19 +928,24 @@ def learn_ez(
     endPoints,
     endTimes,
     trueParams,
-    keepLossThreshold,
     previousPursuerXList=None,
+    mean=None,
+    cov=None,
+    angleMean=None,
+    angleKappa=None,
+    # previousPursuerXList=None,
     numStartHeadings=10,
     lowerLimit=None,
     upperLimit=None,
     interceptedPathWeight=1.0,
     flattenLearningLossAmount=0.0,
+    useGaussianSampling=False,
 ):
     # jax.config.update("jax_platform_name", "cpu")
     start = time.time()
     pursuerXList = []
     lossList = []
-    if previousPursuerXList is None:
+    if mean is None:
         initialPursuerXList = latin_hypercube_uniform(
             lowerLimit, upperLimit, numStartHeadings
         )
@@ -911,14 +953,20 @@ def learn_ez(
         initialPursuerXList = find_opt_starting_pursuerX(
             interceptedList,
             endPoints,
-            previousPursuerXList,
             lowerLimit,
             upperLimit,
+            previousPursuerXList,
+            mean,
+            cov,
+            angleMean,
+            angleKappa,
             numStartHeadings,
+            useGaussianSampling=useGaussianSampling,
         )
 
     for i in tqdm.tqdm(range(len(initialPursuerXList))):
         # for i in range(len(initialPursuerXList)):
+        # pursuerX, loss = run_optimization_hueristic_scipy(
         pursuerX, loss = run_optimization_hueristic(
             headings,
             speeds,
@@ -932,7 +980,7 @@ def learn_ez(
             trueParams,
             interceptedPathWeight=interceptedPathWeight,
             flattenLearingLossAmount=flattenLearningLossAmount,
-            verbose=i == 0,
+            verbose=False,
         )
         pursuerXList.append(pursuerX)
         lossList.append(loss)
@@ -1011,6 +1059,31 @@ def softmin(x, tau=0.5):
     return -tau * jnp.log(jnp.sum(jnp.exp(-x / tau)))
 
 
+def which_lp_spends_most_time_in_all_rs(
+    # angle,
+    start_pos,
+    heading,
+    pursuerXList,
+    speed,
+    trueParams,
+    center,
+    radius,
+    tmax=10.0,
+    numPoints=100,
+    diff_threshold=0.3,
+):
+    def single_score(pursuerX):
+        t = jnp.linspace(0.0, tmax, numPoints)
+        direction = jnp.array([jnp.cos(heading), jnp.sin(heading)])
+        displacement = t[:, None] * speed * direction  # shape (T, 2)
+        path = start_pos + displacement  # shape (T, 2)
+        rs = dubins_reachable_set_from_pursuerX(pursuerX, path, trueParams)
+        return jnp.sum(jnp.where(rs < 0.0, 1.0, 0.0))
+
+    totalScore = jnp.sum(jax.vmap(single_score)(pursuerXList))
+    return totalScore
+
+
 def which_lp_path_minimizes_number_of_potential_solutions(
     # angle,
     start_pos,
@@ -1080,7 +1153,6 @@ def which_lp_path_minimizes_number_of_potential_solutions(
 
 
 def which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all(
-    # angle,
     start_pos,
     heading,
     pursuerXList,
@@ -1134,7 +1206,6 @@ def which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all(
         #
         # Only compare if both intercepted
         both_intercepted = jnp.logical_and(intercepted_i, intercepted_j)
-        too_far_apart = jnp.linalg.norm(pi - pj) > diff_threshold
         return jnp.where(both_intercepted, jnp.linalg.norm(pi - pj), jnp.nan)
 
     pairs = jnp.array([(i, j) for i in range(N) for j in range(i + 1, N)])
@@ -1148,7 +1219,7 @@ def which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all(
 
 
 def inside_model_disagreement_score(
-    angle,
+    start_pos,
     heading,
     pursuerXList,
     speed,
@@ -1157,11 +1228,11 @@ def inside_model_disagreement_score(
     radius,
     tmax=10.0,
     num_points=100,
+    diff_threshold=0.3,
 ):
     N = pursuerXList.shape[0]
 
     # Simulate new path
-    start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
     new_path, new_headings = simulate_trajectory_fn(
         start_pos, heading, speed, tmax, num_points
     )
@@ -1170,19 +1241,16 @@ def inside_model_disagreement_score(
     # Compute min EZ value for each parameter set
     def in_rs(pX):
         rs = dubins_reachable_set_from_pursuerX(pX, new_path, trueParams)
-        ez = dubinsEZ_from_pursuerX(pX, new_path, new_headings, speed, trueParams)
-        return rs <= 0.0, ez <= 0.0
+        return rs <= 0.0
 
-    probsRS, probsEZ = jax.vmap(in_rs)(pursuerXList)  # (N,)
+    probsRS = jax.vmap(in_rs)(pursuerXList)  # (N,)
     # probs = rs_vals < 0.0
 
     # Pairwise disagreement: p_i * (1 - p_j) + p_j * (1 - p_i)
     def pairwise_disagree(i, j):
         pi = probsRS[i]
         pj = probsRS[j]
-        pezi = probsEZ[i]
-        pezj = probsEZ[j]
-        return jnp.sum(pi != pj) + jnp.sum(pezi != pezj)
+        return jnp.sum(pi != pj)
 
     # indices = jnp.arange(N)
     pairs = jnp.array([(i, j) for i in range(N) for j in range(i + 1, N)])
@@ -1196,53 +1264,74 @@ def inside_model_disagreement_score(
 
 
 def generate_headings_toward_center(
-    radius, num_angles, num_headings, delta, center=(0.0, 0.0), plot=True
+    radius,
+    num_angles,
+    num_headings,
+    delta,
+    center=(0.0, 0.0),
+    theta1=0.0,
+    theta2=2 * jnp.pi,
+    plot=True,
 ):
     """
-    Generate heading directions pointing toward the center ± delta from points on a circle.
+    Generate heading directions pointing toward the center ± delta from points on an arc.
 
     Args:
         radius (float): Radius of the circle.
-        num_angles (int): Number of angular positions around the circle.
+        num_angles (int): Number of angular positions along the arc.
         num_headings (int): Number of heading deviations per point.
         delta (float): Max deviation (in radians) from heading toward center.
-        center (tuple): (x, y) of the center to point towards.
+        center (tuple): (x, y) of the center to point toward.
+        theta1 (float): Start angle of arc (in radians, counterclockwise).
+        theta2 (float): End angle of arc (in radians, counterclockwise).
         plot (bool): If True, show a matplotlib plot.
 
     Returns:
-        positions: (N, 2) array of positions on the circle
-        headings:  (N,) array of headings from each position
+        positions: (num_angles * num_headings, 2) array of positions on the arc
+        headings:  (num_angles * num_headings,) array of headings from each position
     """
-    # Sample angles around circle
-    angles = jnp.linspace(0, 2 * jnp.pi, num_angles, endpoint=False)
     cx, cy = center
 
-    # Positions on circle
+    # Normalize angles into [0, 2π)
+    theta1 = jnp.mod(theta1, 2 * jnp.pi)
+    theta2 = jnp.mod(theta2, 2 * jnp.pi)
+
+    # Ensure counterclockwise sweep
+    if theta2 <= theta1:
+        theta2 += 2 * jnp.pi
+
+    # Sample angles along the arc
+    angles = jnp.linspace(theta1, theta2, num_angles)
+
+    # Compute positions on arc
     x = radius * jnp.cos(angles) + cx
     y = radius * jnp.sin(angles) + cy
-    positions = jnp.stack([x, y], axis=-1)  # (num_angles, 2)
+    positions = jnp.stack([x, y], axis=-1)  # shape: (num_angles, 2)
 
     # Compute headings toward center
     headings_to_center = jnp.arctan2(cy - y, cx - x)  # shape: (num_angles,)
 
-    # Deviations from center-heading
+    # Heading deviations
     heading_offsets = jnp.linspace(
         -delta, delta, num_headings
     )  # shape: (num_headings,)
 
     # Broadcast to generate all combinations
-    positions_expanded = jnp.repeat(positions, num_headings, axis=0)
+    positions_expanded = jnp.repeat(positions, num_headings, axis=0)  # (N*M, 2)
     headings_expanded = jnp.repeat(headings_to_center[:, None], num_headings, axis=1)
-    headings_expanded = (headings_expanded + heading_offsets[None, :]).ravel()
+    headings_expanded = (headings_expanded + heading_offsets[None, :]).ravel()  # (N*M,)
 
     if plot:
         plt.figure(figsize=(6, 6))
         plt.plot(cx, cy, "ro", label="Center")
+
         for i in range(positions_expanded.shape[0]):
             px, py = positions_expanded[i]
-            dx = px + jnp.cos(headings_expanded[i])
-            dy = py + jnp.sin(headings_expanded[i])
-            plt.plot([px, dx], [py, dy], c="r", alpha=0.7)
+            heading = headings_expanded[i]
+            dx = jnp.cos(heading)
+            dy = jnp.sin(heading)
+            plt.arrow(px, py, dx * 0.2, dy * 0.2, head_width=0.05, color="r", alpha=0.7)
+
         plt.gca().set_aspect("equal")
         plt.title("Headings Toward Center ± δ")
         plt.xlabel("x")
@@ -1295,15 +1384,53 @@ def optimize_next_low_priority_path(
     # angle_flat = angle_grid.ravel()
     # heading_flat = heading_grid.ravel()
     positions, headings = generate_headings_toward_center(
-        radius, num_angles, num_headings, 0.5, center=center, plot=False
+        radius,
+        num_angles,
+        num_headings,
+        0.5,
+        center=center,
+        theta1=lowerTheta,
+        theta2=upperTheta,
+        plot=False,
     )
 
     diff_threshold = 10.0
-    loop = True
-    while loop:
+    scores = jax.vmap(
+        # inside_model_disagreement_score,
+        which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all,
+        # which_lp_spends_most_time_in_all_rs,
+        in_axes=(
+            0,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )(
+        # angle_flat,
+        # heading_flat,
+        positions,
+        headings,
+        pursuerXList,
+        speed,
+        trueParams,
+        center,
+        radius,
+        tmax,
+        num_points,
+        diff_threshold,
+    )
+    max_score = jnp.max(scores)
+    min_score = jnp.min(scores)
+    if jnp.isnan(max_score) or jnp.isnan(min_score):
         scores = jax.vmap(
             # inside_model_disagreement_score,
-            which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all,
+            which_lp_path_minimizes_number_of_potential_solutions,
             in_axes=(
                 0,
                 0,
@@ -1330,51 +1457,12 @@ def optimize_next_low_priority_path(
             num_points,
             diff_threshold,
         )
-        max_score = jnp.max(scores)
-        min_score = jnp.min(scores)
-        if jnp.isnan(max_score) or jnp.isnan(min_score):
-            print("NaN detected in scores")
-            scores = jax.vmap(
-                # inside_model_disagreement_score,
-                which_lp_path_minimizes_number_of_potential_solutions,
-                in_axes=(
-                    0,
-                    0,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-            )(
-                # angle_flat,
-                # heading_flat,
-                positions,
-                headings,
-                pursuerXList,
-                speed,
-                trueParams,
-                center,
-                radius,
-                tmax,
-                num_points,
-                diff_threshold,
-            )
-        print("minimum score:", jnp.nanmin(scores))
-        print("maximum score:", jnp.nanmax(scores))
-        loop = max_score == min_score
-        diff_threshold /= 2
 
     best_idx = jnp.nanargmax(scores)
 
     best_start_pos = positions[best_idx]
     best_heading = headings[best_idx]
 
-    print("best start position:", best_start_pos)
-    print("best heading:", best_heading)
     print("time to optimize next low-priority path:", time.time() - start)
     return best_start_pos, best_heading
 
@@ -1449,7 +1537,7 @@ def plot_all(
     lossList,
     trueParams,
 ):
-    fig, ax = plt.subplots(figsize=(20, 20))
+    fig, ax = plt.subplots()
     ax.set_xlim(-5.0, 5.0)
     ax.set_ylim(-5.0, 5.0)
     plot_low_priority_paths(
@@ -1472,14 +1560,11 @@ def plot_all(
     plt.legend()
     # fig1, axes = make_axes(numPlots)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(layout="tight")
     # colors = ["blue", "orange", "red", "purple", "brown", "pink", "gray"]
 
     alpha = 1.0 / len(pursuerXList)
     # for i in range(numPlots):
-    plot_low_priority_paths(
-        startPositions, interceptedList, endPoints, pathHistories, ax
-    )
     # plot_low_priority_paths_with_ez(
     #     headings,
     #     speeds,
@@ -1491,6 +1576,14 @@ def plot_all(
     #     trueParams,
     #     ax,
     # )
+    dubinsEZ.plot_dubins_reachable_set(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerRange,
+        pursuerTurnRadius,
+        ax,
+        colors=["red"],
+    )
     for i in range(len(pursuerXList)):
         # pick ax
         # ax = axes[i]
@@ -1498,14 +1591,6 @@ def plot_all(
         ax.set_xlim(-5.0, 5.0)
         ax.set_ylim(-5.0, 5.0)
         pursuerX = pursuerXList[i].squeeze()
-        dubinsEZ.plot_dubins_reachable_set(
-            pursuerPosition,
-            pursuerHeading,
-            pursuerRange,
-            pursuerTurnRadius,
-            ax,
-            colors=["green"],
-        )
         (
             pursuerPositionLearned1,
             pursuerHeadingLearned1,
@@ -1519,7 +1604,7 @@ def plot_all(
             pursuerRangeLearned1,
             minimumTurnRadiusLearned1,
             ax,
-            colors=["red"],
+            colors=["magenta"],
             # colors=[colors[i % len(colors)]],
             alpha=0.1,
         )
@@ -1530,6 +1615,11 @@ def plot_all(
         #     pursuerHeadingLearned1,
         #     ax,
         # )
+    plot_low_priority_paths(
+        startPositions, interceptedList, endPoints, pathHistories, ax
+    )
+    ax.tick_params(labelsize=30)
+
     return fig
 
 
@@ -1707,6 +1797,93 @@ def find_learning_loss_flatten_amount(cov, beta):
     return beta * np.sqrt(max_eigval)  # Adjusted scaling factor
 
 
+def wrap_to_pi(angle):
+    """Wrap angle to [-π, π)."""
+    return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+import numpy as np
+
+
+def wrap_to_pi(angle):
+    """Wrap angle to [-π, π)."""
+    return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+def fit_von_mises_with_variance(angles):
+    """
+    Fit a von Mises distribution to angle data and return:
+      - mean direction,
+      - concentration (kappa),
+      - circular variance,
+      - circular standard deviation (radians)
+
+    Parameters:
+        angles (np.ndarray): Angles in radians, in [-π, π) or [0, 2π)
+
+    Returns:
+        mu (float): Mean direction in radians, wrapped to [-π, π)
+        kappa (float): Concentration parameter
+        circular_variance (float): 1 - R, in [0, 1]
+        std_dev (float): Circular standard deviation in radians
+    """
+    # Mean resultant vector
+    C = np.mean(np.cos(angles))
+    S = np.mean(np.sin(angles))
+    mu = np.arctan2(S, C)
+    R = np.sqrt(C**2 + S**2)
+    circular_variance = 1 - R
+
+    # Approximate κ using Mardia & Jupp
+    def A1inv(R):
+        if R < 1e-6:
+            return 0.0
+        elif R < 0.53:
+            return 2 * R + R**3 + (5 * R**5) / 6
+        elif R < 0.85:
+            return -0.4 + 1.39 * R + 0.43 / (1 - R)
+        else:
+            return 1 / (R**3 - 4 * R**2 + 3 * R)
+
+    kappa = A1inv(R)
+
+    # Circular standard deviation
+    if R < 1e-12:
+        std_dev = np.pi / np.sqrt(3)  # Max entropy value ~1.81
+    else:
+        std_dev = np.sqrt(-2 * np.log(R))
+
+    return wrap_to_pi(mu), kappa, circular_variance, std_dev
+
+
+def find_mean_and_std(pursuerXListZeroLoss):
+    # Track stats
+    angles = pursuerXListZeroLoss[:, 2]
+    angleMean, angleKappa, angleVariance, angleStd = fit_von_mises_with_variance(angles)
+    print(
+        "angleMean:",
+        angleMean,
+        "angleKappa:",
+        angleKappa,
+        "angleVariance:",
+        angleVariance,
+        "angleStd:",
+        angleStd,
+    )
+
+    mean = np.mean(pursuerXListZeroLoss, axis=0)
+    if len(pursuerXListZeroLoss) == 1:
+        cov = np.zeros_like(mean)
+    else:
+        cov = np.cov(pursuerXListZeroLoss, rowvar=False).diagonal().copy()
+    std = np.sqrt(cov)
+    std[2] = angleStd  # Replace heading std with circular std
+
+    mean[2] = angleMean  # Replace heading with wrapped mean
+    # cov[2] = angleVariance  # Replace heading variance with circular variance
+    return mean, cov, std, angleMean, angleKappa
+
+
 def run_simulation_with_random_pursuer(
     lower_bounds_all,
     upper_bounds_all,
@@ -1718,8 +1895,6 @@ def run_simulation_with_random_pursuer(
     plotEvery=1,
     dataDir="results",
     saveDir="run",
-    plot=False,
-    saveData=False,
 ):
     rng = np.random.default_rng(seed)
     trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
@@ -1731,9 +1906,9 @@ def run_simulation_with_random_pursuer(
     pursuerRange = trueParams[5]
     pursuerCaptureRadius = 0.0
     agentSpeed = 1.0
-    dt = 0.01
+    dt = 0.001
     searchCircleCenter = np.array([0, 0])
-    searchCircleRadius = upper_bounds_all[5] + upper_bounds_all[0]
+    searchCircleRadius = upper_bounds_all[5] + upper_bounds_all[0] + 1
     tmax = (2 * searchCircleRadius) / agentSpeed
     numPoints = int(tmax / dt) + 1
 
@@ -1742,24 +1917,31 @@ def run_simulation_with_random_pursuer(
         flattenLearingLossAmount = find_learning_loss_flatten_amount(
             lowPriorityAgentPositionCov, beta=3.0
         )
-        keepLossThreshold = 1e-2
-        maxStdDevThreshold = 0.15
+        # flattenLearingLossAmount = 0.0
+        print("flattenLearingLossAmount:", flattenLearingLossAmount)
+        # keepLossThreshold = 1e-2
+        maxStdDevThreshold = 0.05
     else:
         lowPriorityAgentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
         flattenLearingLossAmount = 0.0
         maxStdDevThreshold = 0.1
     # flattenLearingLossAmount = 0.0
-    print("flattenLearingLossAmount:", flattenLearingLossAmount)
 
     # Init histories
     interceptedList, endPoints, endTimes = [], [], []
     pathHistories, startPositions, headings, speeds = [], [], [], []
     pursuerParameter_history, pursuerParameterMean_history = [], []
     pursuerParameterVariance_history, lossList_history = [], []
+    pursuerParameterStdDev_history = []
 
     pursuerXListZeroLoss = None
+    pursuerXListZeroLossCollapsed = None
     i = 0
     singlePursuerX = False
+    mean = None
+    cov = None
+    angleKappa = None
+    angleMean = None
 
     while i < numLowPriorityAgents and not singlePursuerX:
         # keepLossThreshold = 2 * (i + 1) * lossThreshAmount
@@ -1776,7 +1958,7 @@ def run_simulation_with_random_pursuer(
             )
             # searchCenter = searchCircleCenter
             startPosition, heading = optimize_next_low_priority_path(
-                pursuerXListZeroLoss,
+                pursuerXListZeroLossCollapsed,
                 jnp.array(headings),
                 jnp.array(speeds),
                 jnp.array(interceptedList),
@@ -1834,13 +2016,17 @@ def run_simulation_with_random_pursuer(
             jnp.array(endPoints),
             jnp.array(endTimes),
             trueParams,
-            keepLossThreshold,
             pursuerXListZeroLoss,
+            None,
+            cov,
+            angleMean,
+            angleKappa,
             numOptimizerStarts,
             lowerLimit=lower_bounds_all[parameterMask],
             upperLimit=upper_bounds_all[parameterMask],
             interceptedPathWeight=1.0,
             flattenLearningLossAmount=flattenLearingLossAmount,
+            useGaussianSampling=True,
         )
 
         # Filter good fits
@@ -1857,13 +2043,17 @@ def run_simulation_with_random_pursuer(
                 jnp.array(endPoints),
                 jnp.array(endTimes),
                 trueParams,
-                keepLossThreshold,
                 pursuerXListZeroLoss,
+                None,
+                cov,
+                angleMean,
+                angleKappa,
                 numOptimizerStarts,
                 lowerLimit=lower_bounds_all[parameterMask],
                 upperLimit=upper_bounds_all[parameterMask],
-                interceptedPathWeight=0.0,  # simpler loss
+                interceptedPathWeight=0.0,
                 flattenLearningLossAmount=flattenLearingLossAmount,
+                useGaussianSampling=False,
             )
             pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
             lossListZeroLoss = lossList[lossList <= keepLossThreshold]
@@ -1872,30 +2062,29 @@ def run_simulation_with_random_pursuer(
                 break
         pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
         lossListZeroLoss = lossList[lossList <= keepLossThreshold]
+        # fig, ax = plt.subplots()
+        # plt.hist(
+        #     pursuerXListZeroLoss[:, 2], bins=10, alpha=0.5, label="Learned Headings"
+        # )
 
-        pursuerXListZeroLoss, lossListZeroLoss = get_unique_rows_by_proximity(
-            pursuerXListZeroLoss, lossListZeroLoss, rtol=1e-10
+        pursuerXListZeroLossCollapsed, _ = get_unique_rows_by_proximity(
+            pursuerXListZeroLoss, lossListZeroLoss, rtol=1
         )
-        print("num unique models:", len(pursuerXListZeroLoss))
-
-        # Track stats
-        mean = jnp.mean(pursuerXListZeroLoss, axis=0)
-        if len(lossListZeroLoss) == 1:
-            cov = jnp.zeros_like(mean)
-        else:
-            cov = jnp.cov(pursuerXListZeroLoss, rowvar=False).diagonal()
+        print("num valid models:", len(pursuerXListZeroLoss))
+        print("num collapsed models:", len(pursuerXListZeroLossCollapsed))
+        mean, cov, std, angleMean, angleKappa = find_mean_and_std(pursuerXListZeroLoss)
         print("trueParams", trueParams)
         print("mean:", mean)
-        print("cov:", cov)
-        print("std dev", np.sqrt(cov))
+        print("std dev", std)
 
         pursuerParameterMean_history.append(mean)
         pursuerParameterVariance_history.append(cov)
+        pursuerParameterStdDev_history.append(std)
         pursuerParameter_history.append(pursuerXList)
         lossList_history.append(lossList)
 
         # Plot
-        if i % plotEvery == 0 and plot:
+        if i % plotEvery == 0 and plotAllFlag:
             fig = plot_all(
                 startPositions,
                 interceptedList,
@@ -1919,9 +2108,8 @@ def run_simulation_with_random_pursuer(
 
         i += 1
         # singlePursuerX = len(pursuerXList) == 1
-        print("max std dev:", np.sqrt(cov).max())
-        singlePursuerX = np.sqrt(cov).max() < maxStdDevThreshold
-        print("singlePursuerX:", singlePursuerX)
+        print("max std dev:", np.max(std))
+        singlePursuerX = std.max() < maxStdDevThreshold
         if len(lossListZeroLoss) <= 1:
             break
 
@@ -1939,7 +2127,7 @@ def run_simulation_with_random_pursuer(
     abs_error_history = compute_abs_error_history(
         mean_history, trueParams_np, parameterMask
     )
-    if plot:
+    if plotAllFlag:
         plot_pursuer_parameters_spread(
             np.array(pursuerParameter_history),
             np.array(pursuerParameterMean_history),
@@ -1956,11 +2144,12 @@ def run_simulation_with_random_pursuer(
         "interceptedList": np.array(interceptedList).tolist(),
         "mean_estimates": mean_history.tolist(),
         "cov_estimates": np.array(pursuerParameterVariance_history).tolist(),
+        "std_dev_estimates": np.array(pursuerParameterStdDev_history).tolist(),
         "absolute_errors": abs_error_history.tolist(),
         "rmse_history": rmse_history.tolist(),
     }
 
-    if saveData:
+    if saveResults:
         os.makedirs(saveDir, exist_ok=True)
         os.makedirs(f"{dataDir}/{saveDir}", exist_ok=True)
         with open(f"{dataDir}/{saveDir}/{seed}_results.json", "w") as f:
@@ -1978,7 +2167,7 @@ def main():
     # seed = 25
 
     # Define parameter bounds
-    lowerBoundsAll = np.array([-2.0, -2.0, -np.pi, 1.0, 0.2, 2.0])
+    lowerBoundsAll = np.array([-2.0, -2.0, -np.pi, 1.0, 0.4, 2.0])
     upperBoundsAll = np.array([2.0, 2.0, np.pi, 3.0, 1.5, 3.0])
 
     # Determine which parameters are learnable
@@ -1992,15 +2181,13 @@ def main():
         upperBoundsAll,
         parameterMask,
         seed=seed,
-        numLowPriorityAgents=10,
+        numLowPriorityAgents=15,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-4,
+        keepLossThreshold=1e-6,
         plotEvery=1,
         dataDir="results",
-        saveDir="knownShapeAndSpeedWithNois",
+        saveDir="knownSpeedWithNoise",
         # saveDir="knownSpeed",
-        plot=True,  # Set to True to enable plotting
-        saveData=True,  # Set to True to save results
     )
 
 
@@ -2013,6 +2200,8 @@ def plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
     flagged_files = []
 
     count = 0
+    minval = np.inf
+    minValFile = None
     for filename in os.listdir(results_dir):
         count += 1
         if filename.endswith("_results.json"):
@@ -2021,6 +2210,10 @@ def plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
                 data = json.load(f)
                 rmse = data.get("rmse_history", [])
                 abs_err = data.get("absolute_errors", [])
+                trueParams = data.get("true_params", [])
+                if trueParams[-2] < minval:
+                    minval = trueParams[-2]
+                    minValFile = filename
 
                 if len(rmse) == 0 or len(abs_err) == 0:
                     continue
@@ -2308,8 +2501,9 @@ if __name__ == "__main__":
     # results_dir = "results/knownShapeAndSpeed"
     # results_dir = "results/knownSpeed"
     # results_dir = "results/knownShapeAndSpeedWithNois"
-    # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
+    results_dir = "results/knownSpeedWithNoise"
+    plot_median_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.1)
     # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
     # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
-    main()
-    plt.show()
+    # main()
+    # plt.show()

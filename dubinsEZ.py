@@ -820,12 +820,12 @@ def plot_dubins_reachable_set(
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
 
-    ax.contour(X, Y, Z <= 0.0, colors=colors, levels=[0], zorder=10000, alpha=alpha)
+    ax.contour(X, Y, Z <= 0.0, colors=colors, levels=[0], alpha=alpha, linewidths=3)
     # c = ax.contourf(X, Y, Z, levels=np.linspace(-1, 1, 101), alpha=0.5)
     # c = ax.pcolormesh(X, Y, Z, alpha=0.5, cmap="coolwarm", vmin=-1, vmax=1)
     # cbar = plt.colorbar(c, ax=ax)
     contour_proxy = plt.plot(
-        [0], [0], color=colors[0], linestyle="-", label="Reachable Set"
+        [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
     )
     ax.set_aspect("equal", "box")
     return ax
@@ -833,8 +833,8 @@ def plot_dubins_reachable_set(
 
 def main():
     pursuerVelocity = 2
-    minimumTurnRadius = 1
-    pursuerRange = 1.0 * np.pi
+    minimumTurnRadius = 0.2
+    pursuerRange = 3.0
     pursuerPosition = np.array([0, 0])
     pursuerHeading = np.pi / 2
 
@@ -1108,7 +1108,7 @@ def main_EZ():
     pursuerSpeed = 2
 
     pursuerRange = 2
-    minimumTurnRadius = 0.5
+    minimumTurnRadius = 0.4
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 0.5
