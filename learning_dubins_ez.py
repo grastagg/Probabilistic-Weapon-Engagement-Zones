@@ -28,7 +28,7 @@ interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = True
 saveResults = True
-plotAllFlag = False
+plotAllFlag = True
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
 elif knownSpeed:
@@ -799,8 +799,20 @@ def run_optimization_hueristic(
         flattenLearingLossAmount=flattenLearingLossAmount,
         verbose=False,
     )
+    lossNoFlatten = total_learning_loss(
+        pursuerX,
+        headings,
+        speeds,
+        interceptedList,
+        pathHistories,
+        endPoints,
+        trueParams,
+        interceptedPathWeight=0.0,
+        flattenLearingLossAmount=0.0,
+        verbose=False,
+    )
     # loss = loss["loss"]
-    return pursuerX, loss
+    return pursuerX, loss, lossNoFlatten
 
 
 def latin_hypercube_uniform(lowerLimit, upperLimit, numSamples):
@@ -945,6 +957,7 @@ def learn_ez(
     start = time.time()
     pursuerXList = []
     lossList = []
+    lossListNoFlatten = []
     if mean is None:
         initialPursuerXList = latin_hypercube_uniform(
             lowerLimit, upperLimit, numStartHeadings
@@ -967,7 +980,7 @@ def learn_ez(
     for i in tqdm.tqdm(range(len(initialPursuerXList))):
         # for i in range(len(initialPursuerXList)):
         # pursuerX, loss = run_optimization_hueristic_scipy(
-        pursuerX, loss = run_optimization_hueristic(
+        pursuerX, loss, lossNoFlatten = run_optimization_hueristic(
             headings,
             speeds,
             interceptedList,
@@ -984,6 +997,7 @@ def learn_ez(
         )
         pursuerXList.append(pursuerX)
         lossList.append(loss)
+        lossListNoFlatten.append(lossNoFlatten)
 
     # def run_single(initialPursuerX):
     #     pursuerX, loss = run_optimization_hueristic(
@@ -1008,14 +1022,17 @@ def learn_ez(
 
     pursuerXList = np.array(pursuerXList).squeeze()
     lossList = np.array(lossList).squeeze()
+    lossListNoFlatten = np.array(lossListNoFlatten).squeeze()
 
     sorted_indices = np.argsort(lossList)
     lossList = lossList[sorted_indices]
     pursuerXList = pursuerXList[sorted_indices]
+    lossListNoFlatten = lossListNoFlatten[sorted_indices]
     print("lossList:", lossList)
     print("time to learn ez", time.time() - start)
     # pursuerXList[:, 2] = np.unwrap(pursuerXList[:, 2])
-    return pursuerXList, lossList
+
+    return pursuerXList, lossList, lossListNoFlatten
 
 
 def uniform_circular_entry_points_with_heading_noise(
@@ -2008,7 +2025,7 @@ def run_simulation_with_random_pursuer(
         pathHistories.append(pathHistory)
 
         # Learn
-        pursuerXList, lossList = learn_ez(
+        pursuerXList, lossList, lossListNoFlatten = learn_ez(
             jnp.array(headings),
             jnp.array(speeds),
             jnp.array(interceptedList),
@@ -2028,6 +2045,7 @@ def run_simulation_with_random_pursuer(
             flattenLearningLossAmount=flattenLearingLossAmount,
             useGaussianSampling=True,
         )
+        print("most likely pursuerX:", pursuerXList[jnp.argmin(lossListNoFlatten)])
 
         # Filter good fits
         # pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
@@ -2035,7 +2053,7 @@ def run_simulation_with_random_pursuer(
         if len(pursuerXList[lossList <= keepLossThreshold]) == 0:
             print("No good models found. trying again with simpler loss")
 
-            pursuerXList, lossList = learn_ez(
+            pursuerXList, lossList, lossListNoFlatten = learn_ez(
                 jnp.array(headings),
                 jnp.array(speeds),
                 jnp.array(interceptedList),
@@ -2501,9 +2519,9 @@ if __name__ == "__main__":
     # results_dir = "results/knownShapeAndSpeed"
     # results_dir = "results/knownSpeed"
     # results_dir = "results/knownShapeAndSpeedWithNois"
-    results_dir = "results/knownSpeedWithNoise"
-    plot_median_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.1)
+    # results_dir = "results/knownSpeedWithNoise"
+    # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.15)
     # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
     # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
-    # main()
-    # plt.show()
+    main()
+    plt.show()
