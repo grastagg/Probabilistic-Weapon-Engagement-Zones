@@ -28,7 +28,7 @@ interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = True
 saveResults = True
-plotAllFlag = True
+plotAllFlag = False
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
 elif knownSpeed:
@@ -1169,6 +1169,53 @@ def which_lp_path_minimizes_number_of_potential_solutions(
     return score
 
 
+def which_lp_path_maximizes_dist_to_next_intercept(
+    start_pos,
+    heading,
+    pursuerXList,
+    speed,
+    trueParams,
+    center,
+    radius,
+    tmax=10.0,
+    numPoints=100,
+    diff_threshold=0.3,
+    pastInterceptedPoints=None,
+):
+    def intercpetion_point(pursuerX):
+        (
+            pursuerPosition,
+            pursuerHeading,
+            pursuerSpeed,
+            minimumTurnRadius,
+            pursuerRange,
+        ) = pursuerX_to_params(pursuerX, trueParams)
+        intercepted, endPoint, endTime, pathHistory = send_low_priority_agent(
+            start_pos,
+            heading,
+            speed,
+            pursuerPosition,
+            pursuerHeading,
+            minimumTurnRadius,
+            0.0,
+            pursuerRange,
+            pursuerSpeed,
+            tmax,
+            numPoints,
+            numSimulationPoints=1000,
+        )
+        return endPoint, intercepted
+
+    interceptedPoints, intercepteds = jax.vmap(intercpetion_point)(pursuerXList)
+    interceptedPoints = jnp.where(intercepteds[:, None], interceptedPoints, jnp.nan)
+    # interceptedPoints = jnp.array(interceptedPoints)[jnp.array(intercepteds)]
+
+    diffs = interceptedPoints[:, None, :] - pastInterceptedPoints[None, :, :]
+    dists = jnp.linalg.norm(diffs, axis=-1)
+    total_distances = jnp.sum(dists)  # Sum distances to all other points
+    return total_distances
+
+
 def which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all(
     start_pos,
     heading,
@@ -1180,6 +1227,7 @@ def which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all(
     tmax=10.0,
     numPoints=100,
     diff_threshold=0.3,
+    endpoints=None,
 ):
     N = pursuerXList.shape[0]
 
@@ -1412,39 +1460,82 @@ def optimize_next_low_priority_path(
     )
 
     diff_threshold = 10.0
-    scores = jax.vmap(
-        # inside_model_disagreement_score,
-        which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all,
-        # which_lp_spends_most_time_in_all_rs,
-        in_axes=(
-            0,
-            0,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
-    )(
-        # angle_flat,
-        # heading_flat,
-        positions,
-        headings,
-        pursuerXList,
-        speed,
-        trueParams,
-        center,
-        radius,
-        tmax,
-        num_points,
-        diff_threshold,
-    )
-    max_score = jnp.max(scores)
-    min_score = jnp.min(scores)
+    if len(endPoints[interceptedList]) > 0:
+        print("TEST")
+        scores = jax.vmap(
+            # inside_model_disagreement_score,
+            # which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all,
+            which_lp_path_maximizes_dist_to_next_intercept,
+            # which_lp_spends_most_time_in_all_rs,
+            in_axes=(
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        )(
+            # angle_flat,
+            # heading_flat,
+            positions,
+            headings,
+            pursuerXList,
+            speed,
+            trueParams,
+            center,
+            radius,
+            tmax,
+            num_points,
+            diff_threshold,
+            endPoints[interceptedList],
+        )
+    else:
+        scores = jax.vmap(
+            # inside_model_disagreement_score,
+            which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all,
+            # which_lp_path_maximizes_dist_to_next_intercept,
+            # which_lp_spends_most_time_in_all_rs,
+            in_axes=(
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        )(
+            # angle_flat,
+            # heading_flat,
+            positions,
+            headings,
+            pursuerXList,
+            speed,
+            trueParams,
+            center,
+            radius,
+            tmax,
+            num_points,
+            diff_threshold,
+            endPoints[interceptedList],
+        )
+
+    max_score = jnp.nanmax(scores)
+    min_score = jnp.nanmin(scores)
+    print("min score:", jnp.nanmin(scores))
+    print("max score:", jnp.nanmax(scores))
     if jnp.isnan(max_score) or jnp.isnan(min_score):
+        print("naN in scores, using fallback method")
         scores = jax.vmap(
             # inside_model_disagreement_score,
             which_lp_path_minimizes_number_of_potential_solutions,
@@ -2519,9 +2610,9 @@ if __name__ == "__main__":
     # results_dir = "results/knownShapeAndSpeed"
     # results_dir = "results/knownSpeed"
     # results_dir = "results/knownShapeAndSpeedWithNois"
-    # results_dir = "results/knownSpeedWithNoise"
-    # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.15)
+    results_dir = "results/knownSpeedWithNoise"
+    plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.5)
     # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
     # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
-    main()
-    plt.show()
+    # main()
+    # plt.show()
