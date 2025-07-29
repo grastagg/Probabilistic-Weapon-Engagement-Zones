@@ -595,7 +595,7 @@ def in_dubins_engagement_zone_augmented_single(
         startPosition, startHeading, turnRadius, pursuerRange, goalPositions
     )
 
-    ez = dubinsPathLengths - pursuerRange
+    ez = dubinsPathLengths  # - pursuerRange
     return ez
 
 
@@ -1152,17 +1152,17 @@ def main_EZ():
     plot_dubins_reachable_set(
         pursuerPosition, pursuerHeading, pursuerRange, minimumTurnRadius, ax
     )
-    # plot_dubins_EZ(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     pursuerSpeed,
-    #     minimumTurnRadius,
-    #     captureRadius,
-    #     pursuerRange,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     ax,
-    # )
+    plot_dubins_EZ(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        evaderHeading,
+        evaderSpeed,
+        ax,
+    )
     plt.xlabel("X", fontsize=20)
     plt.ylabel("Y", fontsize=20)
     # set tick fonhtsize
