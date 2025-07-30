@@ -23,10 +23,10 @@ jax.config.update("jax_enable_x64", True)
 #
 
 positionAndHeadingOnly = False
-knownSpeed = False
+knownSpeed = True
 interceptionOnBoundary = True
 randomPath = False
-noisyMeasurementsFlag = False
+noisyMeasurementsFlag = True
 saveResults = False
 plotAllFlag = True
 if positionAndHeadingOnly:
@@ -552,7 +552,7 @@ def learning_loss_on_boundary_function_single_EZ(
     flattenLearingLossAmount=0.0,
     verbose=False,
 ):
-    inEZ = pathTime <= ezTime
+    inEZ = pathTime >= ezTime
 
     headings = heading * jnp.ones(pathHistory.shape[0])
     ezFirst = dubinsEZ_from_pursuerX(
@@ -564,7 +564,12 @@ def learning_loss_on_boundary_function_single_EZ(
         ezFirst - flattenLearingLossAmount
     ) + activation(-ezFirst - flattenLearingLossAmount)
 
-    interceptedLossTrajectory = 0
+    interceptedLossTrajectory = jnp.where(
+        inEZ,
+        0.0,
+        activation(-ezAll - flattenLearingLossAmount),
+    )
+    interceptedLossTrajectory = jnp.sum(interceptedLossTrajectory)
 
     interceptedLossEZ = (
         interceptedPathWeight * interceptedLossTrajectory + interceptedLossEZFirst
@@ -580,12 +585,23 @@ def learning_loss_on_boundary_function_single_EZ(
 
     def verbose_print():
         jax.debug.print(
-            "interceptedPoint: {interceptedPoint}, rsEnd: {rsEnd}, lossRS: {lossRS}, minTrajRS {rsmin}, rsTrajLoss {rstlos}",
-            interceptedPoint=interceptedPoint,
-            rsEnd=ezFirst,
-            lossRS=interceptedLossEZFirst,
-            rsmin=0,
-            rstlos=interceptedLossTrajectory,
+            "\n"
+            "interceptedPoint: {ip}\n"
+            "ez: {ezAll}\n"
+            "ezPoint: {ezp}\n"
+            "ezFirst (ez at ezPoint): {ezf}\n"
+            "interceptedLossEZFirst: {ilf}\n"
+            "sum interceptedLossTrajectory: {ilt}\n"
+            "sum survivedLossEZ: {slz}\n"
+            "lossEZ: {lez}\n",
+            ip=interceptedPoint,
+            ezAll=jnp.min(ezAll),
+            ezp=ezPoint,
+            ezf=ezFirst,
+            ilf=interceptedLossEZFirst,
+            ilt=interceptedLossTrajectory,
+            slz=survivedLossEZ,
+            lez=lossEZ,
         )
 
     jax.lax.cond(verbose, verbose_print, lambda: None)
@@ -1044,7 +1060,6 @@ def find_opt_starting_pursuerX(
     useGaussianSampling=False,
 ):
     initialPursuerXList = []
-    print("num previous pursuerX:", previousPursuerX.shape[0])
 
     if useGaussianSampling:
         std = np.sqrt(cov)
@@ -1447,7 +1462,7 @@ def which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all(
             minimumTurnRadius,
             pursuerRange,
         ) = pursuerX_to_params(pursuerX, trueParams)
-        _, intercepted, endPoint, endTime, pathHistory = send_low_priority_agent(
+        _, intercepted, endPoint, endTime, pathHistory, _, _ = send_low_priority_agent(
             start_pos,
             heading,
             speed,
@@ -2222,6 +2237,7 @@ def run_simulation_with_random_pursuer(
     dataDir="results",
     saveDir="run",
 ):
+    print("Running simulation with random pursuer...")
     rng = np.random.default_rng(seed)
     trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
 
@@ -2278,7 +2294,7 @@ def run_simulation_with_random_pursuer(
         # print("keepLossThreshold:", keepLossThreshold)
         if i == 0:
             startPosition = jnp.array([-searchCircleRadius, 0.0001])
-            heading = 0.0001
+            heading = 0.01
         else:
             searchCenter = (
                 jnp.mean(pursuerXListZeroLoss[:, :2], axis=0)
@@ -2393,6 +2409,7 @@ def run_simulation_with_random_pursuer(
             pursuerXList, lossList, lossListNoFlatten = learn_ez(
                 jnp.array(headings),
                 jnp.array(speeds),
+                jnp.array(pathTimes),
                 jnp.array(interceptedList),
                 jnp.array(pathHistories),
                 jnp.array(endPoints),
@@ -2410,7 +2427,7 @@ def run_simulation_with_random_pursuer(
                 upperLimit=upper_bounds_all[parameterMask],
                 interceptedPathWeight=0.0,
                 flattenLearningLossAmount=flattenLearingLossAmount,
-                useGaussianSampling=False,
+                useGaussianSampling=True,
             )
             pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
             lossListZeroLoss = lossList[lossList <= keepLossThreshold]
@@ -2540,10 +2557,10 @@ def main():
         seed=seed,
         numLowPriorityAgents=15,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-6,
+        keepLossThreshold=1e-4,
         plotEvery=1,
         dataDir="results",
-        saveDir="knownSpeedWithNoise",
+        saveDir="unknownSpeed",
         # saveDir="knownSpeed",
     )
 
@@ -2859,7 +2876,8 @@ if __name__ == "__main__":
     # results_dir = "results/knownSpeed"
     # results_dir = "results/knownShapeAndSpeedWithNois"
     # results_dir = "results/knownSpeedWithNoise"
-    # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.5)
+    # results_dir = "results/unknownSpeed"
+    # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.15)
     # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
     # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
     main()
