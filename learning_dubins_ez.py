@@ -29,12 +29,15 @@ randomPath = False
 noisyMeasurementsFlag = True
 saveResults = True
 plotAllFlag = True
+only_speed = True
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
 elif knownSpeed:
     parameterMask = np.array([True, True, True, False, True, True])
 else:
     parameterMask = np.array([True, True, True, True, True, True])
+if only_speed:
+    parameterMask = np.array([False, False, False, True, False, False])
 
 np.random.seed(326)  # for reproducibility
 
@@ -390,12 +393,29 @@ def pursuerX_to_params_all(X, trueParams):
     )
 
 
+def pursuerX_to_params_only_speed(X, trueParams):
+    pursuerPosition = trueParams[0:2]
+    pursuerHeading = trueParams[2]
+    pursuerSpeed = X[0]
+    minimumTurnRadius = trueParams[4]
+    pursuerRange = trueParams[5]
+    return (
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
+    )
+
+
 if positionAndHeadingOnly:
     pursuerX_to_params = pursuerX_to_params_position_and_heading
 elif knownSpeed:
     pursuerX_to_params = pursuerX_to_params_no_speed
 else:
     pursuerX_to_params = pursuerX_to_params_all
+if only_speed:
+    pursuerX_to_params = pursuerX_to_params_only_speed
 
 
 def dubinsEZ_from_pursuerX(
@@ -836,6 +856,8 @@ def run_optimization_hueristic(
         # lowerLimitSub = np.array([0.5, 0.5, 0, 0.2, 0.2])
     else:
         lowerLimitSub = np.array([0.5, 0.5, 0.2, 0.2, 0.2, 0.2])
+    if only_speed:
+        lowerLimitSub = np.array([0.2])
 
     initialLoss = total_learning_loss(
         initialPursuerX,
@@ -868,13 +890,14 @@ def run_optimization_hueristic(
             trueParams,
             interceptedPathWeight,
             flattenLearingLossAmount,
-            verbose=verbose,
+            verbose=True,
         )
         print("initial loss:", initialLoss)
         print(
             "true pursuerX:",
             trueParams[parameterMask],
         )
+
         lossTrue = total_learning_loss(
             trueParams[parameterMask],
             headings,
@@ -888,7 +911,7 @@ def run_optimization_hueristic(
             trueParams,
             interceptedPathWeight,
             flattenLearingLossAmount,
-            verbose=verbose,
+            verbose=True,
         )
         print("true learning loss:", lossTrue)
 
@@ -958,6 +981,8 @@ def run_optimization_hueristic(
         numVars = 5
     else:
         numVars = 6
+    if only_speed:
+        numVars = 1
     optProb.addVarGroup(
         name="pursuerX",
         nVars=numVars,
@@ -1018,7 +1043,20 @@ def run_optimization_hueristic(
         verbose=False,
     )
     # loss = loss["loss"]
-    return pursuerX, loss, lossNoFlatten
+    return (
+        np.array(
+            [
+                trueParams[0],
+                trueParams[1],
+                trueParams[2],
+                pursuerX[0],
+                trueParams[4],
+                trueParams[5],
+            ]
+        ),
+        loss,
+        lossNoFlatten,
+    )
 
 
 def latin_hypercube_uniform(lowerLimit, upperLimit, numSamples):
@@ -2239,6 +2277,7 @@ def run_simulation_with_random_pursuer(
     print("Running simulation with random pursuer...")
     rng = np.random.default_rng(seed)
     trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
+    trueParams[3] = 2.5
 
     pursuerPosition = np.array([trueParams[0], trueParams[1]])
     pursuerHeading = trueParams[2]
@@ -2556,7 +2595,7 @@ def main():
         seed=seed,
         numLowPriorityAgents=15,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-9,
+        keepLossThreshold=1e-15,
         plotEvery=1,
         dataDir="results",
         saveDir="unknownSpeedWithNoise",
