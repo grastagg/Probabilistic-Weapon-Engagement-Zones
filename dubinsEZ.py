@@ -1111,7 +1111,7 @@ def main_EZ():
     minimumTurnRadius = 0.4
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
-    evaderSpeed = 0.5
+    evaderSpeed = 1
     evaderPosition = np.array([-0.8858, 0.8512])
     startTime = time.time()
 
@@ -1156,6 +1156,17 @@ def main_EZ():
         pursuerPosition,
         pursuerHeading,
         pursuerSpeed,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        evaderHeading,
+        evaderSpeed,
+        ax,
+    )
+    plot_dubins_EZ(
+        pursuerPosition,
+        pursuerHeading,
+        3.0,
         minimumTurnRadius,
         captureRadius,
         pursuerRange,

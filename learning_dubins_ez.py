@@ -23,11 +23,11 @@ jax.config.update("jax_enable_x64", True)
 #
 
 positionAndHeadingOnly = False
-knownSpeed = True
+knownSpeed = False
 interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = True
-saveResults = False
+saveResults = True
 plotAllFlag = True
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
@@ -569,13 +569,13 @@ def learning_loss_on_boundary_function_single_EZ(
         0.0,
         activation(-ezAll - flattenLearingLossAmount),
     )
-    interceptedLossTrajectory = jnp.sum(interceptedLossTrajectory)
+    interceptedLossTrajectory = jnp.mean(interceptedLossTrajectory)
 
     interceptedLossEZ = (
         interceptedPathWeight * interceptedLossTrajectory + interceptedLossEZFirst
     )
 
-    survivedLossEZ = jnp.sum(
+    survivedLossEZ = jnp.mean(
         activation(-ezAll - flattenLearingLossAmount)
     )  # loss if survived in EZ
 
@@ -1432,7 +1432,7 @@ def which_lp_path_maximizes_dist_to_next_intercept(
 
     diffs = interceptedPoints[:, None, :] - pastInterceptedPoints[None, :, :]
     dists = jnp.linalg.norm(diffs, axis=-1)
-    total_distances = jnp.sum(dists)  # Sum distances to all other points
+    total_distances = jnp.min(dists)  # Sum distances to all other points
     return total_distances
 
 
@@ -1681,7 +1681,6 @@ def optimize_next_low_priority_path(
 
     diff_threshold = 10.0
     if len(endPoints[interceptedList]) > 0:
-        print("TEST")
         scores = jax.vmap(
             # inside_model_disagreement_score,
             # which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all,
@@ -1715,7 +1714,6 @@ def optimize_next_low_priority_path(
             diff_threshold,
             endPoints[interceptedList],
         )
-        print("test2")
     else:
         scores = jax.vmap(
             # inside_model_disagreement_score,
@@ -1880,6 +1878,7 @@ def plot_all(
         ax,
         colors=["magenta"],
     )
+
     # plt.legend(fontsize=18)
 
     numPlots = len(pursuerXList)
@@ -2267,7 +2266,7 @@ def run_simulation_with_random_pursuer(
     else:
         lowPriorityAgentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
         flattenLearingLossAmount = 0.0
-        maxStdDevThreshold = 0.1
+        maxStdDevThreshold = 0.05
     # flattenLearingLossAmount = 0.0
 
     # Init histories
@@ -2557,10 +2556,10 @@ def main():
         seed=seed,
         numLowPriorityAgents=15,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-4,
+        keepLossThreshold=1e-9,
         plotEvery=1,
         dataDir="results",
-        saveDir="unknownSpeed",
+        saveDir="unknownSpeedWithNoise",
         # saveDir="knownSpeed",
     )
 
@@ -2637,7 +2636,7 @@ def plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
         fig, axes = plt.subplots(2, 2, figsize=(12, 8))
         labels = ["RMSE", "x error", "y error", "heading error"]
         colors = ["tab:blue", "tab:green", "tab:orange", "tab:red"]
-    else:
+    elif knownSpeed:
         fig, axes = plt.subplots(3, 2, figsize=(12, 8))
         labels = [
             "RMSE",
@@ -2655,6 +2654,27 @@ def plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
             "tab:purple",
             "tab:brown",
         ]
+    else:
+        fig, axes = plt.subplots(4, 2, figsize=(12, 10))
+        labels = [
+            "RMSE",
+            "x error",
+            "y error",
+            "heading error",
+            "speed error",
+            "turn radius error",
+            "range error",
+        ]
+        colors = [
+            "tab:blue",
+            "tab:green",
+            "tab:orange",
+            "tab:red",
+            "tab:purple",
+            "tab:brown",
+            "tab:pink",
+        ]
+
     stat_data = [(median_rmse, q1_rmse, q3_rmse, min_rmse, max_rmse)] + [
         (
             median_abs[:, i],
@@ -2741,13 +2761,24 @@ def plot_box_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
     if positionAndHeadingOnly:
         fig, axes = plt.subplots(2, 2, figsize=(12, 8))
         labels = ["RMSE", "x error", "y error", "heading error"]
-    else:
+    elif knownSpeed:
         fig, axes = plt.subplots(3, 2, figsize=(12, 10))
         labels = [
             "RMSE",
             "x error",
             "y error",
             "heading error",
+            "turn radius error",
+            "range error",
+        ]
+    else:
+        fig, axes = plt.subplots(4, 2, figsize=(12, 10))
+        labels = [
+            "RMSE",
+            "x error",
+            "y error",
+            "heading error",
+            "speed error",
             "turn radius error",
             "range error",
         ]
@@ -2877,8 +2908,9 @@ if __name__ == "__main__":
     # results_dir = "results/knownShapeAndSpeedWithNois"
     # results_dir = "results/knownSpeedWithNoise"
     # results_dir = "results/unknownSpeed"
-    # plot_median_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.15)
-    # plot_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.1)
+    # results_dir = "results/unknownSpeedWithNoise"
+    # plot_median_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.15)
+    # plot_box_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.1)
     # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
     main()
     plt.show()
