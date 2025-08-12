@@ -4,7 +4,7 @@
 # for SEED in 132; do
 # for SEED in 276 38 248 193 239 63 216 27 225; do
 # for SEED in {362..500}; do
-for SEED in {0..0}; do
+for SEED in {108..108}; do
   # for SEED in {362..500}; do
   python3 learning_dubins_ez.py $SEED
 done

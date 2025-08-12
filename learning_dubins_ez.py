@@ -4,8 +4,12 @@ from functools import partial
 import sys
 import time
 import jax
+from concurrent.futures import ThreadPoolExecutor
+
+
+jax.config.update("jax_platform_name", "gpu")
+
 import getpass
-from jax._src.sharding_impls import PositionalSharding
 from pyoptsparse import Optimization, OPT, IPOPT
 import jax.numpy as jnp
 import numpy as np
@@ -16,7 +20,6 @@ import json
 from scipy.optimize import minimize
 
 import dubinsEZ
-import dubinsPEZ
 
 jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax.config.update("jax_platform_name", "gpu")")
@@ -27,7 +30,7 @@ knownSpeed = True
 interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = True
-saveResults = False
+saveResults = True
 plotAllFlag = True
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
@@ -463,7 +466,13 @@ def new_activation(x, c=2.96, p=0.33, k=10):
     return g(x - c, k) + g(-x - c, k) + p * x**2
 
 
+def activation_pos(x, delta=1.0):
+    z = jax.nn.relu(x)  # only positive side
+    return jnp.where(z <= delta, 0.5 * z**2, delta * (z - 0.5 * delta))
+
+
 def activation(x):
+    return jax.nn.relu(x)  # ReLU activation function
     return jnp.square(jax.nn.relu(x))  # ReLU activation function
     return jnp.log1p(jnp.exp(beta * x)) / beta
     return (jnp.tanh(10.0 * x) + 1.0) / 2.0 * x**2
@@ -587,20 +596,17 @@ def learning_loss_on_boundary_function_single(
     interceptedLossRSEnd = activation(rsEnd - flattenLearingLossAmount) + activation(
         -rsEnd - flattenLearingLossAmount
     )
-    # interceptedLossRSEnd = new_activation(
-    #     rsEnd, flattenLearingLossAmount
-    # ) + new_activation(-rsEnd, flattenLearingLossAmount)
-    interceptedLossTrajectory = jnp.mean(
+    interceptedLossTrajectory = jnp.max(
         activation(-rsAll[:-4] - flattenLearingLossAmount)
     )
-    # interceptedLossTrajectory = jnp.max(
-    #     new_activation(-rsAll[:-4], flattenLearingLossAmount)
+    # interceptedLossTrajectory = activation(
+    #     -jnp.min(rsAll[:-4]) - flattenLearingLossAmount
     # )
     interceptedLossRS = (
         interceptedPathWeight * interceptedLossTrajectory + interceptedLossRSEnd
     )
 
-    survivedLossRS = jnp.mean(
+    survivedLossRS = jnp.max(
         activation(-rsAll - flattenLearingLossAmount)
     )  # loss if survived in RS
 
@@ -608,18 +614,18 @@ def learning_loss_on_boundary_function_single(
         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
     )
 
-    def verbose_print():
-        jax.debug.print(
-            "interceptedPoint: {interceptedPoint}, rsEnd: {rsEnd}, lossRS: {lossRS}, minTrajRS {rsmin}, rsTrajLoss {rstlos}",
-            interceptedPoint=interceptedPoint,
-            rsEnd=rsEnd,
-            lossRS=interceptedLossRSEnd,
-            rsmin=rsAll[:-4].min(),
-            rstlos=interceptedLossTrajectory,
-        )
-
-    jax.lax.cond(verbose, verbose_print, lambda: None)
-
+    # def verbose_print():
+    #     jax.debug.print(
+    #         "interceptedPoint: {interceptedPoint}, rsEnd: {rsEnd}, lossRS: {lossRS}, minTrajRS {rsmin}, rsTrajLoss {rstlos}",
+    #         interceptedPoint=interceptedPoint,
+    #         rsEnd=rsEnd,
+    #         lossRS=interceptedLossRSEnd,
+    #         rsmin=rsAll[:-4].min(),
+    #         rstlos=interceptedLossTrajectory,
+    #     )
+    #
+    # jax.lax.cond(verbose, verbose_print, lambda: None)
+    #
     return lossRS
 
 
@@ -1089,9 +1095,15 @@ def run_optimization_hueristic(
         #     headings,
         #     speeds,
         #     interceptedList,
+        #     pathTimes,
         #     pathHistories,
         #     endPoints,
+        #     ezPoints,
+        #     ezTimes,
         #     trueParams,
+        #     interceptedPathWeight,
+        #     flattenLearingLossAmount,
+        #     verbose=False,
         # )
         #
         # funcsSens = {
@@ -1124,18 +1136,15 @@ def run_optimization_hueristic(
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
     opt.options["max_iter"] = 50
+    opt.options["warm_start_init_point"] = "yes"
+    opt.options["mu_init"] = 1e-1
+    opt.options["nlp_scaling_method"] = "gradient-based"
     opt.options["tol"] = 1e-8
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
-    # opt.options["hessian_approximation"] = "limited-memory"
-    # opt.options["hessian_approximation"] = "exact"
-    # opt.setOption("hessian_approximation", "exact")  # Use your Hessian
-
-    # opt.options["derivative_test"] = "first-order"
-    # opt.options["derivative_test"] = "second-order"
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
@@ -1292,6 +1301,108 @@ def find_opt_starting_pursuerX(
     return jnp.array(initialPursuerXList)
 
 
+def plot_contour_of_loss(
+    headings,
+    speeds,
+    pathTimes,
+    interceptedList,
+    pathHistories,
+    endPoints,
+    endTimes,
+    ezPoints,
+    ezTimes,
+    trueParams,
+    learnedParams,
+    lowerLimit,
+    upperLimit,
+    pursuerXList,
+    parameterIndexi=3,
+    parameterIndexj=4,
+    interceptedPathWeight=1.0,
+    flattenLearningLossAmount=0.0,
+    title="",
+):
+    paramterNames = ["xpos", "ypos", "heading", "turnRadius", "range"]
+    numSamples = 100
+    paramsi = np.linspace(
+        lowerLimit[parameterIndexi], upperLimit[parameterIndexi], numSamples
+    )
+    paramsj = np.linspace(
+        lowerLimit[parameterIndexj], upperLimit[parameterIndexj], numSamples
+    )
+    paramsi, paramsj = np.meshgrid(paramsi, paramsj)
+    losses = np.zeros(paramsj.shape)
+    # param = np.array(
+    #     [trueParams[0], trueParams[1], trueParams[2], trueParams[4], trueParams[5]]
+    # )
+    param = learnedParams.copy()
+    print("learnedParams", learnedParams)
+    for i in tqdm.tqdm(range(paramsi.shape[0])):
+        for j in range(paramsj.shape[1]):
+            param[parameterIndexi] = paramsi[i, j]
+            param[parameterIndexj] = paramsj[i, j]
+            lossTrue = total_learning_loss(
+                param,
+                headings,
+                speeds,
+                interceptedList,
+                pathTimes,
+                pathHistories,
+                endPoints,
+                ezPoints,
+                ezTimes,
+                trueParams,
+                1.0,
+                flattenLearningLossAmount,
+                verbose=False,
+            )
+
+            losses[i, j] = lossTrue
+    fig, ax = plt.subplots(figsize=(10, 8))
+    c = ax.pcolormesh(paramsi, paramsj, losses)
+    cbar = fig.colorbar(c, ax=ax)
+    mask = (losses < 1e-5).astype(float)
+    ax.contour(
+        paramsi,
+        paramsj,
+        mask,
+        levels=[0.5],  # boundary between 0 and 1
+        colors="red",
+        linewidths=0.5,
+    )
+    if parameterIndexi > 2:
+        parameterIndexiTrue = parameterIndexi + 1
+    else:
+        parameterIndexiTrue = parameterIndexi
+    if parameterIndexj > 2:
+        parameterIndexjTrue = parameterIndexj + 1
+    else:
+        parameterIndexjTrue = parameterIndexj
+    ax.scatter(
+        trueParams[parameterIndexiTrue],
+        trueParams[parameterIndexjTrue],
+        color="red",
+        label="True Params",
+    )
+    ax.scatter(
+        pursuerXList[:, parameterIndexi],
+        pursuerXList[:, parameterIndexj],
+        color="blue",
+        label="All Params",
+    )
+    ax.scatter(
+        learnedParams[parameterIndexi],
+        learnedParams[parameterIndexj],
+        color="green",
+        label="Learned Params",
+    )
+    ax.set_xlabel(paramterNames[parameterIndexi])
+    ax.set_ylabel(paramterNames[parameterIndexj])
+    ax.set_aspect("equal", adjustable="box")
+    ax.legend()
+    plt.title(title)
+
+
 def learn_ez(
     headings,
     speeds,
@@ -1340,45 +1451,35 @@ def learn_ez(
             useGaussianSampling=useGaussianSampling,
         )
 
-    print(
-        "true pursuerX:",
-        trueParams[parameterMask],
-    )
-    lossTrue = total_learning_loss(
-        trueParams[parameterMask],
-        headings,
-        speeds,
-        interceptedList,
-        pathTimes,
-        pathHistories,
-        endPoints,
-        ezPoints,
-        ezTimes,
-        trueParams,
-        interceptedPathWeight,
-        flattenLearningLossAmount,
-        verbose=True,
-    )
-    trueGrad = dTotalLossDX(
-        trueParams[parameterMask],
-        headings,
-        speeds,
-        interceptedList,
-        pathTimes,
-        pathHistories,
-        endPoints,
-        ezPoints,
-        ezTimes,
-        trueParams,
-        interceptedPathWeight,
-        flattenLearningLossAmount,
-    )
-    print("true learning loss:", lossTrue)
-    print("true gradient:", trueGrad)
-    for i in tqdm.tqdm(range(len(initialPursuerXList))):
-        # for i in range(len(initialPursuerXList)):
-        # pursuerX, loss = run_optimization_hueristic_scipy(
-        pursuerX, loss, lossNoFlatten = run_optimization_hueristic(
+    # initialPursuerXList: (N, d_max)
+    #
+    # for i in tqdm.tqdm(range(len(initialPursuerXList))):
+    #     # for i in range(len(initialPursuerXList)):
+    #     # pursuerX, loss = run_optimization_hueristic_scipy(
+    #     pursuerX, loss, lossNoFlatten = run_optimization_hueristic(
+    #         headings,
+    #         speeds,
+    #         pathTimes,
+    #         interceptedList,
+    #         pathHistories,
+    #         endPoints,
+    #         endTimes,
+    #         ezPoints,
+    #         ezTimes,
+    #         initialPursuerXList[i],
+    #         lowerLimit,
+    #         upperLimit,
+    #         trueParams,
+    #         interceptedPathWeight=interceptedPathWeight,
+    #         flattenLearingLossAmount=flattenLearningLossAmount,
+    #         verbose=False,
+    #     )
+    #     pursuerXList.append(pursuerX)
+    #     lossList.append(loss)
+    #     lossListNoFlatten.append(lossNoFlatten)
+    #     #
+    def _solve_one(x0):
+        return run_optimization_hueristic(
             headings,
             speeds,
             pathTimes,
@@ -1388,7 +1489,7 @@ def learn_ez(
             endTimes,
             ezPoints,
             ezTimes,
-            initialPursuerXList[i],
+            x0,
             lowerLimit,
             upperLimit,
             trueParams,
@@ -1396,9 +1497,20 @@ def learn_ez(
             flattenLearingLossAmount=flattenLearningLossAmount,
             verbose=False,
         )
-        pursuerXList.append(pursuerX)
-        lossList.append(loss)
-        lossListNoFlatten.append(lossNoFlatten)
+
+    # parallel, order-preserving, minimal diff
+    with ThreadPoolExecutor(max_workers=2) as ex:  # tweak workers (e.g., 4–8)
+        results = list(
+            tqdm.tqdm(
+                ex.map(_solve_one, initialPursuerXList),
+                total=len(initialPursuerXList),
+            )
+        )
+
+    # unpack just like before
+    pursuerXList, lossList, lossListNoFlatten = map(
+        lambda xs: np.squeeze(np.array(xs)), zip(*results)
+    )
 
     pursuerXList = np.array(pursuerXList).squeeze()
     lossList = np.array(lossList).squeeze()
@@ -1408,50 +1520,12 @@ def learn_ez(
     lossList = lossList[sorted_indices]
     pursuerXList = pursuerXList[sorted_indices]
     lossListNoFlatten = lossListNoFlatten[sorted_indices]
-    print("first parameters", pursuerXList[0])
-    testLoss = total_learning_loss(
-        pursuerXList[0],
-        headings,
-        speeds,
-        interceptedList,
-        pathTimes,
-        pathHistories,
-        endPoints,
-        ezPoints,
-        ezTimes,
-        trueParams,
-        interceptedPathWeight,
-        flattenLearningLossAmount,
-        verbose=True,
-    )
-    testGrad = dTotalLossDX(
-        pursuerXList[0],
-        headings,
-        speeds,
-        interceptedList,
-        pathTimes,
-        pathHistories,
-        endPoints,
-        ezPoints,
-        ezTimes,
-        trueParams,
-        interceptedPathWeight,
-        flattenLearningLossAmount,
-    )
-    print("test learning loss:", testLoss)
-    print("test gradient:", testGrad)
 
     print("lossList:", lossList)
 
-    def posterior_weights(nlls):
-        nlls = jnp.asarray(nlls)
-        likelihoods = jnp.exp(-nlls + nlls.min())  # subtract min to avoid underflow
-        weights = likelihoods / likelihoods.sum()
-        return weights
-
-    print("weights", posterior_weights(lossList))
     print("time to learn ez", time.time() - start)
     # pursuerXList[:, 2] = np.unwrap(pursuerXList[:, 2])
+    #
 
     return pursuerXList, lossList, lossListNoFlatten
 
@@ -2067,28 +2141,10 @@ def plot_all(
     lossList,
     trueParams,
 ):
-    fig, ax = plt.subplots()
-    ax.set_xlim(-5.0, 5.0)
-    ax.set_ylim(-5.0, 5.0)
-    plot_low_priority_paths(
-        startPositions, interceptedList, endPoints, pathHistories, ax
-    )
-    dubinsEZ.plot_dubins_reachable_set(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerRange,
-        pursuerTurnRadius,
-        ax,
-        colors=["magenta"],
-    )
-
-    # plt.legend(fontsize=18)
-
     numPlots = len(pursuerXList)
     # make 2 rows and ceil(numPlots/2) columns
     # numPlots = 10
     numPlots = min(numPlots, 10)
-    plt.legend()
     # fig1, axes = make_axes(numPlots)
 
     fig, ax = plt.subplots(layout="tight")
@@ -2399,6 +2455,120 @@ def fit_von_mises_with_variance(angles):
     return wrap_to_pi(mu), kappa, circular_variance, std_dev
 
 
+def summarize_solutions(
+    X,  # shape [M, D]
+    angle_idx=2,  # which column is heading
+    weights=None,  # optional weights, shape [M]
+):
+    X = np.asarray(X)
+    M, D = X.shape
+    if weights is None:
+        w = np.ones(M) / M
+    else:
+        w = np.asarray(weights).astype(float)
+        w = w / (w.sum() + 1e-12)
+
+    # 1) Circular stats for angle
+    angles = X[:, angle_idx]
+    # Use your function; assuming it returns mean, kappa, variance, std
+    angleMean, angleKappa, angleVariance, angleStd = fit_von_mises_with_variance(angles)
+
+    # 2) Linear means for the rest
+    mean = (w[:, None] * X).sum(axis=0)
+    mean[angle_idx] = angleMean  # replace with circular mean
+
+    # 3) Build residuals with wrapped angle residuals
+    R = X - mean  # linear residuals
+    R[:, angle_idx] = wrap_to_pi(angles - angleMean)
+
+    # 4) Weighted covariance (full), unbiased-ish correction
+    #    (you can drop the correction if you prefer MLE)
+    ess = 1.0 / (w**2).sum()  # effective sample size
+    C = (w[:, None, None] * (R[:, :, None] * R[:, None, :])).sum(axis=0)
+    C *= ess / max(ess - 1.0, 1.0)  # small-sample correction
+
+    # 5) Replace the angle variance on the diagonal with circular variance
+    #    (keeps covariance with other dims from the wrapped residuals)
+    C[angle_idx, angle_idx] = angleVariance
+
+    var = np.diag(C).copy()
+    std = np.sqrt(var)
+    std[angle_idx] = angleStd  # ensure std matches circular std
+
+    return mean, C, var, std, angleMean, angleKappa
+
+
+def weights_from_losses(
+    losses,
+    tau=None,  # temperature; if None, use median(L - Lmin) over positives
+    keep_frac=None,  # e.g., 0.3 keeps best 30% by loss; None = no fraction trim
+    delta=None,  # keep if L <= Lmin + delta; None = no delta trim
+    prior_logw=None,  # optional log-prior per model (same shape as losses)
+    eps=1e-12,
+):
+    """
+    Convert losses to soft weights with optional relative trimming.
+
+    Args:
+        losses (array-like): 1D losses, any real scale (lower is better).
+        tau (float|None): Temperature. If None, sets tau = median(L - Lmin) over L>Lmin.
+        keep_frac (float|None): Keep top fraction by loss (0<keep_frac<=1).
+        delta (float|None): Keep runs with L <= Lmin + delta.
+        prior_logw (array-like|None): Optional log-prior per run to break ties.
+        eps (float): Numerical floor.
+
+    Returns:
+        w (np.ndarray): Normalized weights summing to 1 (zeros for trimmed).
+        mask (np.ndarray): Boolean mask of which runs were kept.
+        tau (float): Temperature actually used.
+        ess (float): Effective sample size = 1 / sum(w^2).
+    """
+    L = np.asarray(losses, dtype=float)
+    Lmin = float(np.min(L))
+    dL = L - Lmin
+
+    # Temperature: robust default from the spread above the minimum
+    if tau is None:
+        pos = dL[dL > 0]
+        tau = float(np.median(pos)) if pos.size > 0 else 1.0
+        tau = max(tau, eps)
+
+    # Build keep mask (relative trims; both can be used together)
+    mask = np.ones_like(L, dtype=bool)
+    if delta is not None:
+        mask &= L <= (Lmin + delta)
+    if keep_frac is not None:
+        k = max(1, int(np.ceil(keep_frac * L.size)))
+        thresh = np.partition(L, k - 1)[k - 1]  # kth smallest
+        mask &= L <= thresh
+
+    # Base log-weights from losses (pseudo-likelihood)
+    logw = -(dL) / tau
+
+    # Optional prior in log-space
+    if prior_logw is not None:
+        prior_logw = np.asarray(prior_logw, dtype=float)
+        logw = logw + prior_logw
+
+    # Zero out trimmed runs by setting -inf before softmax
+    logw = np.where(mask, logw, -np.inf)
+
+    # Stable softmax
+    m = np.max(logw[np.isfinite(logw)]) if np.any(np.isfinite(logw)) else 0.0
+    w_unnorm = np.exp(np.clip(logw - m, -700, 700))  # avoid overflow
+    Z = w_unnorm.sum()
+
+    if Z <= 0 or not np.isfinite(Z):
+        # Fallback: put all weight on the best-loss run
+        w = np.zeros_like(L)
+        w[np.argmin(L)] = 1.0
+    else:
+        w = w_unnorm / Z
+
+    ess = 1.0 / np.sum(w**2 + eps)
+    return w, mask, float(tau), float(ess)
+
+
 def find_mean_and_std(pursuerXListZeroLoss):
     # Track stats
     angles = pursuerXListZeroLoss[:, 2]
@@ -2448,7 +2618,7 @@ def run_simulation_with_random_pursuer(
         lowPriorityAgentPositionCov = np.array([[0.001, 0.0], [0.0, 0.001]])
         lowPriorityAgentTimeVar = 0.001
         flattenLearingLossAmount = find_learning_loss_flatten_amount(
-            lowPriorityAgentPositionCov, beta=3.0
+            lowPriorityAgentPositionCov, beta=2.0
         )
         maxStdDevThreshold = 0.05
     else:
@@ -2558,8 +2728,8 @@ def run_simulation_with_random_pursuer(
         pathHistories.append(pathHistory)
         interceptionPointEZList.append(interceptionPointEZ)
         interceptionTimeEZList.append(interceptionTimeEZ)
-        downSampledPathHistories.append(pathHistory[::100])
-        downSampledPathTimes.append(pathTime[::100])
+        downSampledPathHistories.append(pathHistory[::1])
+        downSampledPathTimes.append(pathTime[::1])
 
         # Learn
         pursuerXList, lossList, lossListNoFlatten = learn_ez(
@@ -2624,6 +2794,7 @@ def run_simulation_with_random_pursuer(
                 break
         pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
         lossListZeroLoss = lossList[lossList <= keepLossThreshold]
+
         # fig, ax = plt.subplots()
         # plt.hist(
         #     pursuerXListZeroLoss[:, 2], bins=10, alpha=0.5, label="Learned Headings"
@@ -2636,13 +2807,38 @@ def run_simulation_with_random_pursuer(
         print("trueParams", trueParams)
         print("mean:", mean)
         print("std dev", std)
-
         pursuerParameterMean_history.append(mean)
         pursuerParameterVariance_history.append(cov)
         pursuerParameterStdDev_history.append(std)
         pursuerParameter_history.append(pursuerXList)
         lossList_history.append(lossList)
-
+        #####plot_loss
+        # if i > 20:
+        #    ijPairs = [[3, 4]]
+        #    for ij in ijPairs:
+        #        title = f"Loss Contour for {i} Agents"
+        #        plot_contour_of_loss(
+        #            jnp.array(headings),
+        #            jnp.array(speeds),
+        #            jnp.array(pathTimes),
+        #            jnp.array(interceptedList),
+        #            jnp.array(pathHistories),
+        #            jnp.array(endPoints),
+        #            jnp.array(endTimes),
+        #            jnp.array(interceptionPointEZList),
+        #            jnp.array(interceptionTimeEZList),
+        #            trueParams,
+        #            pursuerXListZeroLoss[0],
+        #            mean - 7 * std,
+        #            mean + 7 * std,
+        #            pursuerXList[lossList <= 1e-8],
+        #            interceptedPathWeight=1.0,
+        #            flattenLearningLossAmount=flattenLearingLossAmount,
+        #            parameterIndexi=ij[0],
+        #            parameterIndexj=ij[1],
+        #            title=title,
+        #        )
+        #
         # Plot
         if i % plotEvery == 0 and plotAllFlag:
             fig = plot_all(
@@ -2664,7 +2860,7 @@ def run_simulation_with_random_pursuer(
             fig.savefig(f"video/{i}.png")
             plt.close(fig)
             # close all figures to save memory
-            plt.close("all")
+            # plt.close("all")
 
         i += 1
         # singlePursuerX = len(pursuerXList) == 1
@@ -2687,6 +2883,8 @@ def run_simulation_with_random_pursuer(
     abs_error_history = compute_abs_error_history(
         mean_history, trueParams_np, parameterMask
     )
+    print("final error", abs_error_history[-1])
+    print("final rmse", rmse_history[-1])
     if plotAllFlag:
         plot_pursuer_parameters_spread(
             np.array(pursuerParameter_history),
@@ -2742,7 +2940,7 @@ def main():
         parameterMask,
         seed=seed,
         numLowPriorityAgents=15,
-        numOptimizerStarts=50,
+        numOptimizerStarts=100,
         keepLossThreshold=1e-7,
         plotEvery=1,
         dataDir="results",
@@ -3102,5 +3300,7 @@ if __name__ == "__main__":
     # plot_median_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.15)
     # plot_box_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.1)
     # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
+    start = time.time()
     main()
+    print("Total time:", time.time() - start)
     plt.show()
