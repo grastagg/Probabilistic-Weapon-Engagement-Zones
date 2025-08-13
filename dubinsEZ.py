@@ -15,9 +15,6 @@ import jax.numpy as jnp
 
 jax.config.update("jax_enable_x64", True)
 
-print(jax.devices())
-print(jax.default_backend())
-
 
 def plot_turn_radius_circles(startPosition, startHeading, turnRadius, ax):
     theta = np.linspace(0, 2 * np.pi, 100)

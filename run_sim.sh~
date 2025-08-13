@@ -6,7 +6,7 @@
 # for SEED in {362..500}; do
 commandIndex=0
 commandList=()
-for SEED in {40..40}; do
+for SEED in {13..23}; do
   commandList+=("nohup python3 -u learning_dubins_ez.py $SEED  > logs/$commandIndex.log 2>&1")
   commandIndex=$((commandIndex + 1))
 done
@@ -14,8 +14,9 @@ echo "${commandList[@]}"
 
 numCommands=${#commandList[@]}
 
-numThreads=6
+numThreads=4
 currentCommand=0
+numThreads=10
 for cmd in "${commandList[@]}"; do
   # wait until fewer than numThreads jobs are running
   while (($(jobs -rp | wc -l) >= numThreads)); do

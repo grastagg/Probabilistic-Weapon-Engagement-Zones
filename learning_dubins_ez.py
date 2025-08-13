@@ -1,13 +1,9 @@
 import tqdm
-from joblib import Parallel, delayed
 from functools import partial
 import sys
 import time
 import jax
-from concurrent.futures import ThreadPoolExecutor
 
-
-jax.config.update("jax_platform_name", "gpu")
 
 import getpass
 from pyoptsparse import Optimization, OPT, IPOPT
@@ -16,10 +12,28 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pyDOE import lhs  # or pyDOE2
 import os
+
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = (
+    "0.30"  # try 0.30; adjust if you run 2–3 workers
+)
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("MPLBACKEND", "Agg")  # avoid X11 ("Invalid MIT-MAGIC-COOKIE-1")
+# GPU + headless settings BEFORE any heavy imports
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.10"  # tune for worker count
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+os.environ.setdefault("MPLBACKEND", "Agg")
+# os.environ["QT_QPA_PLATFORM"] = "offscreen"
+# os.environ.pop("DISPLAY", None)
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
 from scipy.optimize import minimize
 
 import dubinsEZ
+# import mp_worker
 
 jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax.config.update("jax_platform_name", "gpu")")
@@ -31,15 +45,13 @@ interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = True
 saveResults = True
-plotAllFlag = True
+plotAllFlag = False
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
 elif knownSpeed:
     parameterMask = np.array([True, True, True, False, True, True])
 else:
     parameterMask = np.array([True, True, True, True, True, True])
-
-np.random.seed(326)  # for reproducibility
 
 
 def plot_low_priority_paths(
@@ -304,7 +316,7 @@ def send_low_priority_agent(
     )
 
 
-def sample_entry_point_and_heading(xBounds, yBounds):
+def sample_entry_point_and_heading(xBounds, yBounds, rng):
     """
     Sample a random entry point on the boundary of a rectangular region,
     and generate a heading that points into the region.
@@ -319,19 +331,19 @@ def sample_entry_point_and_heading(xBounds, yBounds):
     xmin, xmax = xBounds
     ymin, ymax = yBounds
 
-    edge = np.random.choice(["left", "right", "top", "bottom"])
+    edge = rng.choice(["left", "right", "top", "bottom"])
 
     if edge == "left":
         x = xmin
-        y = np.random.uniform(ymin, ymax)
+        y = rng.uniform(ymin, ymax)
     elif edge == "right":
         x = xmax
-        y = np.random.uniform(ymin, ymax)
+        y = rng.uniform(ymin, ymax)
     elif edge == "bottom":
-        x = np.random.uniform(xmin, xmax)
+        x = rng.uniform(xmin, xmax)
         y = ymin
     elif edge == "top":
-        x = np.random.uniform(xmin, xmax)
+        x = rng.random.uniform(xmin, xmax)
         y = ymax
 
     start_pos = np.array([x, y], dtype=np.float64)
@@ -342,7 +354,7 @@ def sample_entry_point_and_heading(xBounds, yBounds):
 
     # Add Gaussian noise to heading
     heading_noise_std = 0.5  # Standard deviation of noise
-    heading += np.random.normal(0.0, heading_noise_std)
+    heading += rng.normal(0.0, heading_noise_std)
 
     return start_pos, heading
 
@@ -434,19 +446,19 @@ def dubins_reachable_set_from_pursuerX(
     rs = dubinsEZ.in_dubins_reachable_set_augmented(
         pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, goalPosition
     )
-
-    def verbose_print():
-        jax.debug.print(
-            "pursuerPosition {}, puysuerHeading {}, minimumTurnRadius {}, pursuerRange {}, goalPosition {}, rs {}",
-            pursuerPosition,
-            pursuerHeading,
-            minimumTurnRadius,
-            pursuerRange,
-            goalPosition,
-            rs,
-        )
-
-    jax.lax.cond(verbose, verbose_print, lambda: None)
+    #
+    # def verbose_print():
+    #     jax.debug.print(
+    #         "pursuerPosition {}, puysuerHeading {}, minimumTurnRadius {}, pursuerRange {}, goalPosition {}, rs {}",
+    #         pursuerPosition,
+    #         pursuerHeading,
+    #         minimumTurnRadius,
+    #         pursuerRange,
+    #         goalPosition,
+    #         rs,
+    #     )
+    #
+    # jax.lax.cond(verbose, verbose_print, lambda: None)
 
     return rs
 
@@ -485,88 +497,6 @@ def compute_intercept_probability(ez_min, alpha=10.0):
 
 def _Phi(z):  # stable normal CDF
     return 0.5 * (1.0 + jax.lax.erf(z / jnp.sqrt(2.0)))
-
-
-# @jax.jit
-# def learning_loss_on_boundary_function_single(
-#     pursuerX,
-#     heading,
-#     speed,
-#     intercepted,
-#     pathTime,
-#     pathHistory,
-#     interceptedPoint,
-#     ezPoint,
-#     ezTime,
-#     trueParams,
-#     interceptedPathWeight=1.0,
-#     flattenLearingLossAmount=0.0,
-#     verbose=False,
-# ):
-#     gamma = 0.0  # outside margin (your flatten amount)
-#     Sigma_pos = jnp.array([[0.001, 0.0], [0.0, 0.001]])
-#     L = jnp.linalg.cholesky(Sigma_pos)  # lower triangular matrix for linearization
-#     boundary_tol = 0.01  # extra variance at hit to avoid overconfidence
-#     # ---- setup & numerics ----
-#     eps = 1e-12
-#
-#     # f(x): signed RS margin (+ outside, 0 boundary, - inside)
-#     def f_pos(pos):
-#         return jnp.squeeze(
-#             dubins_reachable_set_from_pursuerX(pursuerX, pos[None, :], trueParams),
-#             axis=0,
-#         )
-#         # ---- One linearization per point to get (mu, sigma)
-#
-#     def mu_sigma_at_pos(pos):
-#         mu, f_lin = jax.linearize(f_pos, pos)
-#         d1 = f_lin(L[:, 0])
-#         d2 = f_lin(L[:, 1])
-#         sigma = jnp.sqrt(d1 * d1 + d2 * d2) + eps
-#         return mu, sigma
-#
-#     grad_f_pos = jax.jacfwd(f_pos)
-#
-#     # linearized stats along path
-#     # mu_all = jax.vmap(f_pos)(pathHistory)  # (T,)
-#     #
-#     # g_all = jax.vmap(grad_f_pos)(pathHistory)  # (T,2)
-#     # sigma_all = (
-#     #     jnp.sqrt(jnp.maximum(jnp.einsum("ti,ij,tj->t", g_all, Sigma_pos, g_all), 0.0))
-#     #     + eps
-#     # )
-#     mu_all, sigma_all = jax.vmap(mu_sigma_at_pos)(pathHistory)  # (T,)
-#
-#     # pre-hit mask and -mean log Phi over masked samples
-#     def nll_outside(mu, sigma):
-#         z = (mu - gamma) / jnp.maximum(sigma, eps)
-#         Phi = jnp.clip(_Phi(z), 1e-12, 1.0 - 1e-12)
-#         val = -(jnp.log(Phi)).sum()
-#         return jnp.maximum(val, 0.0)
-#
-#     pre_nll = nll_outside(mu_all, sigma_all)
-#
-#     # hit boundary term (only if intercepted): -log N(0; mu_hit, sigma_hit^2 + boundary_tol^2)
-#     def _hit_nll(_):
-#         mu_hit = f_pos(interceptedPoint)
-#         g_hit = grad_f_pos(interceptedPoint)
-#         sigma_hit = jnp.sqrt(jnp.maximum(g_hit @ Sigma_pos @ g_hit, 0.0)) + eps
-#         var_tot = sigma_hit**2 + boundary_tol**2
-#         term = 0.5 * (jnp.log(2.0 * jnp.pi * var_tot) + (mu_hit**2) / var_tot)
-#         return jnp.maximum(term, 0.0)
-#
-#     hit_term = jax.lax.cond(
-#         intercepted, _hit_nll, lambda _: jnp.array(0.0), operand=None
-#     )
-#
-#     loss = jax.lax.cond(
-#         intercepted,
-#         lambda _: interceptedPathWeight * pre_nll + hit_term,
-#         lambda _: pre_nll,
-#         operand=None,
-#     )
-#
-#     return loss
 
 
 #
@@ -627,33 +557,6 @@ def learning_loss_on_boundary_function_single(
     # jax.lax.cond(verbose, verbose_print, lambda: None)
     #
     return lossRS
-
-
-def fast_predicted_crossing(ezAll, pathTime, pathHistory):
-    """
-    Fast approximate first zero crossing time and position.
-    """
-    # Index with smallest absolute EZ value
-    idx = jnp.argmin(jnp.abs(ezAll))
-
-    # Neighbor index (before or after)
-    neighbor_idx = jnp.clip(
-        idx + jnp.where(ezAll[idx] > 0, 1, -1), 0, ezAll.shape[0] - 1
-    )
-
-    # Values and times for interpolation
-    t0, t1 = pathTime[idx], pathTime[neighbor_idx]
-    v0, v1 = ezAll[idx], ezAll[neighbor_idx]
-    p0, p1 = pathHistory[idx], pathHistory[neighbor_idx]
-
-    # Fraction of the way to zero crossing
-    alpha = (0.0 - v0) / (v1 - v0 + 1e-9)
-
-    # Interpolated crossing time and position
-    pred_time = t0 + alpha * (t1 - t0)
-    pred_point = p0 + alpha * (p1 - p0)
-
-    return pred_time, pred_point
 
 
 def time_loss_with_flatten(predicted_ezTime, ezTime, flatten_amount):
@@ -722,29 +625,6 @@ def learning_loss_on_boundary_function_single_EZ(
     lossEZ = jax.lax.cond(
         intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
     )
-
-    def verbose_print():
-        jax.debug.print(
-            "\n"
-            "interceptedPoint: {ip}\n"
-            "ez: {ezAll}\n"
-            "ezPoint: {ezp}\n"
-            "ezFirst (ez at ezPoint): {ezf}\n"
-            "interceptedLossEZFirst: {ilf}\n"
-            "sum interceptedLossTrajectory: {ilt}\n"
-            "sum survivedLossEZ: {slz}\n"
-            "lossEZ: {lez}\n",
-            ip=interceptedPoint,
-            ezAll=jnp.min(ezAll),
-            ezp=ezPoint,
-            ezf=ezFirst,
-            ilf=interceptedLossEZFirst,
-            ilt=interceptedLossTrajectory,
-            slz=survivedLossEZ,
-            lez=lossEZ,
-        )
-
-    jax.lax.cond(verbose, verbose_print, lambda: None)
 
     return lossEZ
 
@@ -868,78 +748,6 @@ dTotalLossDX = jax.jit(jax.jacfwd(total_learning_loss, argnums=0))
 totalLossHessian = jax.jit(jax.jacfwd(dTotalLossDX, argnums=0))
 
 
-def run_optimization_hueristic_scipy(
-    headings,
-    speeds,
-    interceptedList,
-    pathHistories,
-    endPoints,
-    endTimes,
-    initialPursuerX,
-    lowerLimit,
-    upperLimit,
-    trueParams,
-    interceptedPathWeight=1.0,
-    flattenLearingLossAmount=0.0,
-    verbose=False,
-):
-    # Use same logic to define bounds
-    global positionAndHeadingOnly
-    if positionAndHeadingOnly:
-        lowerLimitSub = np.array([0.1, 0.1, 0])
-    else:
-        lowerLimitSub = np.array([0.1, 0.1, 0, 0, 0])
-
-    lower = lowerLimit - lowerLimitSub
-    upper = upperLimit + lowerLimitSub
-    bounds = list(zip(lower, upper))
-
-    # Define the objective and gradient for scipy
-    def loss_fn(x):
-        return float(
-            total_learning_loss(
-                x,
-                headings,
-                speeds,
-                interceptedList,
-                pathHistories,
-                endPoints,
-                trueParams,
-                interceptedPathWeight=interceptedPathWeight,
-                flattenLearingLossAmount=flattenLearingLossAmount,
-            )
-        )
-
-    def grad_fn(x):
-        return np.array(
-            dTotalLossDX(
-                x,
-                headings,
-                speeds,
-                interceptedList,
-                pathHistories,
-                endPoints,
-                trueParams,
-                interceptedPathWeight=interceptedPathWeight,
-                flattenLearingLossAmount=flattenLearingLossAmount,
-            )
-        )
-
-    # Run the optimization
-    res = minimize(
-        fun=loss_fn,
-        jac=grad_fn,
-        x0=initialPursuerX,
-        bounds=bounds,
-        method="trust-constr",
-        options={"gtol": 1e-8, "maxiter": 200, "disp": False},
-    )
-
-    pursuerX = res.x
-    loss = res.fun
-    return pursuerX, loss
-
-
 def run_optimization_hueristic(
     headings,
     speeds,
@@ -983,74 +791,74 @@ def run_optimization_hueristic(
         verbose=verbose,
     )
 
-    if verbose:
-        print("initial pursuerX:", initialPursuerX)
-        initialLoss = total_learning_loss(
-            initialPursuerX,
-            headings,
-            speeds,
-            interceptedList,
-            pathTimes,
-            pathHistories,
-            endPoints,
-            ezPoints,
-            ezTimes,
-            trueParams,
-            interceptedPathWeight,
-            flattenLearingLossAmount,
-            verbose=verbose,
-        )
-        initialGradient = dTotalLossDX(
-            initialPursuerX,
-            headings,
-            speeds,
-            interceptedList,
-            pathTimes,
-            pathHistories,
-            endPoints,
-            ezPoints,
-            ezTimes,
-            trueParams,
-            interceptedPathWeight,
-            flattenLearingLossAmount,
-        )
-        print("initial loss:", initialLoss)
-        print("initial gradient:", initialGradient)
-        print(
-            "true pursuerX:",
-            trueParams[parameterMask],
-        )
-        lossTrue = total_learning_loss(
-            trueParams[parameterMask],
-            headings,
-            speeds,
-            interceptedList,
-            pathTimes,
-            pathHistories,
-            endPoints,
-            ezPoints,
-            ezTimes,
-            trueParams,
-            interceptedPathWeight,
-            flattenLearingLossAmount,
-            verbose=verbose,
-        )
-        trueGrad = dTotalLossDX(
-            trueParams[parameterMask],
-            headings,
-            speeds,
-            interceptedList,
-            pathTimes,
-            pathHistories,
-            endPoints,
-            ezPoints,
-            ezTimes,
-            trueParams,
-            interceptedPathWeight,
-            flattenLearingLossAmount,
-        )
-        print("true learning loss:", lossTrue)
-        print("true gradient:", trueGrad)
+    # if verbose:
+    #     print("initial pursuerX:", initialPursuerX)
+    #     initialLoss = total_learning_loss(
+    #         initialPursuerX,
+    #         headings,
+    #         speeds,
+    #         interceptedList,
+    #         pathTimes,
+    #         pathHistories,
+    #         endPoints,
+    #         ezPoints,
+    #         ezTimes,
+    #         trueParams,
+    #         interceptedPathWeight,
+    #         flattenLearingLossAmount,
+    #         verbose=verbose,
+    #     )
+    #     initialGradient = dTotalLossDX(
+    #         initialPursuerX,
+    #         headings,
+    #         speeds,
+    #         interceptedList,
+    #         pathTimes,
+    #         pathHistories,
+    #         endPoints,
+    #         ezPoints,
+    #         ezTimes,
+    #         trueParams,
+    #         interceptedPathWeight,
+    #         flattenLearingLossAmount,
+    #     )
+    #     print("initial loss:", initialLoss)
+    #     print("initial gradient:", initialGradient)
+    #     print(
+    #         "true pursuerX:",
+    #         trueParams[parameterMask],
+    #     )
+    #     lossTrue = total_learning_loss(
+    #         trueParams[parameterMask],
+    #         headings,
+    #         speeds,
+    #         interceptedList,
+    #         pathTimes,
+    #         pathHistories,
+    #         endPoints,
+    #         ezPoints,
+    #         ezTimes,
+    #         trueParams,
+    #         interceptedPathWeight,
+    #         flattenLearingLossAmount,
+    #         verbose=verbose,
+    #     )
+    #     trueGrad = dTotalLossDX(
+    #         trueParams[parameterMask],
+    #         headings,
+    #         speeds,
+    #         interceptedList,
+    #         pathTimes,
+    #         pathHistories,
+    #         endPoints,
+    #         ezPoints,
+    #         ezTimes,
+    #         trueParams,
+    #         interceptedPathWeight,
+    #         flattenLearingLossAmount,
+    #     )
+    #     print("true learning loss:", lossTrue)
+    #     print("true gradient:", trueGrad)
 
     def objfunc(xDict):
         pursuerX = xDict["pursuerX"]
@@ -1210,97 +1018,6 @@ def latin_hypercube_uniform(lowerLimit, upperLimit, numSamples):
     return jnp.array(lhs_scaled)
 
 
-def find_opt_starting_pursuerX(
-    interceptedList,
-    endPoints,
-    lowerLimit,
-    upperLimit,
-    previousPursuerX,
-    mean,
-    cov,
-    angleMean,
-    angleKappa,
-    numStartHeadings=10,
-    useGaussianSampling=False,
-):
-    initialPursuerXList = []
-
-    if useGaussianSampling:
-        std = np.sqrt(cov)
-        initialPositionXs = mean[0] + np.random.normal(0.0, std[0], numStartHeadings)
-        initialPositionYs = mean[1] + np.random.normal(0.0, std[1], numStartHeadings)
-        initialHeadings = mean[2] + np.random.normal(0.0, std[2], numStartHeadings)
-        # initialHeadings = np.random.vonmises(angleMean, angleKappa, numStartHeadings)
-    else:
-        jitter = 0.02
-        initialPositionXs = np.random.choice(
-            previousPursuerX[:, 0], size=numStartHeadings, replace=True
-        ) + np.random.normal(0.0, jitter, numStartHeadings)
-        initialPositionYs = np.random.choice(
-            previousPursuerX[:, 1], size=numStartHeadings, replace=True
-        ) + np.random.normal(0.0, jitter, numStartHeadings)
-        initialHeadings = np.random.choice(
-            previousPursuerX[:, 2], size=numStartHeadings, replace=True
-        ) + np.random.normal(0.0, jitter, numStartHeadings)
-    if not positionAndHeadingOnly:
-        if knownSpeed:
-            if useGaussianSampling:
-                initialTurnRadii = mean[3] + np.random.normal(
-                    0.0, std[3], numStartHeadings
-                )
-                initialRanges = mean[4] + np.random.normal(
-                    0.0, std[4], numStartHeadings
-                )
-            else:
-                initialTurnRadii = np.random.choice(
-                    previousPursuerX[:, 3], size=numStartHeadings, replace=True
-                ) + np.random.normal(0.0, jitter, numStartHeadings)
-                initialRanges = (
-                    np.random.choice(
-                        previousPursuerX[:, 4], size=numStartHeadings, replace=True
-                    )
-                    + np.random.normal(0.0, jitter, numStartHeadings)
-                )  # initialTurnRadii = mean[3] + np.random.normal(0.0, std[3], numStartHeadings)
-            # initialRanges = mean[4] + np.random.normal(0.0, std[4], numStartHeadings)
-        else:
-            initialSpeeds = mean[3] + np.random.normal(0.0, std[3], numStartHeadings)
-            initialTurnRadii = mean[4] + np.random.normal(0.0, std[4], numStartHeadings)
-            initialRanges = mean[5] + np.random.normal(0.0, cov[5], numStartHeadings)
-    for i in range(numStartHeadings):
-        if positionAndHeadingOnly:
-            intialPursuerX = jnp.array(
-                [
-                    initialPositionXs[i],
-                    initialPositionYs[i],
-                    initialHeadings[i],
-                ]
-            )
-        else:
-            if knownSpeed:
-                intialPursuerX = jnp.array(
-                    [
-                        initialPositionXs[i],
-                        initialPositionYs[i],
-                        initialHeadings[i],
-                        initialTurnRadii[i],
-                        initialRanges[i],
-                    ]
-                )
-            else:
-                intialPursuerX = jnp.array(
-                    [
-                        initialPositionXs[i],
-                        initialPositionYs[i],
-                        initialHeadings[i],
-                        initialSpeeds[i],
-                        initialTurnRadii[i],
-                        initialRanges[i],
-                    ]
-                )
-        initialPursuerXList.append(intialPursuerX)
-    return jnp.array(initialPursuerXList)
-
-
 def plot_contour_of_loss(
     headings,
     speeds,
@@ -1403,6 +1120,151 @@ def plot_contour_of_loss(
     plt.title(title)
 
 
+_G = {}  # per-worker constants
+
+
+def set_constants(payload):
+    (
+        headings,
+        speeds,
+        pathTimes,
+        interceptedList,
+        pathHistories,
+        endPoints,
+        endTimes,
+        ezPoints,
+        ezTimes,
+        trueParams,
+        lowerLimit,
+        upperLimit,
+        interceptedPathWeight,
+        flattenLearningLossAmount,
+    ) = payload
+    _G.update(
+        headings=headings,
+        speeds=speeds,
+        pathTimes=pathTimes,
+        interceptedList=interceptedList,
+        pathHistories=pathHistories,
+        endPoints=endPoints,
+        endTimes=endTimes,
+        ezPoints=ezPoints,
+        ezTimes=ezTimes,
+        trueParams=trueParams,
+        lowerLimit=lowerLimit,
+        upperLimit=upperLimit,
+        interceptedPathWeight=float(interceptedPathWeight),
+        flattenLearningLossAmount=float(flattenLearningLossAmount),
+    )
+    return True  # so caller can await completion
+
+
+def solve_one(x0):
+    return run_optimization_hueristic(
+        _G["headings"],
+        _G["speeds"],
+        _G["pathTimes"],
+        _G["interceptedList"],
+        _G["pathHistories"],
+        _G["endPoints"],
+        _G["endTimes"],
+        _G["ezPoints"],
+        _G["ezTimes"],
+        x0,
+        _G["lowerLimit"],
+        _G["upperLimit"],
+        _G["trueParams"],
+        interceptedPathWeight=_G["interceptedPathWeight"],
+        flattenLearingLossAmount=_G["flattenLearningLossAmount"],
+        verbose=False,
+    )
+
+
+_EXECUTOR = None
+_NWORKERS = 0
+
+
+def start_pool(workers=2):
+    """Create a single persistent pool (once)."""
+    global _EXECUTOR, _NWORKERS
+    if mp.get_start_method(allow_none=True) != "spawn":
+        mp.set_start_method("spawn", force=True)
+    if _EXECUTOR is None:
+        _EXECUTOR = ProcessPoolExecutor(max_workers=workers)
+        _NWORKERS = workers
+    return _EXECUTOR
+
+
+def stop_pool():
+    global _EXECUTOR
+    if _EXECUTOR is not None:
+        _EXECUTOR.shutdown(wait=True)
+        _EXECUTOR = None
+
+
+def _broadcast_constants(payload):
+    """Ensure each worker receives the new measurement constants once."""
+    ex = _EXECUTOR
+    futs = [ex.submit(set_constants, payload) for _ in range(_NWORKERS)]
+    for f in as_completed(futs):
+        f.result()  # propagate any worker error immediately
+
+
+def solve_measurement(
+    headings,
+    speeds,
+    pathTimes,
+    interceptedList,
+    pathHistories,
+    endPoints,
+    endTimes,
+    ezPoints,
+    ezTimes,
+    trueParams,
+    lowerLimit,
+    upperLimit,
+    interceptedPathWeight,
+    flattenLearningLossAmount,
+    initialPursuerXList,
+    workers=2,
+):
+    # 1) ensure pool exists (spawn ONCE)
+    ex = start_pool(workers)
+
+    # 2) broadcast THIS measurement's constants to every worker
+    payload = (
+        headings,
+        speeds,
+        pathTimes,
+        interceptedList,
+        pathHistories,
+        endPoints,
+        endTimes,
+        ezPoints,
+        ezTimes,
+        trueParams,
+        lowerLimit,
+        upperLimit,
+        interceptedPathWeight,
+        flattenLearningLossAmount,
+    )
+    _broadcast_constants(payload)
+
+    # 3) run the multistarts in parallel and return immediately
+    results = list(
+        tqdm.tqdm(
+            ex.map(solve_one, initialPursuerXList),  # order preserved
+            total=len(initialPursuerXList),
+            desc="Multistart IPOPT",
+        )
+    )
+    pursuerXList, lossList, lossListNoFlatten = map(
+        lambda xs: np.squeeze(np.array(xs)), zip(*results)
+    )
+    idx = np.argsort(lossList)
+    return pursuerXList[idx], lossList[idx], lossListNoFlatten[idx]
+
+
 def learn_ez(
     headings,
     speeds,
@@ -1478,38 +1340,23 @@ def learn_ez(
     #     lossList.append(loss)
     #     lossListNoFlatten.append(lossNoFlatten)
     #     #
-    def _solve_one(x0):
-        return run_optimization_hueristic(
-            headings,
-            speeds,
-            pathTimes,
-            interceptedList,
-            pathHistories,
-            endPoints,
-            endTimes,
-            ezPoints,
-            ezTimes,
-            x0,
-            lowerLimit,
-            upperLimit,
-            trueParams,
-            interceptedPathWeight=interceptedPathWeight,
-            flattenLearingLossAmount=flattenLearningLossAmount,
-            verbose=False,
-        )
 
-    # parallel, order-preserving, minimal diff
-    with ThreadPoolExecutor(max_workers=2) as ex:  # tweak workers (e.g., 4–8)
-        results = list(
-            tqdm.tqdm(
-                ex.map(_solve_one, initialPursuerXList),
-                total=len(initialPursuerXList),
-            )
-        )
-
-    # unpack just like before
-    pursuerXList, lossList, lossListNoFlatten = map(
-        lambda xs: np.squeeze(np.array(xs)), zip(*results)
+    pursuerXList, lossList, lossListNoFlatten = solve_measurement(
+        headings,
+        speeds,
+        pathTimes,
+        interceptedList,
+        pathHistories,
+        endPoints,
+        endTimes,
+        ezPoints,
+        ezTimes,
+        trueParams,
+        lowerLimit,
+        upperLimit,
+        interceptedPathWeight,
+        flattenLearningLossAmount,
+        initialPursuerXList,
     )
 
     pursuerXList = np.array(pursuerXList).squeeze()
@@ -1531,7 +1378,7 @@ def learn_ez(
 
 
 def uniform_circular_entry_points_with_heading_noise(
-    center, radius, num_agents, heading_noise_std=0.000005
+    center, radius, num_agents, rng, heading_noise_std=0.000005
 ):
     """
     Uniformly sample agent entry points around a circle, with headings toward the center plus noise.
@@ -1559,7 +1406,7 @@ def uniform_circular_entry_points_with_heading_noise(
         heading = np.arctan2(direction_to_center[1], direction_to_center[0])
 
         # Add Gaussian noise
-        heading += np.random.normal(0.0, heading_noise_std)
+        heading += rng.normal(0.0, heading_noise_std)
 
         results.append((start_pos, heading))
 
@@ -1923,13 +1770,13 @@ def optimize_next_low_priority_path(
     speed,
     tmax,
     num_points,
+    rng,
 ):
-    jax.config.update("jax_platform_name", "gpu")
     start = time.time()
     upperTheta = jnp.pi + jnp.pi  # / 4
     lowerTheta = jnp.pi - jnp.pi  # / 4
     if randomPath:
-        best_angle = np.random.uniform(lowerTheta, upperTheta)
+        best_angle = rng.uniform(lowerTheta, upperTheta)
         best_start_pos = center + radius * jnp.array(
             [jnp.cos(best_angle), jnp.sin(best_angle)]
         )
@@ -1937,7 +1784,7 @@ def optimize_next_low_priority_path(
             center[1] - best_start_pos[1],  # Δy
             center[0] - best_start_pos[0],  # Δx
         )
-        best_heading = headingToCenter + np.random.normal(0.0, 0.2)
+        best_heading = headingToCenter + rng.normal(0.0, 0.2)
         return best_start_pos, best_heading
     print("Optimizing next low-priority path...")
 
@@ -2680,6 +2527,7 @@ def run_simulation_with_random_pursuer(
                 speed=agentSpeed,
                 tmax=tmax,
                 num_points=numPoints // 10,
+                rng=rng,
             )
 
         # Send agent
@@ -3292,15 +3140,15 @@ if __name__ == "__main__":
     # results_dir = "results/knownShapeAndSpeed"
     # results_dir = "results/knownSpeed"
     # results_dir = "results/knownShapeAndSpeedWithNois"
-    # results_dir = "results/knownSpeedWithNoise"
+    results_dir = "results/knownSpeedWithNoise"
     # results_dir = "results/oldNoiseExperiments/knownSpeedWithNoise"
     # print("Plotting results from:", results_dir)
     # results_dir = "results/unknownSpeed"
     # results_dir = "results/unknownSpeedWithNoise"
-    # plot_median_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.15)
+    plot_median_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.15)
     # plot_box_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.1)
     # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
-    start = time.time()
-    main()
-    print("Total time:", time.time() - start)
+    # start = time.time()
+    # main()
+    # print("Total time:", time.time() - start)
     plt.show()
