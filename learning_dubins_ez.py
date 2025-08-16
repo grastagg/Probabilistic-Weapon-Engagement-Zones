@@ -10,7 +10,7 @@ from pyoptsparse import Optimization, OPT, IPOPT
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
-from pyDOE import lhs  # or pyDOE2
+from pyDOE2 import lhs  # or pyDOE2
 import os
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -40,7 +40,7 @@ jax.config.update("jax_enable_x64", True)
 #
 
 positionAndHeadingOnly = False
-knownSpeed = True
+knownSpeed = False
 interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = True
@@ -993,7 +993,7 @@ def run_optimization_hueristic(
     return pursuerX, loss, lossNoFlatten
 
 
-def latin_hypercube_uniform(lowerLimit, upperLimit, numSamples):
+def latin_hypercube_uniform(lowerLimit, upperLimit, numSamples, rng):
     """
     Perform Latin Hypercube Sampling between lower and upper limits (uniform).
 
@@ -1009,8 +1009,8 @@ def latin_hypercube_uniform(lowerLimit, upperLimit, numSamples):
     upperLimit = np.array(upperLimit)
     dim = len(lowerLimit)
 
-    # LHS in [0,1]^d
-    lhs_unit = lhs(dim, samples=numSamples)
+    rs = np.random.RandomState(int(rng.integers(0, 2**31 - 1, dtype=np.uint32)))
+    lhs_unit = lhs(dim, samples=numSamples, random_state=rs)
 
     # Scale to [lower, upper]
     lhs_scaled = lowerLimit + lhs_unit * (upperLimit - lowerLimit)
@@ -1288,6 +1288,7 @@ def learn_ez(
     interceptedPathWeight=1.0,
     flattenLearningLossAmount=0.0,
     useGaussianSampling=False,
+    rng=np.random.default_rng(0),
 ):
     # jax.config.update("jax_platform_name", "cpu")
     start = time.time()
@@ -1296,7 +1297,7 @@ def learn_ez(
     lossListNoFlatten = []
     if mean is None:
         initialPursuerXList = latin_hypercube_uniform(
-            lowerLimit, upperLimit, numStartHeadings
+            lowerLimit, upperLimit, numStartHeadings, rng
         )
     else:
         initialPursuerXList = find_opt_starting_pursuerX(
@@ -2465,7 +2466,7 @@ def run_simulation_with_random_pursuer(
         lowPriorityAgentPositionCov = np.array([[0.001, 0.0], [0.0, 0.001]])
         lowPriorityAgentTimeVar = 0.001
         flattenLearingLossAmount = find_learning_loss_flatten_amount(
-            lowPriorityAgentPositionCov, beta=2.0
+            lowPriorityAgentPositionCov, beta=2.3
         )
         maxStdDevThreshold = 0.05
     else:
@@ -2604,6 +2605,7 @@ def run_simulation_with_random_pursuer(
             interceptedPathWeight=1.0,
             flattenLearningLossAmount=flattenLearingLossAmount,
             useGaussianSampling=True,
+            rng=rng,
         )
 
         # Filter good fits
@@ -2764,14 +2766,7 @@ def run_simulation_with_random_pursuer(
     return result
 
 
-def main():
-    # Parse command-line seed
-    if len(sys.argv) != 2:
-        sys.exit(1)
-
-    seed = int(sys.argv[1])
-    # seed = 25
-
+def main(seed):
     # Define parameter bounds
     lowerBoundsAll = np.array([-2.0, -2.0, -np.pi, 2.0, 0.4, 2.0])
     upperBoundsAll = np.array([2.0, 2.0, np.pi, 3.0, 1.5, 3.0])
@@ -2792,12 +2787,18 @@ def main():
         keepLossThreshold=1e-7,
         plotEvery=1,
         dataDir="results",
-        saveDir="knownSpeedWithNoise",
+        saveDir="unknownSpeedWithNoise",
         # saveDir="knownSpeed",
     )
 
 
-def plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
+def plot_median_rmse_and_abs_errors(
+    results_dir,
+    max_steps=6,
+    epsilon=None,
+    knownSpeed=False,
+    positionAndHeadingOnly=False,
+):
     """
     Plot median, IQR, and min/max for RMSE and absolute errors in a 2x2 grid.
     """
@@ -2816,6 +2817,8 @@ def plot_median_rmse_and_abs_errors(results_dir, max_steps=6, epsilon=None):
                 data = json.load(f)
                 rmse = data.get("rmse_history", [])
                 abs_err = data.get("absolute_errors", [])
+                # if len(abs_err[-1]) != 3:
+                #     print(filename)
                 trueParams = data.get("true_params", [])
                 if trueParams[-2] < minval:
                     minval = trueParams[-2]
@@ -3137,18 +3140,45 @@ def plot_filtered_box_rmse_and_abs_errors(
 
 
 if __name__ == "__main__":
-    # results_dir = "results/knownShapeAndSpeed"
-    # results_dir = "results/knownSpeed"
-    # results_dir = "results/knownShapeAndSpeedWithNois"
-    results_dir = "results/knownSpeedWithNoise"
-    # results_dir = "results/oldNoiseExperiments/knownSpeedWithNoise"
-    # print("Plotting results from:", results_dir)
-    # results_dir = "results/unknownSpeed"
-    # results_dir = "results/unknownSpeedWithNoise"
-    plot_median_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.15)
-    # plot_box_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.1)
-    # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
-    # start = time.time()
-    # main()
-    # print("Total time:", time.time() - start)
-    plt.show()
+    # Parse command-line seed
+    #
+    if len(sys.argv) != 3:
+        print("usage: script.py <seed:int> <runSim:0|1>")
+        sys.exit(2)
+
+    seed = int(sys.argv[1])
+    runSim = bool(int(sys.argv[2]))  # "0" -> False, "1" -> True
+    print("seed", seed, "runSim", runSim)
+    #
+    #
+    #
+    if runSim:
+        start = time.time()
+        main(seed)
+        print("Total time:", time.time() - start)
+        _EXECUTOR.shutdown(wait=True)
+        if plotAllFlag:
+            plt.show()
+
+        # plt.show()
+    else:
+        # results_dir = "results/knownShapeAndSpeed"
+        # results_dir = "results/knownSpeed"
+        # results_dir = "results/knownShapeAndSpeedWithNoise"
+        # results_dir = "results/oldNoiseExperiments/knownShapeAndSpeedWithNois"
+        results_dir = "results/knownSpeedWithNoise"
+        # results_dir = "results/oldNoiseExperiments/knownSpeedWithNoise"
+        # print("Plotting results from:", results_dir)
+        # results_dir = "results/unknownSpeed"
+        results_dir = "results/unknownSpeedWithNoise"
+        # results_dir = "results/oldNoiseExperiments/unknownSpeedWithNoise"
+        plot_median_rmse_and_abs_errors(
+            results_dir,
+            max_steps=15,
+            epsilon=0.15,
+            positionAndHeadingOnly=False,
+            knownSpeed=False,
+        )
+        # plot_box_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.1)
+        # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
+        plt.show()
