@@ -4,11 +4,11 @@
 # for SEED in 132; do
 # for SEED in 276 38 248 193 239 63 216 27 225; do
 # for SEED in {362..500}; do
-SEEDS=(497 77 345 113 380 249 150 318)
+SEEDS=(3 18 42 114 120 123 125 129 222 223 272 282 307 309 331 339 348 352 363 364 384 400 406 409 416 420 430 437 439 440 441 452 470 487 491 499)
 
 commandIndex=0
 commandList=()
-# for SEED in {319..500}; do
+# for SEED in {0..500}; do
 for SEED in "${SEEDS[@]}"; do
   commandList+=("nohup python3 -u learning_dubins_ez.py $SEED 1 > logs/$SEED.log 2>&1")
   commandIndex=$((commandIndex + 1))
@@ -17,7 +17,7 @@ echo "${commandList[@]}"
 
 numCommands=${#commandList[@]}
 
-numThreads=5
+numThreads=3
 currentCommand=0
 for cmd in "${commandList[@]}"; do
   # wait until fewer than numThreads jobs are running

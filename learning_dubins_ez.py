@@ -40,10 +40,10 @@ jax.config.update("jax_enable_x64", True)
 #
 
 positionAndHeadingOnly = False
-knownSpeed = False
+knownSpeed = True
 interceptionOnBoundary = True
 randomPath = False
-noisyMeasurementsFlag = True
+noisyMeasurementsFlag = False
 saveResults = True
 plotAllFlag = False
 if positionAndHeadingOnly:
@@ -473,21 +473,13 @@ def g(t, k):
     return t**2 * h
 
 
-# Full function y(x)
-def new_activation(x, c=2.96, p=0.33, k=10):
-    return g(x - c, k) + g(-x - c, k) + p * x**2
-
-
 def activation_pos(x, delta=1.0):
     z = jax.nn.relu(x)  # only positive side
     return jnp.where(z <= delta, 0.5 * z**2, delta * (z - 0.5 * delta))
 
 
 def activation(x):
-    return jax.nn.relu(x)  # ReLU activation function
-    return jnp.square(jax.nn.relu(x))  # ReLU activation function
-    return jnp.log1p(jnp.exp(beta * x)) / beta
-    return (jnp.tanh(10.0 * x) + 1.0) / 2.0 * x**2
+    return jax.nn.relu(x) ** 2  # ReLU activation function
 
 
 def compute_intercept_probability(ez_min, alpha=10.0):
@@ -593,15 +585,21 @@ def learning_loss_on_boundary_function_single_EZ(
     ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
 
     inEZ = pathTime >= ezTime
+    outEZ = pathTime < ezTime - 3 * np.sqrt(0.001)
 
     interceptedLossEZFirst = activation(
         ezFirst - flattenLearingLossAmount
     ) + activation(-ezFirst - flattenLearingLossAmount)
 
+    # interceptedLossTrajectory = jnp.where(
+    #     inEZ,
+    #     0.0,
+    #     activation(-ezAll - flattenLearingLossAmount),
+    # )
     interceptedLossTrajectory = jnp.where(
-        inEZ,
-        0.0,
+        outEZ,
         activation(-ezAll - flattenLearingLossAmount),
+        0.0,
     )
     interceptedLossTrajectory = jnp.mean(interceptedLossTrajectory)
 
@@ -2466,11 +2464,12 @@ def run_simulation_with_random_pursuer(
         lowPriorityAgentPositionCov = np.array([[0.001, 0.0], [0.0, 0.001]])
         lowPriorityAgentTimeVar = 0.001
         flattenLearingLossAmount = find_learning_loss_flatten_amount(
-            lowPriorityAgentPositionCov, beta=2.3
+            lowPriorityAgentPositionCov, beta=2.0
         )
         maxStdDevThreshold = 0.05
     else:
         lowPriorityAgentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
+        lowPriorityAgentTimeVar = 0.0
         flattenLearingLossAmount = 0.0
         maxStdDevThreshold = 0.05
     # flattenLearingLossAmount = 0.0
@@ -2784,10 +2783,10 @@ def main(seed):
         seed=seed,
         numLowPriorityAgents=15,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-7,
+        keepLossThreshold=1e-5,
         plotEvery=1,
         dataDir="results",
-        saveDir="unknownSpeedWithNoise",
+        saveDir="knownSpeed",
         # saveDir="knownSpeed",
     )
 
@@ -3162,20 +3161,22 @@ if __name__ == "__main__":
 
         # plt.show()
     else:
-        # results_dir = "results/knownShapeAndSpeed"
+        results_dir = "results/knownSpeed"
+        # results_dir = "results/oldNoNoise/knownSpeed"
+        # results_dir = "results/oldNoNoise/knownShapeAndSpeed"
         # results_dir = "results/knownSpeed"
         # results_dir = "results/knownShapeAndSpeedWithNoise"
         # results_dir = "results/oldNoiseExperiments/knownShapeAndSpeedWithNois"
-        results_dir = "results/knownSpeedWithNoise"
+        # results_dir = "results/knownSpeedWithNoise"
         # results_dir = "results/oldNoiseExperiments/knownSpeedWithNoise"
         # print("Plotting results from:", results_dir)
         # results_dir = "results/unknownSpeed"
-        results_dir = "results/unknownSpeedWithNoise"
+        # results_dir = "results/unknownSpeedWithNoise"
         # results_dir = "results/oldNoiseExperiments/unknownSpeedWithNoise"
         plot_median_rmse_and_abs_errors(
             results_dir,
             max_steps=15,
-            epsilon=0.15,
+            epsilon=0.001,
             positionAndHeadingOnly=False,
             knownSpeed=False,
         )
