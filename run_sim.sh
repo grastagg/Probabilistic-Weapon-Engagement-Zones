@@ -6,7 +6,7 @@
 # for SEED in {362..500}; do
 SEEDS=(91 230 242 315 79 8 323 232 170 101 497 77 345 113 380 249 150 318)
 
-for SEED in {1..1}; do
+for SEED in {311..311}; do
   # for SEED in "${SEEDS[@]}"; do
   python3 learning_dubins_ez.py $SEED 1
 done
