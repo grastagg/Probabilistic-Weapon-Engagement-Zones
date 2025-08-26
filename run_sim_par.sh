@@ -17,7 +17,7 @@ echo "${commandList[@]}"
 
 numCommands=${#commandList[@]}
 
-numThreads=3
+numThreads=2
 currentCommand=0
 for cmd in "${commandList[@]}"; do
   # wait until fewer than numThreads jobs are running
