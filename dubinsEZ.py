@@ -714,6 +714,7 @@ def plot_dubins_EZ(
     X = X.flatten()
     Y = Y.flatten()
     evaderHeadings = np.ones_like(X) * evaderHeading
+    print(evaderHeadings.shape)
 
     ZTrue = in_dubins_engagement_zone_agumented(
         pursuerPosition,
