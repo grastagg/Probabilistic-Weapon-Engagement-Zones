@@ -753,26 +753,30 @@ def learning_loss_function_single(
     flattenLearingLossAmount=0.0,
     verbose=False,
 ):
+    (pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange) = (
+        pursuerX_to_params(pursuerX, trueParams)
+    )
     rsEnd = dubins_reachable_set_from_pursuerX(
         pursuerX,
         jnp.array([interceptedPoint]),
         trueParams,
     ).squeeze()
-    direction = jnp.array([jnp.cos(heading), jnp.sin(heading)])
-    ezPoint = interceptedPoint - direction * (pursuerX[5] * speed / trueParams[3])
-    ezEnd = dubinsEZ_from_pursuerX(
-        pursuerX,
-        jnp.array([ezPoint]),
-        jnp.array([heading]),
-        speed,
-        trueParams,
-    ).squeeze()
+    # direction = jnp.array([jnp.cos(heading), jnp.sin(heading)])
+    # # evaderDist = jnp.linalg.norm(interceptedPoint - ezPoint[0:2])
+    # # pursuerDist = dubinsEZ.find_shortest_dubins_path(
+    # #     pursuerX[0:2], pursuerX[2], ezPoint, trueParams[4]
+    # # )
+    # ezPoint = interceptedPoint - (speed / pursuerSpeed) * pursuerRange * direction
+    # ezEnd = dubinsEZ_from_pursuerX(
+    #     pursuerX, jnp.array([ezPoint]), jnp.array([heading]), speed, trueParams
+    # ).squeeze()
+
     headings = heading * jnp.ones(pathHistory.shape[0])
     ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
     rsAll = dubins_reachable_set_from_pursuerX(pursuerX, pathHistory, trueParams)
 
     interceptedLossRS = activation(rsEnd - flattenLearingLossAmount)
-    interceptedLossEZ = activation(ezEnd - flattenLearingLossAmount)
+    # interceptedLossEZ = activation(ezEnd - flattenLearingLossAmount)
 
     survivedLossRS = jnp.max(
         activation(-rsAll - flattenLearingLossAmount)
@@ -783,29 +787,27 @@ def learning_loss_function_single(
 
     lossRS = jax.lax.cond(
         intercepted,
-        # lambda: interceptedLossEZ,
-        # lambda: survivedLossEZ,
-        lambda: interceptedLossRS + interceptedLossEZ,
-        lambda: survivedLossRS + survivedLossEZ,
+        lambda: interceptedLossRS,  # + interceptedLossEZ,
+        lambda: survivedLossRS,  # + survivedLossEZ,
     )
 
-    def print_func():
-        jax.debug.print(
-            "intercepted: {}\nlossRS: {}\ninterceptedRS: {}\ninterceptedEZ: {}\nsurvivedRS: {}\nsurvivedEZ: {}\nezEnd: {}\nrsEnd: {}\ninterceptionPoint: {}\nnezPoint: {}\n",
-            intercepted,
-            lossRS,
-            interceptedLossRS,
-            interceptedLossEZ,
-            survivedLossRS,
-            survivedLossEZ,
-            ezEnd,
-            rsEnd,
-            interceptedPoint,
-            ezPoint,
-        )
-        return 0.0
-
-    jax.lax.cond(verbose, print_func, lambda: 0.0)
+    # def print_func():
+    #     jax.debug.print(
+    #         "intercepted: {}\nlossRS: {}\ninterceptedRS: {}\ninterceptedEZ: {}\nsurvivedRS: {}\nsurvivedEZ: {}\nezEnd: {}\nrsEnd: {}\ninterceptionPoint: {}\nnezPoint: {}\n",
+    #         intercepted,
+    #         lossRS,
+    #         interceptedLossRS,
+    #         interceptedLossEZ,
+    #         survivedLossRS,
+    #         survivedLossEZ,
+    #         ezEnd,
+    #         rsEnd,
+    #         interceptedPoint,
+    #         ezPoint,
+    #     )
+    #     return 0.0
+    #
+    # jax.lax.cond(verbose, print_func, lambda: 0.0)
 
     return lossRS
 
@@ -1033,7 +1035,7 @@ def run_optimization_hueristic(
             trueParams,
             interceptedPathWeight,
             flattenLearingLossAmount,
-            verbose=True,
+            verbose=False,
         )
         trueGrad = dTotalLossDX(
             trueParams[parameterMask],
@@ -1365,7 +1367,7 @@ def solve_one(x0):
         _G["trueParams"],
         interceptedPathWeight=_G["interceptedPathWeight"],
         flattenLearingLossAmount=_G["flattenLearningLossAmount"],
-        verbose=True,
+        verbose=False,
     )
 
 
@@ -1454,42 +1456,58 @@ def solve_measurement(
     return pursuerXList[idx], lossList[idx], lossListNoFlatten[idx]
 
 
+def RS_path(theta, path_pts, true_params):
+    # returns r_t for all points along path: shape (T,)
+    return dubins_reachable_set_from_pursuerX(theta, path_pts, true_params)
+
+
+# Gradient wrt theta of vector-valued RS_path: shape (T, d)
+# (If d is large and T small, consider jacrev instead.)
+grad_theta_RS_path = jax.jacfwd(RS_path, argnums=0)
+
+
+def grad_theta_RS_point(theta, pt, true_params):
+    # fast pointwise gradient via the same transform (single-row slice)
+    return grad_theta_RS_path(theta, pt[None, :], true_params)[0]
+
+
+# def softmax_weights(x, temp=10.0):
+#     # stable soft selection over time
+#     x = (x - jnp.max(x)) * temp
+#     w = jnp.exp(x)
+#     return w / (jnp.sum(w) + 1e-12)
+#
+
+# --- Single-item kernel (NOT jitted) ---
+
+
 def info_for_trajectory(
     theta,  # (d,)
-    heading,
-    speed,  # kept for API symmetry if you need them later
-    intercepted,
+    heading,  # unused, kept for API symmetry
+    speed,  # unused, kept for API symmetry
+    intercepted,  # bool
     path_time,  # (T,)
     path_history,  # (T,2)
     intercepted_point,  # (2,)
     true_params,
     flatten_margin,
 ):
-    # Helper: RS(x; theta) returns scalar (positive/outside, negative/inside per your code)
-    def RS_at(theta_, pt):
-        return dubins_reachable_set_from_pursuerX(
-            theta_, pt[None, :], true_params
-        ).squeeze()
-
-    # Grad RS wrt parameters at a single point
-    grad_RS = jax.jacfwd(lambda th, pt: RS_at(th, pt), argnums=0)
-
-    # ---- HIT branch: φ''(z_hit) * (∇ r_end)(∇ r_end)^T  (rank ≤ 1) ----
+    # HIT branch: use interception point
     def interception_fn():
-        r_end = RS_at(theta, intercepted_point)
+        r_end = RS_path(theta, intercepted_point[None, :], true_params)[0]
         z_hit = r_end - flatten_margin
-        w_hit = activation_smooth(z_hit)  # scalar ≥ 0
-        g_end = grad_RS(theta, intercepted_point)  # (d_mask,)
+        w_hit = activation_smooth(z_hit)  # ≥ 0
+        g_end = grad_theta_RS_point(theta, intercepted_point, true_params)  # (d,)
         I = w_hit * jnp.outer(g_end, g_end)
-        return I
+        return 0.5 * (I + I.T)
 
-    # ---- MISS branch: average_t φ''(z_t) * (∇ r_t)(∇ r_t)^T  ----
+    # MISS branch: soft-select along the path (keeps gradients)
     def miss_fn():
         # RS and grads along path
         r_t = dubins_reachable_set_from_pursuerX(
             theta, path_history, true_params
         )  # (T,)
-        G = jax.vmap(lambda pt: grad_RS(theta, pt))(path_history)  # (T,d)
+        G = grad_theta_RS_path(theta, path_history, true_params)  # (T, d)
 
         # z_t = inside violation amount
         z_t = -r_t - flatten_margin
@@ -1506,11 +1524,68 @@ def info_for_trajectory(
         return 0.5 * (I + I.T)
 
     I = jax.lax.cond(intercepted, interception_fn, miss_fn)
-    # Symmetrize for numerical hygiene
-    I = 0.5 * (I + I.T)
-    return I
+    # extra symmetrize for hygiene
+    return 0.5 * (I + I.T)
 
 
+# def info_for_trajectory(
+#     theta,  # (d,)
+#     heading,
+#     speed,  # kept for API symmetry if you need them later
+#     intercepted,
+#     path_time,  # (T,)
+#     path_history,  # (T,2)
+#     intercepted_point,  # (2,)
+#     true_params,
+#     flatten_margin,
+# ):
+#     # Helper: RS(x; theta) returns scalar (positive/outside, negative/inside per your code)
+#     def RS_at(theta_, pt):
+#         return dubins_reachable_set_from_pursuerX(
+#             theta_, pt[None, :], true_params
+#         ).squeeze()
+#
+#     # Grad RS wrt parameters at a single point
+#     grad_RS = jax.jacfwd(lambda th, pt: RS_at(th, pt), argnums=0)
+#
+#     # ---- HIT branch: φ''(z_hit) * (∇ r_end)(∇ r_end)^T  (rank ≤ 1) ----
+#     def interception_fn():
+#         r_end = RS_at(theta, intercepted_point)
+#         z_hit = r_end - flatten_margin
+#         w_hit = activation_smooth(z_hit)  # scalar ≥ 0
+#         g_end = grad_RS(theta, intercepted_point)  # (d_mask,)
+#         I = w_hit * jnp.outer(g_end, g_end)
+#         return I
+#
+#     # ---- MISS branch: average_t φ''(z_t) * (∇ r_t)(∇ r_t)^T  ----
+#     def miss_fn():
+#         # RS and grads along path
+#         r_t = dubins_reachable_set_from_pursuerX(
+#             theta, path_history, true_params
+#         )  # (T,)
+#         G = jax.vmap(lambda pt: grad_RS(theta, pt))(path_history)  # (T,d)
+#
+#         # z_t = inside violation amount
+#         z_t = -r_t - flatten_margin
+#         w_t = activation_smooth(z_t)  # (T,)
+#
+#         # pick index of max violation
+#         idx = jnp.argmax(w_t)
+#
+#         # gradient at that index
+#         g = G[idx]  # (d,)
+#
+#         # scale by weight
+#         I = w_t[idx] * jnp.outer(g, g)
+#         return 0.5 * (I + I.T)
+#
+#     I = jax.lax.cond(intercepted, interception_fn, miss_fn)
+#     # Symmetrize for numerical hygiene
+#     I = 0.5 * (I + I.T)
+#     return I
+
+
+@jax.jit
 def info_for_trajectories(
     pursuerX,
     headings,
@@ -2283,6 +2358,28 @@ def inside_model_disagreement_score(
     return score
 
 
+def _offsets_with_spacing(num_headings: int, delta: float, spacing: str):
+    """
+    Return heading offsets in [-delta, +delta] with chosen spacing.
+    - 'uniform':        uniform grid
+    - 'cosine_center':  density ∝ cos( (π θ)/(2δ) )  -> many near 0, few at edges
+                        inverse CDF: θ = (2δ/π) * arcsin(2q - 1),  q in (0,1)
+    """
+    if num_headings == 1:
+        return jnp.array([0.0])
+
+    if spacing == "uniform":
+        return jnp.linspace(-delta, delta, num_headings)
+
+    if spacing == "cosine_center":
+        # Use centered quantiles to avoid endpoints (nice symmetric nodes)
+        q = (jnp.arange(num_headings) + 0.5) / num_headings  # in (0,1)
+        offsets = (2.0 * delta / jnp.pi) * jnp.arcsin(2.0 * q - 1.0)
+        return offsets
+
+    raise ValueError(f"Unknown spacing='{spacing}'")
+
+
 def generate_headings_toward_center(
     radius,
     num_angles,
@@ -2292,54 +2389,47 @@ def generate_headings_toward_center(
     theta1=0.0,
     theta2=2 * jnp.pi,
     plot=True,
+    spacing: str = "cosine_center",  # <— NEW: 'uniform' or 'cosine_center'
 ):
     """
     Generate heading directions pointing toward the center ± delta from points on an arc.
-
-    Args:
-        radius (float): Radius of the circle.
-        num_angles (int): Number of angular positions along the arc.
-        num_headings (int): Number of heading deviations per point.
-        delta (float): Max deviation (in radians) from heading toward center.
-        center (tuple): (x, y) of the center to point toward.
-        theta1 (float): Start angle of arc (in radians, counterclockwise).
-        theta2 (float): End angle of arc (in radians, counterclockwise).
-        plot (bool): If True, show a matplotlib plot.
-
-    Returns:
-        positions: (num_angles * num_headings, 2) array of positions on the arc
-        headings:  (num_angles * num_headings,) array of headings from each position
+    spacing='cosine_center' concentrates offsets near 0 (aim-at-center), which often
+    produces higher-incidence RS crossings and better information.
     """
     cx, cy = center
 
-    # Normalize angles into [0, 2π)
-    theta1 = jnp.mod(theta1, 2 * jnp.pi)
-    theta2 = jnp.mod(theta2, 2 * jnp.pi)
-
-    # Ensure counterclockwise sweep
+    two_pi = 2 * jnp.pi
+    theta1 = jnp.mod(theta1, two_pi)
+    theta2 = jnp.mod(theta2, two_pi)
     if theta2 <= theta1:
-        theta2 += 2 * jnp.pi
+        theta2 += two_pi
 
-    # Sample angles along the arc
-    angles = jnp.linspace(theta1, theta2, num_angles)
+    sweep = theta2 - theta1
+    full_circle = jnp.isclose(sweep, two_pi)
 
-    # Compute positions on arc
+    angles = jnp.linspace(theta1, theta2, num_angles, endpoint=not full_circle)
+
+    # positions on arc
     x = radius * jnp.cos(angles) + cx
     y = radius * jnp.sin(angles) + cy
-    positions = jnp.stack([x, y], axis=-1)  # shape: (num_angles, 2)
+    positions = jnp.stack([x, y], axis=-1)  # (A,2)
 
-    # Compute headings toward center
-    headings_to_center = jnp.arctan2(cy - y, cx - x)  # shape: (num_angles,)
+    # headings toward center
+    heads_to_center = jnp.arctan2(cy - y, cx - x)  # (A,)
 
-    # Heading deviations
-    heading_offsets = jnp.linspace(
-        -delta, delta, num_headings
-    )  # shape: (num_headings,)
+    # bias the offsets
+    heading_offsets = _offsets_with_spacing(num_headings, delta, spacing)  # (H,)
 
-    # Broadcast to generate all combinations
+    # broadcast to all (position, offset) combos
+    pos_grid = positions[:, None, :]  # (A,1,2)
+    head_grid = heads_to_center[:, None] + heading_offsets[None, :]  # (A,H)
+
+    # wrap headings to (-π, π]
+    head_grid = jnp.arctan2(jnp.sin(head_grid), jnp.cos(head_grid))
+
+    # positions_expanded = pos_grid.reshape(-1, 2)  # (A*H,2)
     positions_expanded = jnp.repeat(positions, num_headings, axis=0)  # (N*M, 2)
-    headings_expanded = jnp.repeat(headings_to_center[:, None], num_headings, axis=1)
-    headings_expanded = (headings_expanded + heading_offsets[None, :]).ravel()  # (N*M,)
+    headings_expanded = head_grid.reshape(-1)  # (A*H,)
 
     if plot:
         plt.figure(figsize=(6, 6))
@@ -2361,6 +2451,86 @@ def generate_headings_toward_center(
         plt.show()
 
     return positions_expanded, headings_expanded
+
+
+# def generate_headings_toward_center(
+#     radius,
+#     num_angles,
+#     num_headings,
+#     delta,
+#     center=(0.0, 0.0),
+#     theta1=0.0,
+#     theta2=2 * jnp.pi,
+#     plot=True,
+# ):
+#     """
+#     Generate heading directions pointing toward the center ± delta from points on an arc.
+#
+#     Args:
+#         radius (float): Radius of the circle.
+#         num_angles (int): Number of angular positions along the arc.
+#         num_headings (int): Number of heading deviations per point.
+#         delta (float): Max deviation (in radians) from heading toward center.
+#         center (tuple): (x, y) of the center to point toward.
+#         theta1 (float): Start angle of arc (in radians, counterclockwise).
+#         theta2 (float): End angle of arc (in radians, counterclockwise).
+#         plot (bool): If True, show a matplotlib plot.
+#
+#     Returns:
+#         positions: (num_angles * num_headings, 2) array of positions on the arc
+#         headings:  (num_angles * num_headings,) array of headings from each position
+#     """
+#     cx, cy = center
+#
+#     # Normalize angles into [0, 2π)
+#     theta1 = jnp.mod(theta1, 2 * jnp.pi)
+#     theta2 = jnp.mod(theta2, 2 * jnp.pi)
+#
+#     # Ensure counterclockwise sweep
+#     if theta2 <= theta1:
+#         theta2 += 2 * jnp.pi
+#
+#     # Sample angles along the arc
+#     angles = jnp.linspace(theta1, theta2, num_angles)
+#
+#     # Compute positions on arc
+#     x = radius * jnp.cos(angles) + cx
+#     y = radius * jnp.sin(angles) + cy
+#     positions = jnp.stack([x, y], axis=-1)  # shape: (num_angles, 2)
+#
+#     # Compute headings toward center
+#     headings_to_center = jnp.arctan2(cy - y, cx - x)  # shape: (num_angles,)
+#
+#     # Heading deviations
+#     heading_offsets = jnp.linspace(
+#         -delta, delta, num_headings
+#     )  # shape: (num_headings,)
+#
+#     # Broadcast to generate all combinations
+#     positions_expanded = jnp.repeat(positions, num_headings, axis=0)  # (N*M, 2)
+#     headings_expanded = jnp.repeat(headings_to_center[:, None], num_headings, axis=1)
+#     headings_expanded = (headings_expanded + heading_offsets[None, :]).ravel()  # (N*M,)
+#
+#     if plot:
+#         plt.figure(figsize=(6, 6))
+#         plt.plot(cx, cy, "ro", label="Center")
+#
+#         for i in range(positions_expanded.shape[0]):
+#             px, py = positions_expanded[i]
+#             heading = headings_expanded[i]
+#             dx = jnp.cos(heading)
+#             dy = jnp.sin(heading)
+#             plt.arrow(px, py, dx * 0.2, dy * 0.2, head_width=0.05, color="r", alpha=0.7)
+#
+#         plt.gca().set_aspect("equal")
+#         plt.title("Headings Toward Center ± δ")
+#         plt.xlabel("x")
+#         plt.ylabel("y")
+#         plt.grid(True)
+#         plt.legend()
+#         plt.show()
+#
+#     return positions_expanded, headings_expanded
 
 
 def logdet_psd(A, ridge=1e-6):
@@ -2512,15 +2682,15 @@ def trajectory_fisher_information(
 
     E_after = lam_min(I_past_bar + Delta_bar)
 
-    tau, beta, gamma = 1e-2, 0.5, 0.0  # set gamma=0.2 if you need laggards to catch up
+    tau, beta = 1e-2, 20.0
     penalty = jnp.maximum(0.0, tau - E_after)
 
     e_gain = lam_min(I_past_bar + Delta_bar) - lam_min(I_past_bar)
     D_gain = logdet_psd(I_past_bar + Delta_bar) - logdet_psd(I_past_bar)
     #
-    return e_gain
+    # return e_gain
 
-    return D_gain  # - beta * penalty
+    return D_gain - beta * penalty
 
     # return e_gain
 
@@ -2668,6 +2838,62 @@ def trajectory_maximize_spread(
     return total_distances
 
 
+trajectory_entropy_batch = jax.jit(
+    jax.vmap(
+        trajectory_entropy,
+        in_axes=(
+            0,  # start_pos
+            0,  # heading
+            None,  # pursuerXList
+            None,  # speed
+            None,  # trueParams
+            None,  # center
+            None,  # radius
+            None,  # tmax
+            None,  # num_points
+            None,  # diff_threshold
+            None,  # endPoints
+            None,  # meanPursuerX
+            None,  # measuredHeadings
+            None,  # measuredPathHistories[:, 0] (if that's what your fn needs)
+        ),
+    ),
+    static_argnames="numPoints",
+)
+trajectory_fisher_information_batch = jax.jit(
+    jax.vmap(
+        trajectory_fisher_information,
+        in_axes=(
+            0,  # start_pos (vary)
+            0,  # heading (vary)
+            None,  # pursuerXList
+            None,  # speed
+            None,  # trueParams
+            None,  # tmax
+            None,  # measuredHeadings
+            None,  # measuredSpeeds
+            None,  # measuredPathTimes
+            None,  # measuredInterceptedList
+            None,  # measuredPathHistories
+            None,  # measuredEndPoints
+            None,  # measuredEndTimes
+            None,  # measuredEzPoints
+            None,  # measuredEzTimes
+            None,  # previousFims
+            None,  # flattenLearingLossAmount
+            None,  # meanPursuerX
+            None,  # covPursuerXSqrt
+        ),
+    )
+)
+info_for_trajectories_batch = jax.jit(
+    jax.vmap(
+        info_for_trajectories,
+        in_axes=(0, None, None, None, None, None, None, None, None),
+    )
+)
+
+
 def trajectory_dist_to_past(
     start_pos,
     heading,
@@ -2717,33 +2943,183 @@ def optimize_next_low_priority_path(
     meanPursuerX=None,
 ):
     start = time.time()
-    #     initialGradient = dTotalLossDX(
-    #         initialPursuerX,
-    #         headings,
-    #         speeds,
-    #         interceptedList,
-    #         pathTimes,
-    #         pathHistories,
-    #         endPoints,
-    #         ezPoints,
-    #         ezTimes,
-    #         trueParams,
-    #         interceptedPathWeight,
-    #         flattenLearingLossAmount,
-    #     )
-    upperTheta = jnp.pi + jnp.pi  # / 4
-    lowerTheta = jnp.pi - jnp.pi  # / 4
+    print("Optimizing next low-priority path...")
+
+    # ----- random fallback (optional) -----
     if randomPath:
-        best_angle = rng.uniform(lowerTheta, upperTheta)
+        upperTheta = jnp.pi * 2.0
+        lowerTheta = 0.0
+        best_angle = jax.random.uniform(rng, (), minval=lowerTheta, maxval=upperTheta)
         best_start_pos = center + radius * jnp.array(
             [jnp.cos(best_angle), jnp.sin(best_angle)]
         )
-        headingToCenter = np.arctan2(
-            center[1] - best_start_pos[1],  # Δy
-            center[0] - best_start_pos[0],  # Δx
+        heading_to_center = jnp.arctan2(
+            center[1] - best_start_pos[1], center[0] - best_start_pos[0]
         )
-        best_heading = headingToCenter + rng.normal(0.0, 0.2)
+        best_heading = heading_to_center + 0.2 * jax.random.normal(rng, ())
         return best_start_pos, best_heading
+
+    # ----- candidate generation -----
+    startHeadings = time.time()
+    cand_positions, cand_headings = generate_headings_toward_center(
+        radius,
+        num_angles,
+        num_headings,
+        0.5,
+        center=center,
+        theta1=0.0,
+        theta2=2 * jnp.pi,
+        plot=False,
+    )
+    print("time to generate headings:", time.time() - startHeadings)
+
+    diff_threshold = 10.0
+
+    if not interceptionOnBoundary:
+        # ----- gating by entropy (bits) -----
+        # trajectory_entropy must return a scalar in [0,1] bits for each candidate
+        gateStart = time.time()
+        gate_score = trajectory_entropy_batch(
+            cand_positions,
+            cand_headings,
+            pursuerXList,
+            speed,
+            trueParams,
+            center,
+            radius,
+            tmax,
+            num_points,
+            diff_threshold,
+            endPoints,
+            meanPursuerX,
+            measuredHeadings,
+            measuredPathHistories[:, 0] if measuredPathHistories is not None else None,
+        )
+
+        print(
+            "gate_score min/max:",
+            float(jnp.nanmin(gate_score)),
+            float(jnp.nanmax(gate_score)),
+        )
+
+        hmin_bits = 0.6  # minimum entropy to keep
+        mask = jnp.isfinite(gate_score) & (gate_score >= hmin_bits)
+        if not jnp.any(mask):
+            # fallback: keep top-K by entropy to ensure candidates remain
+            K = jnp.minimum(64, gate_score.shape[0])
+            keep_idx = jnp.argsort(gate_score)[-K:]
+        else:
+            keep_idx = jnp.where(mask)[0]
+
+        sel_positions = cand_positions[keep_idx]
+        sel_headings = cand_headings[keep_idx]
+        print("time to gate candidates:", time.time() - gateStart)
+        print("candidates after gating:", int(sel_headings.shape[0]))
+
+        # ----- prior FIMs (handle None) -----
+        startFim = time.time()
+        previousFims = info_for_trajectories_batch(
+            pursuerXList,
+            measuredHeadings,
+            measuredSpeeds,
+            measuredPathTimes,
+            measuredInterceptedList,
+            measuredPathHistories,
+            measuredEndPoints,
+            trueParams,
+            flattenLearingLossAmount,
+        )
+        print("time to prepare previousFims:", time.time() - startFim)
+        covSqrt = jnp.diag(jnp.sqrt(previousCov))
+
+        # ----- score by global ΔI (your method) -----
+        startTie = time.time()
+        tie_score = trajectory_fisher_information_batch(
+            sel_positions,
+            sel_headings,
+            pursuerXList,
+            speed,
+            trueParams,
+            tmax,
+            measuredHeadings,
+            measuredSpeeds,
+            measuredPathTimes,
+            measuredInterceptedList,
+            measuredPathHistories,
+            measuredEndPoints,
+            measuredEndTimes,
+            measuredEzPoints,
+            measuredEzTimes,
+            previousFims,
+            flattenLearingLossAmount,
+            meanPursuerX,
+            covSqrt,
+        )
+        print("time to score candidates:", time.time() - startTie)
+
+        print(
+            "tie_score min/max:",
+            float(jnp.nanmin(tie_score)),
+            float(jnp.nanmax(tie_score)),
+        )
+
+        local_best = jnp.nanargmax(tie_score)
+        best_idx = keep_idx[local_best]
+
+    else:
+        # ----- boundary-mode branch (leave your scoring function here) -----
+        # Ensure your which_lp_* fns are defined; typical pattern below:
+        scores = jax.vmap(
+            which_lp_path_maximizes_dist_to_next_intercept,
+            in_axes=(0, 0, None, None, None, None, None, None, None, None, None),
+        )(
+            cand_positions,
+            cand_headings,
+            pursuerXList,
+            speed,
+            trueParams,
+            center,
+            radius,
+            tmax,
+            num_points,
+            diff_threshold,
+            endPoints[interceptedList] if jnp.any(interceptedList) else endPoints,
+        )
+        best_idx = jnp.nanargmax(scores)
+
+    best_start_pos = cand_positions[best_idx]
+    best_heading = cand_headings[best_idx]
+
+    print("time to optimize next low-priority path:", time.time() - start)
+    return best_start_pos, best_heading
+    # start = time.time()
+    # #     initialGradient = dTotalLossDX(
+    # #         initialPursuerX,
+    # #         headings,
+    # #         speeds,
+    # #         interceptedList,
+    # #         pathTimes,
+    # #         pathHistories,
+    # #         endPoints,
+    # #         ezPoints,
+    # #         ezTimes,
+    # #         trueParams,
+    # #         interceptedPathWeight,
+    # #         flattenLearingLossAmount,
+    # #     )
+    # upperTheta = jnp.pi + jnp.pi  # / 4
+    # lowerTheta = jnp.pi - jnp.pi  # / 4
+    # if randomPath:
+    #     best_angle = rng.uniform(lowerTheta, upperTheta)
+    #     best_start_pos = center + radius * jnp.array(
+    #         [jnp.cos(best_angle), jnp.sin(best_angle)]
+    #     )
+    #     headingToCenter = np.arctan2(
+    #         center[1] - best_start_pos[1],  # Δy
+    #         center[0] - best_start_pos[0],  # Δx
+    #     )
+    #     best_heading = headingToCenter + rng.normal(0.0, 0.2)
+    #     return best_start_pos, best_heading
     print("Optimizing next low-priority path...")
 
     # Generate candidate start positions and headings
@@ -3615,8 +3991,8 @@ def run_simulation_with_random_pursuer(
                 trueParams,
                 searchCenter,
                 searchCircleRadius,
-                35,
-                35,
+                40,
+                40,
                 # 1,
                 # 1,
                 agentSpeed,
@@ -3925,7 +4301,7 @@ def main(seed):
         seed=seed,
         numLowPriorityAgents=20,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-1,
+        keepLossThreshold=1e-9,
         plotEvery=1,
         dataDir="results",
         saveDir="interioir/knownSpeed",
@@ -3954,7 +4330,7 @@ def plot_median_rmse_and_abs_errors(
     for filename in os.listdir(results_dir):
         count += 1
         if filename.endswith("_results.json"):
-            if int(filename.split("_")[0]) <= 505:
+            if int(filename.split("_")[0]) <= 180:
                 filepath = os.path.join(results_dir, filename)
                 with open(filepath, "r") as f:
                     data = json.load(f)
@@ -4311,8 +4687,16 @@ if __name__ == "__main__":
             plt.show()
 
     else:
-        maxSteps = 20
+        maxSteps = 15
         results_dir = "results/interioir/knownSpeed/"
+        plot_median_rmse_and_abs_errors(
+            results_dir,
+            max_steps=maxSteps,
+            epsilon=0.15,
+            positionAndHeadingOnly=False,
+            knownSpeed=True,
+        )
+        results_dir = "results/interioir/d_score/knownSpeed/"
         plot_median_rmse_and_abs_errors(
             results_dir,
             max_steps=maxSteps,
