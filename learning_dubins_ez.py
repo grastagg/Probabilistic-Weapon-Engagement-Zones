@@ -1478,9 +1478,8 @@ def grad_theta_RS_point(theta, pt, true_params):
 #     return w / (jnp.sum(w) + 1e-12)
 #
 
+
 # --- Single-item kernel (NOT jitted) ---
-
-
 def info_for_trajectory(
     theta,  # (d,)
     heading,  # unused, kept for API symmetry
@@ -1490,80 +1489,81 @@ def info_for_trajectory(
     path_history,  # (T,2)
     intercepted_point,  # (2,)
     true_params,
-    flatten_margin,
+    flatten_margin,  # treated as boundary-band half-width (δ)
 ):
-    # HIT branch: use interception point
-    def interception_fn():
-        r_end = RS_path(theta, intercepted_point[None, :], true_params)[0]
-        z_hit = r_end - flatten_margin
-        w_hit = activation_smooth(z_hit)  # ≥ 0
-        g_end = grad_theta_RS_point(theta, intercepted_point, true_params)  # (d,)
-        I = w_hit * jnp.outer(g_end, g_end)
-        return 0.5 * (I + I.T)
+    """
+    Sensitivity-driven Fisher-style information surrogate.
 
-    # MISS branch: soft-select along the path (keeps gradients)
-    def miss_fn():
-        # RS and grads along path
-        r_t = dubins_reachable_set_from_pursuerX(
-            theta, path_history, true_params
-        )  # (T,)
-        G = grad_theta_RS_path(theta, path_history, true_params)  # (T, d)
+    Key changes vs old version:
+      - SUM over all timesteps with a symmetric boundary-band weight
+        (peaks at r=0; decays for both inside and outside).
+      - NO argmax (keeps gradients smooth, richer rank).
+      - If intercepted==True, ADD a small extra term at the hit point.
+    """
 
-        # z_t = inside violation amount
-        z_t = -r_t - flatten_margin
-        w_t = activation_smooth(z_t)  # (T,)
+    # --- helpers -------------------------------------------------------------
+    eps = 1e-9
+    delta = jnp.maximum(jnp.asarray(flatten_margin, dtype=path_history.dtype), 1e-6)
+    delta = 0.1
 
-        # pick index of max violation
-        idx = jnp.argmax(w_t)
+    # symmetric band weight centered on boundary (r=0):
+    #   z_t = δ - |r_t| ;  activation_smooth(z_t) peaks at r=0 and decays both sides
+    def w_outside_hard(r, m):
+        # r: (T,), signed distance (positive outside, negative inside)
+        # m > 0: safety margin (desired standoff distance outside the boundary)
+        # delta: band width controlling how wide the weight “bell” is
+        return jnp.where(r >= m, jnp.exp(-0.5 * ((r - m) / delta) ** 2), 0.0)
 
-        # gradient at that index
-        g = G[idx]  # (d,)
+    # def boundary_band_weights(r_t):
+    #     z_t = delta - jnp.abs(r_t)
+    #     return activation_smooth(z_t)  # shape (T,)
 
-        # scale by weight
-        I = w_t[idx] * jnp.outer(g, g)
-        return 0.5 * (I + I.T)
+    # --- path-wide contributions --------------------------------------------
+    # Signed distances along path and their parameter-Jacobians
+    r_t = dubins_reachable_set_from_pursuerX(theta, path_history, true_params)  # (T,)
+    G_t = grad_theta_RS_path(theta, path_history, true_params)  # (T,d)
 
-    I = jax.lax.cond(intercepted, interception_fn, miss_fn)
-    # extra symmetrize for hygiene
-    return 0.5 * (I + I.T)
+    # Boundary-focused weights (both sides of boundary)
+    # w_t = boundary_band_weights(r_t)  # (T,)
+    w_t = w_outside_hard(r_t, 0.1)  # (T,)
+
+    # Sum_t w_t * (g_t g_t^T)  -> (d,d)
+    # einsum 't,td,te->de' computes Σ_t w_t * g_t[d] * g_t[e]
+    I_path = jnp.einsum("t,td,te->de", w_t, G_t, G_t)
+
+    I_total = I_path
+    # Symmetrize + tiny ridge for numerical hygiene
+    I_total = 0.5 * (I_total + I_total.T)
+    I_total = I_total + eps * jnp.eye(I_total.shape[0], dtype=I_total.dtype)
+    return I_total
 
 
 # def info_for_trajectory(
 #     theta,  # (d,)
-#     heading,
-#     speed,  # kept for API symmetry if you need them later
-#     intercepted,
+#     heading,  # unused, kept for API symmetry
+#     speed,  # unused, kept for API symmetry
+#     intercepted,  # bool
 #     path_time,  # (T,)
 #     path_history,  # (T,2)
 #     intercepted_point,  # (2,)
 #     true_params,
 #     flatten_margin,
 # ):
-#     # Helper: RS(x; theta) returns scalar (positive/outside, negative/inside per your code)
-#     def RS_at(theta_, pt):
-#         return dubins_reachable_set_from_pursuerX(
-#             theta_, pt[None, :], true_params
-#         ).squeeze()
-#
-#     # Grad RS wrt parameters at a single point
-#     grad_RS = jax.jacfwd(lambda th, pt: RS_at(th, pt), argnums=0)
-#
-#     # ---- HIT branch: φ''(z_hit) * (∇ r_end)(∇ r_end)^T  (rank ≤ 1) ----
+#     # HIT branch: use interception point
 #     def interception_fn():
-#         r_end = RS_at(theta, intercepted_point)
+#         r_end = RS_path(theta, intercepted_point[None, :], true_params)[0]
 #         z_hit = r_end - flatten_margin
-#         w_hit = activation_smooth(z_hit)  # scalar ≥ 0
-#         g_end = grad_RS(theta, intercepted_point)  # (d_mask,)
+#         w_hit = activation_smooth(z_hit)  # ≥ 0
+#         g_end = grad_theta_RS_point(theta, intercepted_point, true_params)  # (d,)
 #         I = w_hit * jnp.outer(g_end, g_end)
-#         return I
+#         return 0.5 * (I + I.T)
 #
-#     # ---- MISS branch: average_t φ''(z_t) * (∇ r_t)(∇ r_t)^T  ----
+#     # MISS branch: soft-select along the path (keeps gradients)
 #     def miss_fn():
 #         # RS and grads along path
 #         r_t = dubins_reachable_set_from_pursuerX(
 #             theta, path_history, true_params
 #         )  # (T,)
-#         G = jax.vmap(lambda pt: grad_RS(theta, pt))(path_history)  # (T,d)
 #
 #         # z_t = inside violation amount
 #         z_t = -r_t - flatten_margin
@@ -1573,16 +1573,15 @@ def info_for_trajectory(
 #         idx = jnp.argmax(w_t)
 #
 #         # gradient at that index
-#         g = G[idx]  # (d,)
+#         g = grad_theta_RS_path(theta, path_history, true_params)[0]
 #
 #         # scale by weight
 #         I = w_t[idx] * jnp.outer(g, g)
 #         return 0.5 * (I + I.T)
 #
 #     I = jax.lax.cond(intercepted, interception_fn, miss_fn)
-#     # Symmetrize for numerical hygiene
-#     I = 0.5 * (I + I.T)
-#     return I
+#     # extra symmetrize for hygiene
+#     return 0.5 * (I + I.T)
 
 
 @jax.jit
@@ -2107,6 +2106,44 @@ def trajectory_margin_mass(
     return timeInMargin
 
 
+def trajectory_intercept_probability(
+    start_pos,
+    heading,
+    pursuerXList,
+    speed,
+    trueParams,
+    center,
+    radius,
+    tmax=10.0,
+    numPoints=100,
+    diff_threshold=0.3,
+    pastInterceptedPoints=None,
+    meanPursuerX=None,
+    pastHeadings=None,
+    pastStartPos=None,
+):
+    # numPoints = len(measuredPathHistories[0])
+    path, _ = simulate_trajectory_fn(start_pos, heading, speed, tmax, numPoints)
+
+    def predicted_measurement(pursuerX):
+        (
+            pursuerPosition,
+            pursuerHeading,
+            pursuerSpeed,
+            minimumTurnRadius,
+            pursuerRange,
+        ) = pursuerX_to_params(pursuerX, trueParams)
+        rs = dubins_reachable_set_from_pursuerX(pursuerX, path, trueParams)
+        timeInRs = jnp.sum(rs < 0.0, axis=0) * (tmax / numPoints)
+        intercepted = jnp.any(rs < 0.0, axis=0)
+
+        return intercepted, timeInRs
+
+    intercepteds, timeInRss = jax.vmap(predicted_measurement)(pursuerXList)
+    q = intercepteds.mean()
+    return q
+
+
 def trajectory_entropy(
     start_pos,
     heading,
@@ -2453,86 +2490,6 @@ def generate_headings_toward_center(
     return positions_expanded, headings_expanded
 
 
-# def generate_headings_toward_center(
-#     radius,
-#     num_angles,
-#     num_headings,
-#     delta,
-#     center=(0.0, 0.0),
-#     theta1=0.0,
-#     theta2=2 * jnp.pi,
-#     plot=True,
-# ):
-#     """
-#     Generate heading directions pointing toward the center ± delta from points on an arc.
-#
-#     Args:
-#         radius (float): Radius of the circle.
-#         num_angles (int): Number of angular positions along the arc.
-#         num_headings (int): Number of heading deviations per point.
-#         delta (float): Max deviation (in radians) from heading toward center.
-#         center (tuple): (x, y) of the center to point toward.
-#         theta1 (float): Start angle of arc (in radians, counterclockwise).
-#         theta2 (float): End angle of arc (in radians, counterclockwise).
-#         plot (bool): If True, show a matplotlib plot.
-#
-#     Returns:
-#         positions: (num_angles * num_headings, 2) array of positions on the arc
-#         headings:  (num_angles * num_headings,) array of headings from each position
-#     """
-#     cx, cy = center
-#
-#     # Normalize angles into [0, 2π)
-#     theta1 = jnp.mod(theta1, 2 * jnp.pi)
-#     theta2 = jnp.mod(theta2, 2 * jnp.pi)
-#
-#     # Ensure counterclockwise sweep
-#     if theta2 <= theta1:
-#         theta2 += 2 * jnp.pi
-#
-#     # Sample angles along the arc
-#     angles = jnp.linspace(theta1, theta2, num_angles)
-#
-#     # Compute positions on arc
-#     x = radius * jnp.cos(angles) + cx
-#     y = radius * jnp.sin(angles) + cy
-#     positions = jnp.stack([x, y], axis=-1)  # shape: (num_angles, 2)
-#
-#     # Compute headings toward center
-#     headings_to_center = jnp.arctan2(cy - y, cx - x)  # shape: (num_angles,)
-#
-#     # Heading deviations
-#     heading_offsets = jnp.linspace(
-#         -delta, delta, num_headings
-#     )  # shape: (num_headings,)
-#
-#     # Broadcast to generate all combinations
-#     positions_expanded = jnp.repeat(positions, num_headings, axis=0)  # (N*M, 2)
-#     headings_expanded = jnp.repeat(headings_to_center[:, None], num_headings, axis=1)
-#     headings_expanded = (headings_expanded + heading_offsets[None, :]).ravel()  # (N*M,)
-#
-#     if plot:
-#         plt.figure(figsize=(6, 6))
-#         plt.plot(cx, cy, "ro", label="Center")
-#
-#         for i in range(positions_expanded.shape[0]):
-#             px, py = positions_expanded[i]
-#             heading = headings_expanded[i]
-#             dx = jnp.cos(heading)
-#             dy = jnp.sin(heading)
-#             plt.arrow(px, py, dx * 0.2, dy * 0.2, head_width=0.05, color="r", alpha=0.7)
-#
-#         plt.gca().set_aspect("equal")
-#         plt.title("Headings Toward Center ± δ")
-#         plt.xlabel("x")
-#         plt.ylabel("y")
-#         plt.grid(True)
-#         plt.legend()
-#         plt.show()
-#
-#     return positions_expanded, headings_expanded
-
-
 def logdet_psd(A, ridge=1e-6):
     sign, logdet = jnp.linalg.slogdet(A)  # sign should be +1 if PD
     return logdet  # stable even when det is tiny
@@ -2559,6 +2516,228 @@ def submat(A, idx):
 def trace_inv(A, ridge=1e-6):
     Ainv = jnp.linalg.solve(A, jnp.eye(A.shape[0]))
     return jnp.trace(Ainv)
+
+
+info_for_trajectory_multple_future = jax.vmap(
+    info_for_trajectory, in_axes=(None, None, None, 0, 0, 0, 0, None, None)
+)
+
+
+def trajectory_fisher_information_cross(
+    start_pos,
+    heading,
+    pursuerXList,  # (K, d)
+    speed,
+    trueParams,
+    tmax=10.0,
+    measuredHeadings=None,
+    measuredSpeeds=None,
+    measuredPathTimes=None,
+    measuredInterceptedList=None,
+    measuredPathHistories=None,
+    measuredEndPoints=None,
+    measuredEndTimes=None,
+    measuredEzPoints=None,
+    measuredEzTimes=None,
+    previousFims=None,
+    flattenLearingLossAmount=0.0,
+    meanPursuerX=None,
+    covPursuerXSqrt=None,
+):
+    K = pursuerXList.shape[0]
+    numPoints = len(measuredPathHistories[0])
+
+    model_weights = jnp.ones((K,), dtype=pursuerXList.dtype) / K
+
+    # Hypothetical / expected measurement from candidate trajectory
+    def find_future_measurements(pursuerX):
+        (
+            pursuerPosition,
+            pursuerHeading,
+            pursuerSpeed,
+            minimumTurnRadius,
+            pursuerRange,
+            # ) = pursuerX_to_params(trueParams[parameterMask], trueParams)
+        ) = pursuerX_to_params(pursuerX, trueParams)
+        (
+            futurePathTime,
+            futureIntercepted,
+            futureInterceptedPoint,
+            futureInterceptedTime,
+            futurePathHistorie,
+            futureInterceptionPointEZ,
+            futureInterceptionTimeEZ,
+        ) = send_low_priority_agent_expected_intercept(
+            start_pos,
+            heading,
+            speed,
+            pursuerPosition,
+            pursuerHeading,
+            minimumTurnRadius,
+            0.0,
+            pursuerRange,
+            pursuerSpeed,
+            tmax,
+            len(measuredPathHistories[0]),
+            numSimulationPoints=100,
+        )
+        return (
+            futureIntercepted,
+            futureInterceptedPoint,
+            futurePathTime,
+            futurePathHistorie,
+        )
+
+    (
+        futureIntercepteds,
+        futureInterceptedPoints,
+        futurePathTimes,
+        futurePathHistories,
+    ) = jax.vmap(find_future_measurements)(pursuerXList)
+
+    def per_model(pursuerX):
+        # Unpack params
+
+        fims = info_for_trajectory_multple_future(
+            pursuerX,
+            heading,
+            speed,
+            futureIntercepteds,
+            futurePathTimes,  #
+            futurePathHistories,  # (K, T, 2)
+            futureInterceptedPoints,  # (K, 2)
+            trueParams,
+            flattenLearingLossAmount,
+        )
+        return jnp.mean(fims, axis=0)
+
+    delta_infos = jax.vmap(per_model)(pursuerXList)  # (K, p, p)
+
+    I_past_bar = jnp.tensordot(model_weights, previousFims, axes=1)  # (p,p)
+    Delta_bar = jnp.tensordot(model_weights, delta_infos, axes=1)  # (p,p)
+
+    # Symmetrize once for numerical stability
+
+    I_before = sym(I_past_bar)
+    I_after = sym(I_past_bar + Delta_bar)
+
+    # Compute gains once
+    E_before = lam_min(I_before)
+    E_after = lam_min(I_after)
+    e_gain = E_after - E_before
+    D_gain = logdet_psd(I_after) - logdet_psd(I_before)
+
+    # Penalty (fix the variable name from 'pen' -> 'penalty')
+    tau, beta = 0.5, 20.0
+    penalty = jnp.maximum(0.0, tau - E_after)
+    # return e_gain
+    # return E_after
+
+    return D_gain - beta * penalty
+
+
+def trajectory_fisher_information_mean(
+    start_pos,
+    heading,
+    pursuerXList,  # (K, d)
+    speed,
+    trueParams,
+    tmax=10.0,
+    measuredHeadings=None,
+    measuredSpeeds=None,
+    measuredPathTimes=None,
+    measuredInterceptedList=None,
+    measuredPathHistories=None,
+    measuredEndPoints=None,
+    measuredEndTimes=None,
+    measuredEzPoints=None,
+    measuredEzTimes=None,
+    previousFims=None,
+    flattenLearingLossAmount=0.0,
+    meanPursuerX=None,
+    covPursuerXSqrt=None,
+):
+    K = pursuerXList.shape[0]
+
+    model_weights = jnp.ones((K,), dtype=pursuerXList.dtype) / K
+
+    (
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
+    ) = pursuerX_to_params(meanPursuerX, trueParams)
+    # ) = pursuerX_to_params(trueParams[parameterMask], trueParams)
+    # ) = pursuerX_to_params(pursuerX, trueParams)
+    (
+        futurePathTime,
+        futureIntercepted,
+        futureInterceptedPoint,
+        futureInterceptedTime,
+        futurePathHistory,
+        futureInterceptionPointEZ,
+        futureInterceptionTimeEZ,
+    ) = send_low_priority_agent_expected_intercept(
+        start_pos,
+        heading,
+        speed,
+        pursuerPosition,
+        pursuerHeading,
+        minimumTurnRadius,
+        0.0,
+        pursuerRange,
+        pursuerSpeed,
+        tmax,
+        len(measuredPathHistories[0]),
+        numSimulationPoints=100,
+    )
+
+    # jax.debug.print(
+    #     "Future intercepted: {},futureInterceptedPoint: {}",
+    #     futureIntercepted,
+    #     futureInterceptedPoint,
+    # )
+
+    def per_model(pursuerX):
+        # Unpack params
+
+        fim = info_for_trajectory(
+            pursuerX,
+            heading,
+            speed,
+            futureIntercepted,
+            futurePathTime,  # (T,)
+            futurePathHistory,  #
+            futureInterceptedPoint,  # (2,)
+            trueParams,
+            flattenLearingLossAmount,
+        )
+        return fim
+
+    delta_infos = jax.vmap(per_model)(pursuerXList)  # (K, p, p)
+
+    I_past_bar = jnp.tensordot(model_weights, previousFims, axes=1)  # (p,p)
+    Delta_bar = jnp.tensordot(model_weights, delta_infos, axes=1)  # (p,p)
+
+    # Symmetrize once for numerical stability
+
+    I_before = sym(I_past_bar)
+    I_after = sym(I_past_bar + Delta_bar)
+
+    # Compute gains once
+    E_before = lam_min(I_before)
+    E_after = lam_min(I_after)
+    e_gain = E_after - E_before
+    D_gain = logdet_psd(I_after) - logdet_psd(I_before)
+
+    # Penalty (fix the variable name from 'pen' -> 'penalty')
+    tau, beta = 1.0, 20.0
+    penalty = jnp.maximum(0.0, tau - E_after)
+    # return e_gain
+    # return E_after
+
+    return D_gain - beta * penalty
 
 
 def trajectory_fisher_information(
@@ -2589,6 +2768,11 @@ def trajectory_fisher_information(
 
     # Hypothetical / expected measurement from candidate trajectory
     def find_future_measurements(pursuerX):
+        # pursuerPosition = trueParams[0:2]
+        # pursuerHeading = trueParams[2]
+        # pursuerSpeed = trueParams[3]
+        # minimumTurnRadius = trueParams[4]
+        # pursuerRange = trueParams[5]
         (
             pursuerPosition,
             pursuerHeading,
@@ -2666,33 +2850,27 @@ def trajectory_fisher_information(
 
     delta_infos = jax.vmap(per_model)(pursuerXList)  # (K, p, p)
 
-    # I_after,k = I_now,k + ΔI_k (symmetrize for numerical safety)
-    # I_after = sym(previousFims + delta_infos)  # (K, p, p)
     I_past_bar = jnp.tensordot(model_weights, previousFims, axes=1)  # (p,p)
     Delta_bar = jnp.tensordot(model_weights, delta_infos, axes=1)  # (p,p)
 
-    p = I_past_bar.shape[0]
-    idx = jnp.array([p - 2, p - 1])  # last two
-    #
-    # I_past_sub = submat(I_past_bar, idx)
-    # I_after_sub = submat(I_past_bar + Delta_bar, idx)
-    #
-    # Ds_gain = logdet_psd(I_after_sub) - logdet_psd(I_past_sub)
-    # return Ds_gain
+    # Symmetrize once for numerical stability
 
-    E_after = lam_min(I_past_bar + Delta_bar)
+    I_before = sym(I_past_bar)
+    I_after = sym(I_past_bar + Delta_bar)
 
-    tau, beta = 1e-2, 20.0
+    # Compute gains once
+    E_before = lam_min(I_before)
+    E_after = lam_min(I_after)
+    e_gain = E_after - E_before
+    D_gain = logdet_psd(I_after) - logdet_psd(I_before)
+
+    # Penalty (fix the variable name from 'pen' -> 'penalty')
+    tau, beta = 0.75, 20.0
     penalty = jnp.maximum(0.0, tau - E_after)
-
-    e_gain = lam_min(I_past_bar + Delta_bar) - lam_min(I_past_bar)
-    D_gain = logdet_psd(I_past_bar + Delta_bar) - logdet_psd(I_past_bar)
-    #
     # return e_gain
+    # return E_after
 
     return D_gain - beta * penalty
-
-    # return e_gain
 
 
 def top_percent(scores, pct=10.0):
@@ -2737,18 +2915,6 @@ def trajectory_det(
     closeEnough = jnp.min(jnp.abs(trueRS)) < thresh
     notTooFarInside = jnp.min(trueRS) > -thresh
     return jnp.where(jnp.logical_and(closeEnough, notTooFarInside), 100, 0)
-    # path, _ = simulate_trajectory_fn(start_pos, heading, speed, tmax, numPoints)
-    #
-    # def single(pursuerX):
-    #     trueRS = dubins_reachable_set_from_pursuerX(pursuerX, path, trueParams)
-    #     inRS = jnp.any(trueRS < 0.00, axis=0)
-    #     thresh = 0.01
-    #     closeEnough = jnp.min(jnp.abs(trueRS)) < thresh
-    #     notTooFarInside = jnp.min(trueRS) > -thresh
-    #     return jnp.where(jnp.logical_and(closeEnough, notTooFarInside), 100, 0)
-
-    # all = jax.vmap(single)(pursuerXList)
-    # return jnp.sum(all)
 
 
 def trajectory_time_near_boundary(
@@ -2767,40 +2933,23 @@ def trajectory_time_near_boundary(
     pastHeadings=None,
     pastStartPos=None,
 ):
-    # pursuerX = trueParams[parameterMask]
-    # # pursuerX = meanPursuerX
-    # path, _ = simulate_trajectory_fn(start_pos, heading, speed, tmax, numPoints)
-    # trueRS = dubins_reachable_set_from_pursuerX(pursuerX, path, trueParams)
-    # thresh = 0.01
-    # closeEnough = jnp.abs(trueRS) < thresh
-    # notTooFarInside = jnp.min(trueRS) > -thresh
-    # return jnp.where(notTooFarInside, jnp.sum(closeEnough), 0.0)
-    # pursuerX = meanPursuerX
+    thresh = 0.1
     path, _ = simulate_trajectory_fn(start_pos, heading, speed, tmax, numPoints)
+    dt = tmax / (numPoints - 1)
 
-    def single(pursuerX):
-        trueRS = dubins_reachable_set_from_pursuerX(pursuerX, path, trueParams)
-        thresh = 0.01
-        closeEnough = jnp.abs(trueRS) < thresh
-        notTooFarInside = jnp.min(trueRS) > -thresh
-        return jnp.where(notTooFarInside, jnp.sum(closeEnough), 0.0)
+    def per_model(pursuerX):
+        r = dubins_reachable_set_from_pursuerX(pursuerX, path, trueParams)  # (T,)
+        close = (jnp.abs(r) < thresh).astype(jnp.float32)  # (T,)
+        # Disallow if the path goes deeper than -thresh at any time
+        safe = (jnp.min(r) > 0).astype(jnp.float32)
+        # # Sum timesteps in band → multiply by dt to get *time*
+        return safe * (jnp.sum(close) * dt)
 
-    return jnp.sum(jax.vmap(single)(pursuerXList))
-    # path, _ = simulate_trajectory_fn(start_pos, heading, speed, tmax, numPoints)
-    #
-    # def single(pursuerX):
-    #     trueRS = dubins_reachable_set_from_pursuerX(pursuerX, path, trueParams)
-    #     inRS = jnp.any(trueRS < 0.00, axis=0)
-    #     thresh = 0.01
-    #     closeEnough = jnp.min(jnp.abs(trueRS)) < thresh
-    #     notTooFarInside = jnp.min(trueRS) > -thresh
-    #     return jnp.where(jnp.logical_and(closeEnough, notTooFarInside), 100, 0)
-
-    # all = jax.vmap(single)(pursuerXList)
-    # return jnp.sum(all)
+    # Sum across models; use jnp.mean(...) if you prefer average per model
+    return jnp.sum(jax.vmap(per_model)(pursuerXList))
 
 
-def trajectory_maximize_spread(
+def trajectory_time_near_boundary_mean(
     start_pos,
     heading,
     pursuerXList,
@@ -2816,28 +2965,60 @@ def trajectory_maximize_spread(
     pastHeadings=None,
     pastStartPos=None,
 ):
-    pursuerX = trueParams[parameterMask]
-    # pursuerX = meanPursuerX
-
+    pursuerX = meanPursuerX
     path, _ = simulate_trajectory_fn(start_pos, heading, speed, tmax, numPoints)
     trueRS = dubins_reachable_set_from_pursuerX(pursuerX, path, trueParams)
-    interceptionPoint = path[jnp.argmin(jnp.abs(trueRS))]
-
-    def single(i):
-        path, _ = simulate_trajectory_fn(
-            pastStartPos[i], pastHeadings[i], speed, tmax, numPoints
-        )
-        rs = dubins_reachable_set_from_pursuerX(pursuerX, path, trueParams)
-        return path[jnp.argmin(jnp.abs(rs))]
-
-    pastInterceptedPoints = jax.vmap(single)(jnp.arange(0, len(pastHeadings)))
-
-    diffs = interceptionPoint - pastInterceptedPoints
-    dists = jnp.linalg.norm(diffs, axis=-1)
-    total_distances = jnp.min(dists)  # Sum distances to all other points
-    return total_distances
+    inRS = jnp.any(trueRS < 0.00, axis=0)
+    thresh = 0.1
+    closeEnough = jnp.min(jnp.abs(trueRS)) < thresh
+    notTooFarInside = jnp.min(trueRS) > -thresh
+    return jnp.where(jnp.logical_and(closeEnough, notTooFarInside), 1.0, 0)
 
 
+trajectory_time_near_boundary_batch = jax.jit(
+    jax.vmap(
+        trajectory_time_near_boundary,
+        in_axes=(
+            0,  # start_pos
+            0,  # heading
+            None,  # pursuerXList
+            None,  # speed
+            None,  # trueParams
+            None,  # center
+            None,  # radius
+            None,  # tmax
+            None,  # num_points
+            None,  # diff_threshold
+            None,  # endPoints
+            None,  # meanPursuerX
+            None,  # measuredHeadings
+            None,  # measuredPathHistories[:, 0] (if that's what your fn needs)
+        ),
+    ),
+    static_argnames="numPoints",
+)
+trajectory_intercept_probability_batch = jax.jit(
+    jax.vmap(
+        trajectory_intercept_probability,
+        in_axes=(
+            0,  # start_pos
+            0,  # heading
+            None,  # pursuerXList
+            None,  # speed
+            None,  # trueParams
+            None,  # center
+            None,  # radius
+            None,  # tmax
+            None,  # num_points
+            None,  # diff_threshold
+            None,  # endPoints
+            None,  # meanPursuerX
+            None,  # measuredHeadings
+            None,  # measuredPathHistories[:, 0] (if that's what your fn needs)
+        ),
+    ),
+    static_argnames="numPoints",
+)
 trajectory_entropy_batch = jax.jit(
     jax.vmap(
         trajectory_entropy,
@@ -2862,7 +3043,7 @@ trajectory_entropy_batch = jax.jit(
 )
 trajectory_fisher_information_batch = jax.jit(
     jax.vmap(
-        trajectory_fisher_information,
+        trajectory_fisher_information_mean,
         in_axes=(
             0,  # start_pos (vary)
             0,  # heading (vary)
@@ -2910,6 +3091,60 @@ def trajectory_dist_to_past(
 ):
     dists = jax.vmap(angle_diff, in_axes=(0, None))(pastHeadings, heading)
     return jnp.min(jnp.abs(dists))
+
+
+def tie_score_streaming(
+    sel_positions,
+    sel_headings,  # (N,2), (N,)
+    pursuerXList,
+    speed,
+    trueParams,
+    tmax,
+    measuredHeadings,
+    measuredSpeeds,
+    measuredPathTimes,
+    measuredInterceptedList,
+    measuredPathHistories,
+    measuredEndPoints,
+    measuredEndTimes,
+    measuredEzPoints,
+    measuredEzTimes,
+    previousFims,
+    flattenLearingLossAmount,
+    meanPursuerX,
+    covSqrt,
+    batch_size=500,
+):
+    N = sel_positions.shape[0]
+    out_chunks = []
+    for start in tqdm.tqdm(range(0, N, batch_size)):
+        end = min(start + batch_size, N)
+        # Slice candidates only; everything else is reused
+        scores_chunk = trajectory_fisher_information_batch(
+            sel_positions[start:end],
+            sel_headings[start:end],
+            pursuerXList,
+            speed,
+            trueParams,
+            tmax,
+            measuredHeadings,
+            measuredSpeeds,
+            measuredPathTimes,
+            measuredInterceptedList,
+            measuredPathHistories,
+            measuredEndPoints,
+            measuredEndTimes,
+            measuredEzPoints,
+            measuredEzTimes,
+            previousFims,
+            flattenLearingLossAmount,
+            meanPursuerX,
+            covSqrt,
+        )
+        # If this is JAX, flush device work so memory is freed before next chunk:
+        scores_chunk = jax.device_get(scores_chunk)
+        out_chunks.append(scores_chunk)
+    return jnp.concatenate([jnp.asarray(c) for c in out_chunks], axis=0)
 
 
 def optimize_next_low_priority_path(
@@ -2965,7 +3200,7 @@ def optimize_next_low_priority_path(
         radius,
         num_angles,
         num_headings,
-        0.5,
+        0.7,
         center=center,
         theta1=0.0,
         theta2=2 * jnp.pi,
@@ -2979,7 +3214,11 @@ def optimize_next_low_priority_path(
         # ----- gating by entropy (bits) -----
         # trajectory_entropy must return a scalar in [0,1] bits for each candidate
         gateStart = time.time()
+        # gate_score = jnp.ones(len(cand_headings))  # placeholder: keep al
+
         gate_score = trajectory_entropy_batch(
+            # gate_score = trajectory_intercept_probability_batch(
+            # gate_score = trajectory_time_near_boundary_batch(
             cand_positions,
             cand_headings,
             pursuerXList,
@@ -3002,8 +3241,9 @@ def optimize_next_low_priority_path(
             float(jnp.nanmax(gate_score)),
         )
 
-        hmin_bits = 0.6  # minimum entropy to keep
+        hmin_bits = 0.01  # minimum entropy to keep
         mask = jnp.isfinite(gate_score) & (gate_score >= hmin_bits)
+
         if not jnp.any(mask):
             # fallback: keep top-K by entropy to ensure candidates remain
             K = jnp.minimum(64, gate_score.shape[0])
@@ -3034,7 +3274,23 @@ def optimize_next_low_priority_path(
 
         # ----- score by global ΔI (your method) -----
         startTie = time.time()
-        tie_score = trajectory_fisher_information_batch(
+        # tie_score = trajectory_time_near_boundary_batch(
+        #     sel_positions,
+        #     sel_headings,
+        #     pursuerXList,
+        #     speed,
+        #     trueParams,
+        #     center,
+        #     radius,
+        #     tmax,
+        #     num_points,
+        #     diff_threshold,
+        #     endPoints,
+        #     meanPursuerX,
+        #     measuredHeadings,
+        #     measuredPathHistories[:, 0],
+        # )
+        tie_score = tie_score_streaming(
             sel_positions,
             sel_headings,
             pursuerXList,
@@ -3054,7 +3310,29 @@ def optimize_next_low_priority_path(
             flattenLearingLossAmount,
             meanPursuerX,
             covSqrt,
+            batch_size=1000,
         )
+        # tie_score = trajectory_fisher_information_batch(
+        #     sel_positions,
+        #     sel_headings,
+        #     pursuerXList,
+        #     speed,
+        #     trueParams,
+        #     tmax,
+        #     measuredHeadings,
+        #     measuredSpeeds,
+        #     measuredPathTimes,
+        #     measuredInterceptedList,
+        #     measuredPathHistories,
+        #     measuredEndPoints,
+        #     measuredEndTimes,
+        #     measuredEzPoints,
+        #     measuredEzTimes,
+        #     previousFims,
+        #     flattenLearingLossAmount,
+        #     meanPursuerX,
+        #     covSqrt,
+        # )
         print("time to score candidates:", time.time() - startTie)
 
         print(
@@ -3997,7 +4275,7 @@ def run_simulation_with_random_pursuer(
                 # 1,
                 agentSpeed,
                 tmax,
-                numPoints // 10,
+                numPoints // 5,
                 rng,
                 jnp.array(headings),
                 jnp.array(speeds),
@@ -4091,8 +4369,9 @@ def run_simulation_with_random_pursuer(
         pathHistories.append(pathHistory)
         interceptionPointEZList.append(interceptionPointEZ)
         interceptionTimeEZList.append(interceptionTimeEZ)
-        downSampledPathHistories.append(pathHistory[::10])
-        downSampledPathTimes.append(pathTime[::10])
+        down = 10
+        downSampledPathHistories.append(pathHistory[::down])
+        downSampledPathTimes.append(pathTime[::down])
 
         # Learn
         pursuerXList, lossList, lossListNoFlatten = learn_ez(
@@ -4330,7 +4609,7 @@ def plot_median_rmse_and_abs_errors(
     for filename in os.listdir(results_dir):
         count += 1
         if filename.endswith("_results.json"):
-            if int(filename.split("_")[0]) <= 180:
+            if int(filename.split("_")[0]) <= 550:
                 filepath = os.path.join(results_dir, filename)
                 with open(filepath, "r") as f:
                     data = json.load(f)
@@ -4687,7 +4966,7 @@ if __name__ == "__main__":
             plt.show()
 
     else:
-        maxSteps = 15
+        maxSteps = 20
         results_dir = "results/interioir/knownSpeed/"
         plot_median_rmse_and_abs_errors(
             results_dir,
