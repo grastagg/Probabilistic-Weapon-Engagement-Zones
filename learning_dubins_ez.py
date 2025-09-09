@@ -45,7 +45,7 @@ interceptionOnBoundary = False
 randomPath = False
 noisyMeasurementsFlag = False
 saveResults = True
-plotAllFlag = True
+plotAllFlag = False
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
 elif knownSpeed:
@@ -1504,7 +1504,7 @@ def info_for_trajectory(
     # --- helpers -------------------------------------------------------------
     eps = 1e-9
     delta = jnp.maximum(jnp.asarray(flatten_margin, dtype=path_history.dtype), 1e-6)
-    delta = 0.1
+    delta = 0.05
 
     # symmetric band weight centered on boundary (r=0):
     #   z_t = δ - |r_t| ;  activation_smooth(z_t) peaks at r=0 and decays both sides
@@ -2661,37 +2661,43 @@ def trajectory_fisher_information_mean(
 
     model_weights = jnp.ones((K,), dtype=pursuerXList.dtype) / K
 
-    (
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        pursuerRange,
-    ) = pursuerX_to_params(meanPursuerX, trueParams)
+    # (
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     pursuerSpeed,
+    #     minimumTurnRadius,
+    #     pursuerRange,
+    # ) = pursuerX_to_params(meanPursuerX, trueParams)
     # ) = pursuerX_to_params(trueParams[parameterMask], trueParams)
     # ) = pursuerX_to_params(pursuerX, trueParams)
-    (
-        futurePathTime,
-        futureIntercepted,
-        futureInterceptedPoint,
-        futureInterceptedTime,
-        futurePathHistory,
-        futureInterceptionPointEZ,
-        futureInterceptionTimeEZ,
-    ) = send_low_priority_agent_expected_intercept(
-        start_pos,
-        heading,
-        speed,
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        0.0,
-        pursuerRange,
-        pursuerSpeed,
-        tmax,
-        len(measuredPathHistories[0]),
-        numSimulationPoints=100,
+    # (
+    #     futurePathTime,
+    #     futureIntercepted,
+    #     futureInterceptedPoint,
+    #     futureInterceptedTime,
+    #     futurePathHistory,
+    #     futureInterceptionPointEZ,
+    #     futureInterceptionTimeEZ,
+    # ) = send_low_priority_agent_expected_intercept(
+    #     start_pos,
+    #     heading,
+    #     speed,
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     minimumTurnRadius,
+    #     0.0,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     tmax,
+    #     len(measuredPathHistories[0]),
+    #     numSimulationPoints=100,
+    # )
+    futurePathHistory, _ = simulate_trajectory_fn(
+        start_pos, heading, speed, tmax, numPoints=100
     )
+    futureInterceptedPoint = None
+    futurePathTime = tmax
+    futureIntercepted = None
 
     # jax.debug.print(
     #     "Future intercepted: {},futureInterceptedPoint: {}",
@@ -3043,7 +3049,7 @@ trajectory_entropy_batch = jax.jit(
 )
 trajectory_fisher_information_batch = jax.jit(
     jax.vmap(
-        trajectory_fisher_information_mean,
+        trajectory_fisher_information,
         in_axes=(
             0,  # start_pos (vary)
             0,  # heading (vary)
