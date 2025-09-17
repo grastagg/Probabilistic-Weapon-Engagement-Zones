@@ -41,11 +41,11 @@ jax.config.update("jax_enable_x64", True)
 
 positionAndHeadingOnly = False
 knownSpeed = True
-interceptionOnBoundary = False
+interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = False
-saveResults = True
-plotAllFlag = False
+saveResults = False
+plotAllFlag = True
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
 elif knownSpeed:
@@ -812,71 +812,6 @@ def learning_loss_function_single(
     return lossRS
 
 
-# @jax.jit
-# def learning_loss_function_single(
-#     pursuerX,
-#     heading,
-#     speed,
-#     intercepted,
-#     pathTime,
-#     pathHistory,
-#     interceptedPoint,
-#     ezPoint,
-#     ezTime,
-#     trueParams,
-#     interceptedPathWeight=1.0,
-#     flattenLearingLossAmount=0.0,
-#     verbose=False,
-# ):
-#     rsEnd = dubins_reachable_set_from_pursuerX(
-#         pursuerX,
-#         jnp.array([interceptedPoint]),
-#         trueParams,
-#     ).squeeze()
-#     rsAll = dubins_reachable_set_from_pursuerX(pursuerX, pathHistory, trueParams)
-#     path = simulate_trajectory_fn(
-#         pathHistory[0], heading, speed, pathTime[-1] * 3, len(pathHistory)
-#     )[0]
-#     rsPath = dubins_reachable_set_from_pursuerX(pursuerX, path, trueParams)
-#     inRS = rsPath < 0.0  # shape (T,)
-#     w = inRS.astype(pathHistory.dtype)  # (T,) float {0.,1.}
-#
-#     num = (path * w[:, None]).sum(axis=0)  # (D,)
-#     den = w.sum()  # scalar
-#
-#     # Only divide if there is at least one True; else fall back (e.g., mean of all points).
-#     interceptionPointExpected = jax.lax.cond(
-#         den > 0,
-#         lambda _: num / den,
-#         lambda _: jnp.array([1000.0, 1000.0]),  # choose the fallback you want
-#         operand=None,
-#     )
-#
-#     interceptedLossRS = jnp.linalg.norm(interceptionPointExpected - interceptedPoint)
-#
-#     survivedLossRS = 10000 * jnp.max(
-#         activation(-rsAll - flattenLearingLossAmount)
-#     )  # loss if survived in RS
-#
-#     lossRS = jax.lax.cond(
-#         intercepted, lambda: interceptedLossRS, lambda: survivedLossRS
-#     )
-#
-#     def verbose_fn():
-#         jax.debug.print(
-#             "pursuerX: {}\ntrue hit location: {}\n estimate interception location: {}\n inRS {}\n",
-#             pursuerX,
-#             interceptedPoint,
-#             interceptionPointExpected,
-#             inRS,
-#         )
-#         return 0.0
-#
-#     jax.lax.cond(verbose, verbose_fn, lambda: 0.0)
-#
-#     return lossRS
-
-
 if interceptionOnBoundary:
     if knownSpeed:
         batched_loss = jax.jit(
@@ -1456,6 +1391,55 @@ def solve_measurement(
     return pursuerXList[idx], lossList[idx], lossListNoFlatten[idx]
 
 
+def percent_of_true_rs_covered(true_params, pursuerXList, numPoints):
+    testPointsx = np.linspace(-5, 5, numPoints)
+    testPointsy = np.linspace(-5, 5, numPoints)
+    gridCellArea = (testPointsx[1] - testPointsx[0]) * (testPointsy[1] - testPointsy[0])
+    [testPointsx, testPointsy] = np.meshgrid(testPointsx, testPointsy)
+    testPointsx = testPointsx.flatten()
+    testPointsy = testPointsy.flatten()
+    testPoints = np.stack((testPointsx, testPointsy), axis=-1)  # (N,2)
+    rsPreds = jax.vmap(dubins_reachable_set_from_pursuerX, in_axes=(0, None, None))(
+        pursuerXList, testPoints, true_params
+    )  # (M,N)
+    trueRs = dubins_reachable_set_from_pursuerX(
+        true_params[parameterMask], testPoints, true_params
+    )
+    outsideAll = jnp.all(rsPreds > 0, axis=0)  # (N,)
+    insideAny = jnp.logical_not(outsideAll)
+    insideArea = jnp.sum(insideAny) * gridCellArea
+    trueArea = jnp.sum(trueRs <= 0) * gridCellArea
+    print("True area", trueArea)
+    insideProportion = insideArea / trueArea
+    outsideTrueRs = trueRs > 0
+    insideTrue = jnp.logical_not(outsideTrueRs)
+    # count number of points inside true RS but outside all predicted RS
+    discrepancy = jnp.sum(jnp.logical_and(insideTrue, outsideAll))
+    totalInsideTrue = jnp.sum(insideTrue)
+    perercentOutside = discrepancy / totalInsideTrue
+    print("percent of true RS outside all predicted RS:", perercentOutside * 100, "%")
+    # plot
+    # fig, ax = plt.subplots()
+    # ax.contour(
+    #     testPointsx.reshape((numPoints, numPoints)),
+    #     testPointsy.reshape((numPoints, numPoints)),
+    #     insideAny.reshape((numPoints, numPoints)),
+    #     levels=[0.5],
+    #     colors="blue",
+    # )
+    # ax.contour(
+    #     testPointsx.reshape((numPoints, numPoints)),
+    #     testPointsy.reshape((numPoints, numPoints)),
+    #     outsideTrueRs.reshape((numPoints, numPoints)),
+    #     levels=[0.0],
+    #     colors="red",
+    #     linestyles="dashed",
+    # )
+    # ax.set_aspect("equal", adjustable="box")
+    # plt.show()
+    return 1.0 - float(perercentOutside), float(insideProportion)
+
+
 def RS_path(theta, path_pts, true_params):
     # returns r_t for all points along path: shape (T,)
     return dubins_reachable_set_from_pursuerX(theta, path_pts, true_params)
@@ -1471,15 +1455,7 @@ def grad_theta_RS_point(theta, pt, true_params):
     return grad_theta_RS_path(theta, pt[None, :], true_params)[0]
 
 
-# def softmax_weights(x, temp=10.0):
-#     # stable soft selection over time
-#     x = (x - jnp.max(x)) * temp
-#     w = jnp.exp(x)
-#     return w / (jnp.sum(w) + 1e-12)
-#
-
-
-# --- Single-item kernel (NOT jitted) ---
+@jax.jit
 def info_for_trajectory(
     theta,  # (d,)
     heading,  # unused, kept for API symmetry
@@ -1489,99 +1465,41 @@ def info_for_trajectory(
     path_history,  # (T,2)
     intercepted_point,  # (2,)
     true_params,
-    flatten_margin,  # treated as boundary-band half-width (δ)
+    flatten_margin,
 ):
-    """
-    Sensitivity-driven Fisher-style information surrogate.
+    # HIT branch: use interception point
+    def interception_fn():
+        r_end = RS_path(theta, intercepted_point[None, :], true_params)[0]
+        z_hit = r_end - flatten_margin
+        w_hit = activation_smooth(z_hit)  # ≥ 0
+        g_end = grad_theta_RS_point(theta, intercepted_point, true_params)  # (d,)
+        I = w_hit * jnp.outer(g_end, g_end)
+        return 0.5 * (I + I.T)
 
-    Key changes vs old version:
-      - SUM over all timesteps with a symmetric boundary-band weight
-        (peaks at r=0; decays for both inside and outside).
-      - NO argmax (keeps gradients smooth, richer rank).
-      - If intercepted==True, ADD a small extra term at the hit point.
-    """
+    # MISS branch: soft-select along the path (keeps gradients)
+    def miss_fn():
+        # RS and grads along path
+        r_t = dubins_reachable_set_from_pursuerX(
+            theta, path_history, true_params
+        )  # (T,)
 
-    # --- helpers -------------------------------------------------------------
-    eps = 1e-9
-    delta = jnp.maximum(jnp.asarray(flatten_margin, dtype=path_history.dtype), 1e-6)
-    delta = 0.05
+        # z_t = inside violation amount
+        z_t = -r_t - flatten_margin
+        w_t = activation_smooth(z_t)  # (T,)
 
-    # symmetric band weight centered on boundary (r=0):
-    #   z_t = δ - |r_t| ;  activation_smooth(z_t) peaks at r=0 and decays both sides
-    def w_outside_hard(r, m):
-        # r: (T,), signed distance (positive outside, negative inside)
-        # m > 0: safety margin (desired standoff distance outside the boundary)
-        # delta: band width controlling how wide the weight “bell” is
-        return jnp.where(r >= m, jnp.exp(-0.5 * ((r - m) / delta) ** 2), 0.0)
+        # pick index of max violation
+        idx = jnp.argmax(w_t)
 
-    # def boundary_band_weights(r_t):
-    #     z_t = delta - jnp.abs(r_t)
-    #     return activation_smooth(z_t)  # shape (T,)
+        # gradient at that index
+        g = grad_theta_RS_path(theta, path_history[idx][None, :], true_params)[0]
 
-    # --- path-wide contributions --------------------------------------------
-    # Signed distances along path and their parameter-Jacobians
-    r_t = dubins_reachable_set_from_pursuerX(theta, path_history, true_params)  # (T,)
-    G_t = grad_theta_RS_path(theta, path_history, true_params)  # (T,d)
+        # scale by weight
+        I = w_t[idx] * jnp.outer(g, g)
+        return 0.5 * (I + I.T)
 
-    # Boundary-focused weights (both sides of boundary)
-    # w_t = boundary_band_weights(r_t)  # (T,)
-    w_t = w_outside_hard(r_t, 0.1)  # (T,)
-
-    # Sum_t w_t * (g_t g_t^T)  -> (d,d)
-    # einsum 't,td,te->de' computes Σ_t w_t * g_t[d] * g_t[e]
-    I_path = jnp.einsum("t,td,te->de", w_t, G_t, G_t)
-
-    I_total = I_path
-    # Symmetrize + tiny ridge for numerical hygiene
-    I_total = 0.5 * (I_total + I_total.T)
-    I_total = I_total + eps * jnp.eye(I_total.shape[0], dtype=I_total.dtype)
-    return I_total
-
-
-# def info_for_trajectory(
-#     theta,  # (d,)
-#     heading,  # unused, kept for API symmetry
-#     speed,  # unused, kept for API symmetry
-#     intercepted,  # bool
-#     path_time,  # (T,)
-#     path_history,  # (T,2)
-#     intercepted_point,  # (2,)
-#     true_params,
-#     flatten_margin,
-# ):
-#     # HIT branch: use interception point
-#     def interception_fn():
-#         r_end = RS_path(theta, intercepted_point[None, :], true_params)[0]
-#         z_hit = r_end - flatten_margin
-#         w_hit = activation_smooth(z_hit)  # ≥ 0
-#         g_end = grad_theta_RS_point(theta, intercepted_point, true_params)  # (d,)
-#         I = w_hit * jnp.outer(g_end, g_end)
-#         return 0.5 * (I + I.T)
-#
-#     # MISS branch: soft-select along the path (keeps gradients)
-#     def miss_fn():
-#         # RS and grads along path
-#         r_t = dubins_reachable_set_from_pursuerX(
-#             theta, path_history, true_params
-#         )  # (T,)
-#
-#         # z_t = inside violation amount
-#         z_t = -r_t - flatten_margin
-#         w_t = activation_smooth(z_t)  # (T,)
-#
-#         # pick index of max violation
-#         idx = jnp.argmax(w_t)
-#
-#         # gradient at that index
-#         g = grad_theta_RS_path(theta, path_history, true_params)[0]
-#
-#         # scale by weight
-#         I = w_t[idx] * jnp.outer(g, g)
-#         return 0.5 * (I + I.T)
-#
-#     I = jax.lax.cond(intercepted, interception_fn, miss_fn)
-#     # extra symmetrize for hygiene
-#     return 0.5 * (I + I.T)
+    I = jax.lax.cond(intercepted, interception_fn, miss_fn)
+    # extra symmetrize for hygiene
+    return 0.5 * (I + I.T)
 
 
 @jax.jit
@@ -2240,17 +2158,38 @@ def trajectory_diff(
     return jnp.sum(scores)
 
 
+def smooth_score(endPoints, intercepteds, pastInterceptedPoints, alpha=10.0, eps=1e-6):
+    """
+    endPoints: (K,2) new candidate endpoints
+    intercepteds: (K,) boolean flags
+    pastInterceptedPoints: (M,2) past intercepts
+    alpha: controls sharpness of soft weighting (bigger = closer to hard switch)
+    """
+
+    # --- 1. Turn hard flags into soft weights (smooth if you want it)
+    # w = intercepteds.astype(jnp.float32)        # hard version (not smooth in flag)
+    w = jax.nn.sigmoid(alpha * (intercepteds.astype(jnp.float32) - 0.5))  # smooth
+
+    # --- 2. Blend between endpoint and fallback point
+    fallback = pastInterceptedPoints[0]  # (2,)
+    blended = w[:, None] * endPoints + (1.0 - w)[:, None] * fallback  # (K,2)
+
+    # --- 3. Compute distances to all past points
+    diffs = blended[:, None, :] - pastInterceptedPoints[None, :, :]  # (K,M,2)
+    dists = jnp.linalg.norm(diffs, axis=-1)  # (K,M)
+
+    # --- 4. Return mean (same as your code)
+    return jnp.mean(dists)
+
+
 def which_lp_path_maximizes_dist_to_next_intercept(
     start_pos,
     heading,
     pursuerXList,
     speed,
     trueParams,
-    center,
-    radius,
     tmax=10.0,
     numPoints=100,
-    diff_threshold=0.3,
     pastInterceptedPoints=None,
 ):
     def intercpetion_point(pursuerX):
@@ -2278,13 +2217,52 @@ def which_lp_path_maximizes_dist_to_next_intercept(
         return endPoint, intercepted
 
     interceptedPoints, intercepteds = jax.vmap(intercpetion_point)(pursuerXList)
-    interceptedPoints = jnp.where(intercepteds[:, None], interceptedPoints, jnp.nan)
+    # return smooth_score(interceptedPoints, intercepteds, pastInterceptedPoints)
+    interceptedPoints = jnp.where(
+        intercepteds[:, None], interceptedPoints, pastInterceptedPoints[0]
+    )
     # interceptedPoints = jnp.array(interceptedPoints)[jnp.array(intercepteds)]
 
     diffs = interceptedPoints[:, None, :] - pastInterceptedPoints[None, :, :]
     dists = jnp.linalg.norm(diffs, axis=-1)
-    total_distances = jnp.min(dists)  # Sum distances to all other points
+    total_distances = jnp.mean(dists)  # Sum distances to all other points
     return total_distances
+
+
+# @jax.jit(static_argnames=("numPoints"))
+def which_max_distance_obj(
+    x,
+    radius,
+    center,
+    pursuerXList,  # (K, d)
+    speed,
+    trueParams,
+    tmax=10.0,
+    numPoints=100,
+    previousFims=None,
+    flattenLearingLossAmount=0.0,
+    meanPursuerX=None,
+    covPursuerXSqrt=None,
+    endPoints=None,
+):
+    start_pos = center + radius * jnp.array([jnp.cos(x[0]), jnp.sin(x[0])])
+    heading = x[1]
+    dist = which_lp_path_maximizes_dist_to_next_intercept(
+        start_pos,
+        heading,
+        pursuerXList,
+        speed,
+        trueParams,
+        tmax,
+        numPoints,
+        endPoints,
+    )
+    return -dist
+
+
+which_max_distance_obj_derivative = jax.jit(
+    jax.jacfwd(which_max_distance_obj), static_argnames=("numPoints",)
+)
 
 
 def which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all(
@@ -2753,39 +2731,24 @@ def trajectory_fisher_information(
     speed,
     trueParams,
     tmax=10.0,
-    measuredHeadings=None,
-    measuredSpeeds=None,
-    measuredPathTimes=None,
-    measuredInterceptedList=None,
-    measuredPathHistories=None,
-    measuredEndPoints=None,
-    measuredEndTimes=None,
-    measuredEzPoints=None,
-    measuredEzTimes=None,
+    numPoints=100,
     previousFims=None,
     flattenLearingLossAmount=0.0,
     meanPursuerX=None,
     covPursuerXSqrt=None,
 ):
     K = pursuerXList.shape[0]
-    numPoints = len(measuredPathHistories[0])
 
     model_weights = jnp.ones((K,), dtype=pursuerXList.dtype) / K
 
     # Hypothetical / expected measurement from candidate trajectory
     def find_future_measurements(pursuerX):
-        # pursuerPosition = trueParams[0:2]
-        # pursuerHeading = trueParams[2]
-        # pursuerSpeed = trueParams[3]
-        # minimumTurnRadius = trueParams[4]
-        # pursuerRange = trueParams[5]
         (
             pursuerPosition,
             pursuerHeading,
             pursuerSpeed,
             minimumTurnRadius,
             pursuerRange,
-            # ) = pursuerX_to_params(trueParams[parameterMask], trueParams)
         ) = pursuerX_to_params(pursuerX, trueParams)
         (
             futurePathTime,
@@ -2806,7 +2769,7 @@ def trajectory_fisher_information(
             pursuerRange,
             pursuerSpeed,
             tmax,
-            len(measuredPathHistories[0]),
+            numPoints,
             numSimulationPoints=100,
         )
         return futureIntercepted, futureInterceptedPoint
@@ -2877,6 +2840,45 @@ def trajectory_fisher_information(
     # return E_after
 
     return D_gain - beta * penalty
+
+
+@jax.jit
+def traj_info_objective(
+    x,
+    radius,
+    center,
+    pursuerXList,  # (K, d)
+    speed,
+    trueParams,
+    tmax=10.0,
+    numPoints=100,
+    previousFims=None,
+    flattenLearingLossAmount=0.0,
+    meanPursuerX=None,
+    covPursuerXSqrt=None,
+):
+    angle = x[0]
+    heading = x[1]
+    start_pos = center + radius * jnp.array([jnp.cos(angle), jnp.sin(angle)])
+    return -trajectory_fisher_information(
+        start_pos,
+        heading,
+        pursuerXList,
+        speed,
+        trueParams,
+        tmax,
+        numPoints,
+        previousFims,
+        flattenLearingLossAmount,
+        meanPursuerX,
+        covPursuerXSqrt,
+    )
+
+
+d_traj_info_objective = jax.jit(
+    jax.jacfwd(traj_info_objective),
+    static_argnames=("numPoints",),
+)
 
 
 def top_percent(scores, pct=10.0):
@@ -3053,25 +3055,18 @@ trajectory_fisher_information_batch = jax.jit(
         in_axes=(
             0,  # start_pos (vary)
             0,  # heading (vary)
-            None,  # pursuerXList
-            None,  # speed
-            None,  # trueParams
-            None,  # tmax
-            None,  # measuredHeadings
-            None,  # measuredSpeeds
-            None,  # measuredPathTimes
-            None,  # measuredInterceptedList
-            None,  # measuredPathHistories
-            None,  # measuredEndPoints
-            None,  # measuredEndTimes
-            None,  # measuredEzPoints
-            None,  # measuredEzTimes
-            None,  # previousFims
-            None,  # flattenLearingLossAmount
-            None,  # meanPursuerX
-            None,  # covPursuerXSqrt
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ),
-    )
+    ),
+    static_argnames="numPoints",
 )
 info_for_trajectories_batch = jax.jit(
     jax.vmap(
@@ -3106,20 +3101,12 @@ def tie_score_streaming(
     speed,
     trueParams,
     tmax,
-    measuredHeadings,
-    measuredSpeeds,
-    measuredPathTimes,
-    measuredInterceptedList,
-    measuredPathHistories,
-    measuredEndPoints,
-    measuredEndTimes,
-    measuredEzPoints,
-    measuredEzTimes,
     previousFims,
     flattenLearingLossAmount,
     meanPursuerX,
     covSqrt,
     batch_size=500,
+    numPoints=100,
 ):
     N = sel_positions.shape[0]
     out_chunks = []
@@ -3133,15 +3120,7 @@ def tie_score_streaming(
             speed,
             trueParams,
             tmax,
-            measuredHeadings,
-            measuredSpeeds,
-            measuredPathTimes,
-            measuredInterceptedList,
-            measuredPathHistories,
-            measuredEndPoints,
-            measuredEndTimes,
-            measuredEzPoints,
-            measuredEzTimes,
+            numPoints,
             previousFims,
             flattenLearingLossAmount,
             meanPursuerX,
@@ -3151,6 +3130,124 @@ def tie_score_streaming(
         scores_chunk = jax.device_get(scores_chunk)
         out_chunks.append(scores_chunk)
     return jnp.concatenate([jnp.asarray(c) for c in out_chunks], axis=0)
+
+
+def run_sacrificial_path_optimization(
+    startingAngle,
+    startingHeading,
+    pursuerXList,
+    trueParams,
+    center,
+    radius,
+    speed,
+    tmax,
+    numPoints,
+    previousFims,
+    flattenLearingLossAmount=0.0,
+    endPoints=None,
+):
+    print("endPointsa", endPoints)
+
+    def objfunc(xDict):
+        x = xDict["x"]
+        # loss = traj_info_objective(
+        #     x,
+        #     radius,
+        #     center,
+        #     pursuerXList,  # (K, d)
+        #     speed,
+        #     trueParams,
+        #     tmax,
+        #     numPoints,
+        #     previousFims,
+        #     flattenLearingLossAmount,
+        #     meanPursuerX=None,
+        #     covPursuerXSqrt=None,
+        # )
+        loss = which_max_distance_obj(
+            x,
+            radius,
+            center,
+            pursuerXList,  # (K, d)
+            speed,
+            trueParams,
+            tmax,
+            numPoints,
+            previousFims,
+            flattenLearingLossAmount,
+            None,
+            None,
+            endPoints,
+        )
+        funcs = {}
+        funcs["loss"] = loss
+        return funcs, False
+
+    def sens(xDict, funcs):
+        x = xDict["x"]
+        # grad_x = d_traj_info_objective(
+        #     x,
+        #     radius,
+        #     center,
+        #     pursuerXList,  # (K, d)
+        #     speed,
+        #     trueParams,
+        #     tmax,
+        #     numPoints,
+        #     previousFims,
+        #     flattenLearingLossAmount,
+        #     meanPursuerX=None,
+        #     covPursuerXSqrt=None,
+        # )
+        grad_x = which_max_distance_obj_derivative(
+            x,
+            radius,
+            center,
+            pursuerXList,  # (K, d)
+            speed,
+            trueParams,
+            tmax,
+            numPoints,
+            previousFims,
+            flattenLearingLossAmount,
+            None,
+            None,
+            endPoints,
+        )
+
+        funcsSens = {}
+        funcsSens["loss"] = {
+            "x": grad_x,
+        }
+        return funcsSens, False
+
+    optProb = Optimization("sacraficial path optimization", objfunc)
+    optProb.addVarGroup(
+        name="x",
+        nVars=2,
+        varType="c",
+        value=np.array([startingAngle, startingHeading]),
+        lower=[-np.pi, -np.pi],
+        upper=[np.pi, np.pi],
+    )
+    optProb.addObj("loss", scale=1.0)
+    opt = OPT("ipopt")
+    opt.options["print_level"] = 5
+    opt.options["max_iter"] = 500
+    # opt.options["warm_start_init_point"] = "yes"
+    # opt.options["mu_init"] = 1e-1
+    # opt.options["nlp_scaling_method"] = "gradient-based"
+    opt.options["tol"] = 1e-8
+    username = getpass.getuser()
+    opt.options["hsllib"] = (
+        "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
+    )
+    opt.options["linear_solver"] = "ma97"
+
+    sol = opt(optProb, sens=sens)
+    # sol = opt(optProb, sens="fd")
+
+    return sol.xStar["x"][0], sol.xStar["x"][1], sol.fStar
 
 
 def optimize_next_low_priority_path(
@@ -3206,7 +3303,7 @@ def optimize_next_low_priority_path(
         radius,
         num_angles,
         num_headings,
-        0.7,
+        0.5,
         center=center,
         theta1=0.0,
         theta2=2 * jnp.pi,
@@ -3247,7 +3344,7 @@ def optimize_next_low_priority_path(
             float(jnp.nanmax(gate_score)),
         )
 
-        hmin_bits = 0.01  # minimum entropy to keep
+        hmin_bits = 0.51  # minimum entropy to keep
         mask = jnp.isfinite(gate_score) & (gate_score >= hmin_bits)
 
         if not jnp.any(mask):
@@ -3298,47 +3395,18 @@ def optimize_next_low_priority_path(
         # )
         tie_score = tie_score_streaming(
             sel_positions,
-            sel_headings,
+            sel_headings,  # (N,2), (N,)
             pursuerXList,
             speed,
             trueParams,
             tmax,
-            measuredHeadings,
-            measuredSpeeds,
-            measuredPathTimes,
-            measuredInterceptedList,
-            measuredPathHistories,
-            measuredEndPoints,
-            measuredEndTimes,
-            measuredEzPoints,
-            measuredEzTimes,
             previousFims,
             flattenLearingLossAmount,
             meanPursuerX,
             covSqrt,
-            batch_size=1000,
+            batch_size=500,
+            numPoints=100,
         )
-        # tie_score = trajectory_fisher_information_batch(
-        #     sel_positions,
-        #     sel_headings,
-        #     pursuerXList,
-        #     speed,
-        #     trueParams,
-        #     tmax,
-        #     measuredHeadings,
-        #     measuredSpeeds,
-        #     measuredPathTimes,
-        #     measuredInterceptedList,
-        #     measuredPathHistories,
-        #     measuredEndPoints,
-        #     measuredEndTimes,
-        #     measuredEzPoints,
-        #     measuredEzTimes,
-        #     previousFims,
-        #     flattenLearingLossAmount,
-        #     meanPursuerX,
-        #     covSqrt,
-        # )
         print("time to score candidates:", time.time() - startTie)
 
         print(
@@ -3349,30 +3417,79 @@ def optimize_next_low_priority_path(
 
         local_best = jnp.nanargmax(tie_score)
         best_idx = keep_idx[local_best]
+        best_start_pos = cand_positions[best_idx]
+
+        angle = jnp.arctan2(
+            best_start_pos[1] - center[1], best_start_pos[0] - center[0]
+        )
+        # angle, heading, score = run_sacrificial_path_optimization(
+        #     angle,
+        #     cand_headings[best_idx],
+        #     pursuerXList,
+        #     trueParams,
+        #     center,
+        #     radius,
+        #     speed,
+        #     tmax,
+        #     num_points,
+        #     previousFims,
+        #     flattenLearingLossAmount,
+        # )
+        # print(
+        #     "angle before sacrificial optimization:",
+        #     jnp.arctan2(best_start_pos[1] - center[1], best_start_pos[0] - center[0]),
+        # )
+        # print("angle after sacrificial optimization:", angle)
+        # print("best score before sacrificial optimization:", tie_score[local_best])
+        # print("best score after sacrificial optimization:", score)
 
     else:
         # ----- boundary-mode branch (leave your scoring function here) -----
         # Ensure your which_lp_* fns are defined; typical pattern below:
         scores = jax.vmap(
             which_lp_path_maximizes_dist_to_next_intercept,
-            in_axes=(0, 0, None, None, None, None, None, None, None, None, None),
+            # which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all,
+            in_axes=(0, 0, None, None, None, None, None, None),
         )(
             cand_positions,
             cand_headings,
             pursuerXList,
             speed,
             trueParams,
-            center,
-            radius,
             tmax,
             num_points,
-            diff_threshold,
             endPoints[interceptedList] if jnp.any(interceptedList) else endPoints,
         )
         best_idx = jnp.nanargmax(scores)
 
     best_start_pos = cand_positions[best_idx]
     best_heading = cand_headings[best_idx]
+    best_angle = jnp.arctan2(
+        best_start_pos[1] - center[1], best_start_pos[0] - center[0]
+    )
+    # best_angle_opt, best_heading_opt, opt_score = run_sacrificial_path_optimization(
+    #     0,
+    #     0,
+    #     pursuerXList,
+    #     trueParams,
+    #     center,
+    #     radius,
+    #     speed,
+    #     tmax,
+    #     num_points,
+    #     None,
+    #     flattenLearingLossAmount,
+    #     endPoints[interceptedList],
+    # )
+    print("Best start pos:", best_start_pos)
+    print("Best heading:", best_heading)
+    print("score at best:", jnp.max(scores))
+    # print(
+    #     "Best start pos after optimization:",
+    #     center + radius * jnp.array([jnp.cos(best_angle_opt), jnp.sin(best_angle_opt)]),
+    # )
+    # print("Best heading after optimization:", best_heading_opt)
+    # print("score after optimization:", opt_score)
 
     print("time to optimize next low-priority path:", time.time() - start)
     return best_start_pos, best_heading
@@ -3404,315 +3521,84 @@ def optimize_next_low_priority_path(
     #     )
     #     best_heading = headingToCenter + rng.normal(0.0, 0.2)
     #     return best_start_pos, best_heading
-    print("Optimizing next low-priority path...")
 
-    # Generate candidate start positions and headings
-    # angles = jnp.linspace(lowerTheta, upperTheta, num_angles, endpoint=False)
-    # headingsSac = jnp.linspace(-jnp.pi, jnp.pi, num_headings)
-    # angle_grid, heading_grid = jnp.meshgrid(angles, headingsSac)
-    # angle_flat = angle_grid.ravel()
-    # heading_flat = heading_grid.ravel()
-    positions, headings = generate_headings_toward_center(
-        radius,
-        num_angles,
-        num_headings,
-        0.5,
-        center=center,
-        theta1=lowerTheta,
-        theta2=upperTheta,
-        plot=False,
-    )
-
-    diff_threshold = 10.0
-    # if not interceptionOnBoundary:
-    if not interceptionOnBoundary:
-        gate_score = jax.jit(
-            jax.vmap(
-                # trajectory_time_near_boundary,
-                # trajectory_det,
-                trajectory_entropy,
-                # trajectory_maximize_spread,
-                in_axes=(
-                    0,
-                    0,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-            ),
-            static_argnames="numPoints",
-        )(
-            positions,
-            headings,
-            pursuerXList,
-            speed,
-            trueParams,
-            center,
-            radius,
-            tmax,
-            num_points,
-            diff_threshold,
-            endPoints,
-            meanPursuerX,
-            measuredHeadings,
-            measuredPathHistories[:, 0],
-        )
-        print("min gate_score score:", jnp.nanmin(gate_score))
-        print("max gate_score score:", jnp.nanmax(gate_score))
-
-        print("total number of candidate paths:", len(headings))
-        # maxIndicies = top_percent(gate_score, 50)[0]
-        # keepThreshold = jnp.nanmax(gate_score) * 0.9
-        keepThreshold = 0.5
-        maxIndicies = gate_score >= keepThreshold
-        bestHeadings = headings[maxIndicies]
-        bestPositions = positions[maxIndicies]
-        print("min gate_score of selected:", jnp.nanmin(gate_score[maxIndicies]))
-        print("max gate_score of selected:", jnp.nanmax(gate_score[maxIndicies]))
-        maxIndicies = jnp.array([i for i, x in enumerate(maxIndicies) if x])
-        print("Number of candidate paths after gating:", len(bestHeadings))
-
-        previousFims = jax.jit(
-            jax.vmap(
-                info_for_trajectories,
-                in_axes=(0, None, None, None, None, None, None, None, None),
-            )
-        )(
-            pursuerXList,
-            measuredHeadings,
-            measuredSpeeds,
-            measuredPathTimes,
-            measuredInterceptedList,
-            measuredPathHistories,
-            measuredEndPoints,
-            trueParams,
-            flattenLearingLossAmount,
-        )
-
-        L = jnp.linalg.cholesky(jnp.diag(previousCov))
-        tie_score = jax.jit(
-            jax.vmap(
-                trajectory_fisher_information,
-                in_axes=(
-                    0,
-                    0,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-            )
-        )(
-            bestPositions,
-            bestHeadings,
-            pursuerXList,  # (K, d)
-            speed,
-            trueParams,
-            tmax,
-            measuredHeadings,
-            measuredSpeeds,
-            measuredPathTimes,
-            measuredInterceptedList,
-            measuredPathHistories,
-            measuredEndPoints,
-            measuredEndTimes,
-            measuredEzPoints,
-            measuredEzTimes,
-            previousFims,
-            flattenLearingLossAmount,
-            meanPursuerX,
-            L,
-        )
-        #
-        # tie_score = jax.jit(
-        #     jax.vmap(
-        #         # trajectory_mutual_information,
-        #         # trajectory_dist_to_past,
-        #         # trajectory_maximize_spread,
-        #         trajectory_time_near_boundary,
-        #         in_axes=(
-        #             0,
-        #             0,
-        #             None,
-        #             None,
-        #             None,
-        #             None,
-        #             None,
-        #             None,
-        #             None,
-        #             None,
-        #             None,
-        #             None,
-        #             None,
-        #             None,
-        #         ),
-        #     ),
-        #     static_argnames="numPoints",
-        # )(
-        #     bestPositions,
-        #     bestHeadings,
-        #     pursuerXList,
-        #     speed,
-        #     trueParams,
-        #     center,
-        #     radius,
-        #     tmax,
-        #     num_points,
-        #     diff_threshold,
-        #     endPoints,
-        #     meanPursuerX,
-        #     measuredHeadings,
-        #     measuredPathHistories[:, 0],
-        # )
-        print("min tie_score score:", jnp.nanmin(tie_score))
-        print("max tie_score score:", jnp.nanmax(tie_score))
-
-        best_idx = jnp.nanargmax(tie_score)
-        print("tie_score at best_idx:", tie_score[best_idx])
-        best_idx = maxIndicies[best_idx]
-        print("gate_score at best_idx:", gate_score[best_idx])
-
-        # # pick max score with shortest distance to center
-        # dists = jnp.where(maxIndicies, dists, jnp.inf)
-        # print("min dist:", jnp.nanmin(dists))
-        # best_idx = jnp.nanargmin(dists)
-        # print("score at best_idx:", scores[best_idx])
-    else:
-        if len(endPoints[interceptedList]) > 0:
-            scores = jax.vmap(
-                # inside_model_disagreement_score,
-                # which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all,
-                which_lp_path_maximizes_dist_to_next_intercept,
-                # which_lp_spends_most_time_in_all_rs,
-                in_axes=(
-                    0,
-                    0,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-            )(
-                # angle_flat,
-                # heading_flat,
-                positions,
-                headings,
-                pursuerXList,
-                speed,
-                trueParams,
-                center,
-                radius,
-                tmax,
-                num_points,
-                diff_threshold,
-                endPoints[interceptedList],
-            )
-            print("min score:", jnp.nanmin(scores))
-            print("max score:", jnp.nanmax(scores))
-
-        else:
-            scores = jax.vmap(
-                # inside_model_disagreement_score,
-                which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all,
-                # which_lp_path_maximizes_dist_to_next_intercept,
-                # which_lp_spends_most_time_in_all_rs,
-                in_axes=(
-                    0,
-                    0,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-            )(
-                # angle_flat,
-                # heading_flat,
-                positions,
-                headings,
-                pursuerXList,
-                speed,
-                trueParams,
-                center,
-                radius,
-                tmax,
-                num_points,
-                diff_threshold,
-                endPoints[interceptedList],
-            )
-
-        max_score = jnp.nanmax(scores)
-        min_score = jnp.nanmin(scores)
-        if jnp.isnan(max_score) or jnp.isnan(min_score):
-            print("naN in scores, using fallback method")
-            scores = jax.vmap(
-                # inside_model_disagreement_score,
-                which_lp_path_minimizes_number_of_potential_solutions,
-                in_axes=(
-                    0,
-                    0,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-            )(
-                # angle_flat,
-                # heading_flat,
-                positions,
-                headings,
-                pursuerXList,
-                speed,
-                trueParams,
-                center,
-                radius,
-                tmax,
-                num_points,
-                diff_threshold,
-            )
-
-        best_idx = jnp.nanargmax(scores)
-
-    best_start_pos = positions[best_idx]
-    best_heading = headings[best_idx]
-
-    print("time to optimize next low-priority path:", time.time() - start)
-    return best_start_pos, best_heading
+    #     else:
+    #         scores = jax.vmap(
+    #             # inside_model_disagreement_score,
+    #             which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all,
+    #             # which_lp_path_maximizes_dist_to_next_intercept,
+    #             # which_lp_spends_most_time_in_all_rs,
+    #             in_axes=(
+    #                 0,
+    #                 0,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #             ),
+    #         )(
+    #             # angle_flat,
+    #             # heading_flat,
+    #             positions,
+    #             headings,
+    #             pursuerXList,
+    #             speed,
+    #             trueParams,
+    #             center,
+    #             radius,
+    #             tmax,
+    #             num_points,
+    #             diff_threshold,
+    #             endPoints[interceptedList],
+    #         )
+    #
+    #     max_score = jnp.nanmax(scores)
+    #     min_score = jnp.nanmin(scores)
+    #     if jnp.isnan(max_score) or jnp.isnan(min_score):
+    #         print("naN in scores, using fallback method")
+    #         scores = jax.vmap(
+    #             # inside_model_disagreement_score,
+    #             which_lp_path_minimizes_number_of_potential_solutions,
+    #             in_axes=(
+    #                 0,
+    #                 0,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #                 None,
+    #             ),
+    #         )(
+    #             # angle_flat,
+    #             # heading_flat,
+    #             positions,
+    #             headings,
+    #             pursuerXList,
+    #             speed,
+    #             trueParams,
+    #             center,
+    #             radius,
+    #             tmax,
+    #             num_points,
+    #             diff_threshold,
+    #         )
+    #
+    #     best_idx = jnp.nanargmax(scores)
+    #
+    # best_start_pos = positions[best_idx]
+    # best_heading = headings[best_idx]
+    #
+    # print("time to optimize next low-priority path:", time.time() - start)
+    # return best_start_pos, best_heading
+    #
 
 
 def plot_true_and_learned_pursuer(
@@ -4240,6 +4126,8 @@ def run_simulation_with_random_pursuer(
     pursuerParameterStdDev_history = []
     downSampledPathHistories = []
     downSampledPathTimes = []
+    percentOfTrueRsCovered = []
+    proportionOfAreaCoverdHistory = []
 
     pursuerXListZeroLoss = None
     pursuerXListZeroLossCollapsed = None
@@ -4275,13 +4163,13 @@ def run_simulation_with_random_pursuer(
                 trueParams,
                 searchCenter,
                 searchCircleRadius,
-                40,
-                40,
+                35,
+                35,
                 # 1,
                 # 1,
                 agentSpeed,
                 tmax,
-                numPoints // 5,
+                numPoints // 10,
                 rng,
                 jnp.array(headings),
                 jnp.array(speeds),
@@ -4442,6 +4330,12 @@ def run_simulation_with_random_pursuer(
         pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
         lossListZeroLoss = lossList[lossList <= keepLossThreshold]
 
+        percent, proportionOfAreaCoverd = percent_of_true_rs_covered(
+            trueParams, pursuerXListZeroLoss, 1000
+        )
+        percentOfTrueRsCovered.append(percent)
+        proportionOfAreaCoverdHistory.append(proportionOfAreaCoverd)
+
         # fig, ax = plt.subplots()
         # plt.hist(
         #     pursuerXListZeroLoss[:, 2], bins=10, alpha=0.5, label="Learned Headings"
@@ -4557,6 +4451,8 @@ def run_simulation_with_random_pursuer(
         "std_dev_estimates": np.array(pursuerParameterStdDev_history).tolist(),
         "absolute_errors": abs_error_history.tolist(),
         "rmse_history": rmse_history.tolist(),
+        "percent_of_true_rs_covered": percentOfTrueRsCovered,
+        "proportion_of_area_covered": proportionOfAreaCoverdHistory,
     }
 
     if saveResults:
@@ -4589,7 +4485,7 @@ def main(seed):
         keepLossThreshold=1e-9,
         plotEvery=1,
         dataDir="results",
-        saveDir="interioir/knownSpeed",
+        saveDir="boundary/knownSpeed",
         # saveDir="knownSpeed",
     )
 
@@ -4973,7 +4869,7 @@ if __name__ == "__main__":
 
     else:
         maxSteps = 20
-        results_dir = "results/interioir/knownSpeed/"
+        results_dir = "results/boundary/knownSpeed/"
         plot_median_rmse_and_abs_errors(
             results_dir,
             max_steps=maxSteps,
@@ -4981,7 +4877,7 @@ if __name__ == "__main__":
             positionAndHeadingOnly=False,
             knownSpeed=True,
         )
-        results_dir = "results/interioir/d_score/knownSpeed/"
+        results_dir = "results/boundary/no_percent_data/knownSpeed"
         plot_median_rmse_and_abs_errors(
             results_dir,
             max_steps=maxSteps,
