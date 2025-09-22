@@ -40,7 +40,7 @@ jax.config.update("jax_enable_x64", True)
 #
 
 positionAndHeadingOnly = False
-knownSpeed = True
+knownSpeed = False
 interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = False
@@ -404,7 +404,7 @@ def send_low_priority_agent_expected_intercept(
 
 
 @partial(jax.jit, static_argnames=("tmax", "numPoints", "numSimulationPoints"))
-def send_low_priority_agent(
+def send_low_priority_agent_boundary(
     startPosition,
     heading,
     speed,
@@ -700,7 +700,7 @@ def learning_loss_on_boundary_function_single_EZ(
 
     ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
 
-    outEZ = pathTime < ezTime - 3 * np.sqrt(0.001)
+    outEZ = pathTime < ezTime - 3 * np.sqrt(0.00000000000001)
 
     interceptedLossEZFirst = activation(
         ezFirst - flattenLearingLossAmount
@@ -711,7 +711,7 @@ def learning_loss_on_boundary_function_single_EZ(
         activation(-ezAll - flattenLearingLossAmount),
         0.0,
     )
-    interceptedLossTrajectory = jnp.mean(interceptedLossTrajectory)
+    interceptedLossTrajectory = jnp.max(interceptedLossTrajectory)
 
     pred_ezTime = (
         pathTime[-1] - (ezFirst + pursuerX[5]) / pursuerX[3]
@@ -726,7 +726,7 @@ def learning_loss_on_boundary_function_single_EZ(
         + time_loss
     )
 
-    survivedLossEZ = jnp.mean(
+    survivedLossEZ = jnp.max(
         activation(-ezAll - flattenLearingLossAmount)
     )  # loss if survived in EZ
 
@@ -1456,7 +1456,7 @@ def grad_theta_RS_point(theta, pt, true_params):
 
 
 @jax.jit
-def info_for_trajectory(
+def info_for_trajectory_int(
     theta,  # (d,)
     heading,  # unused, kept for API symmetry
     speed,  # unused, kept for API symmetry
@@ -1500,6 +1500,77 @@ def info_for_trajectory(
     I = jax.lax.cond(intercepted, interception_fn, miss_fn)
     # extra symmetrize for hygiene
     return 0.5 * (I + I.T)
+
+
+@jax.jit
+def info_for_trajectory_bound(
+    theta,  # (d,)
+    heading,  # unused, kept for API symmetry
+    speed,  # unused, kept for API symmetry
+    intercepted,  # bool
+    path_time,  # (T,)
+    path_history,  # (T,2)
+    intercepted_point,  # (2,)
+    true_params,
+    flatten_margin,
+):
+    # HIT branch: use interception point
+    def interception_fn():
+        r_t = dubins_reachable_set_from_pursuerX(
+            theta, path_history[:-4], true_params
+        )  # (T,)
+
+        # z_t = inside violation amount
+        z_t = -r_t - flatten_margin
+        w_t = activation_smooth(z_t)  # (T,)
+
+        # pick index of max violation
+        idx = jnp.argmax(w_t)
+
+        # gradient at that index
+        g = grad_theta_RS_path(theta, path_history[idx][None, :], true_params)[0]
+
+        # scale by weight
+        I_traj = w_t[idx] * jnp.outer(g, g)
+
+        g_end = grad_theta_RS_point(theta, intercepted_point, true_params)
+        r_end = RS_path(theta, intercepted_point[None, :], true_params)[0]
+        z_hitn = r_end - flatten_margin
+        z_hitp = -r_end - flatten_margin
+        w_hit = activation_smooth(z_hitn) + activation_smooth(z_hitp)  # ≥ 0
+        I_end = w_hit * jnp.outer(g_end, g_end)
+        return 0.5 * (I_traj + I_traj.T) + 0.5 * (I_end + I_end.T)
+
+    # MISS branch: soft-select along the path (keeps gradients)
+    def miss_fn():
+        # RS and grads along path
+        r_t = dubins_reachable_set_from_pursuerX(
+            theta, path_history, true_params
+        )  # (T,)
+
+        # z_t = inside violation amount
+        z_t = -r_t - flatten_margin
+        w_t = activation_smooth(z_t)  # (T,)
+
+        # pick index of max violation
+        idx = jnp.argmax(w_t)
+
+        # gradient at that index
+        g = grad_theta_RS_path(theta, path_history[idx][None, :], true_params)[0]
+
+        # scale by weight
+        I = w_t[idx] * jnp.outer(g, g)
+        return 0.5 * (I + I.T)
+
+    I = jax.lax.cond(intercepted, interception_fn, miss_fn)
+    # extra symmetrize for hygiene
+    return 0.5 * (I + I.T)
+
+
+if interceptionOnBoundary:
+    info_for_trajectory = info_for_trajectory_bound
+else:
+    info_for_trajectory = info_for_trajectory_int
 
 
 @jax.jit
@@ -1781,7 +1852,7 @@ def which_lp_path_minimizes_number_of_potential_solutions(
             pathHistory,
             interceptionPointEZ,
             interceptionTimeEZ,
-        ) = send_low_priority_agent(
+        ) = send_low_priority_agent_boundary(
             start_pos,
             heading,
             speed,
@@ -2200,19 +2271,21 @@ def which_lp_path_maximizes_dist_to_next_intercept(
             minimumTurnRadius,
             pursuerRange,
         ) = pursuerX_to_params(pursuerX, trueParams)
-        _, intercepted, endPoint, endTime, pathHistory, _, _ = send_low_priority_agent(
-            start_pos,
-            heading,
-            speed,
-            pursuerPosition,
-            pursuerHeading,
-            minimumTurnRadius,
-            0.0,
-            pursuerRange,
-            pursuerSpeed,
-            tmax,
-            numPoints,
-            numSimulationPoints=1000,
+        _, intercepted, endPoint, endTime, pathHistory, _, _ = (
+            send_low_priority_agent_boundary(
+                start_pos,
+                heading,
+                speed,
+                pursuerPosition,
+                pursuerHeading,
+                minimumTurnRadius,
+                0.0,
+                pursuerRange,
+                pursuerSpeed,
+                tmax,
+                numPoints,
+                numSimulationPoints=1000,
+            )
         )
         return endPoint, intercepted
 
@@ -2291,19 +2364,21 @@ def which_lp_path_minimizes_number_of_potential_solutions_must_intercect_all(
             minimumTurnRadius,
             pursuerRange,
         ) = pursuerX_to_params(pursuerX, trueParams)
-        _, intercepted, endPoint, endTime, pathHistory, _, _ = send_low_priority_agent(
-            start_pos,
-            heading,
-            speed,
-            pursuerPosition,
-            pursuerHeading,
-            minimumTurnRadius,
-            0.0,
-            pursuerRange,
-            pursuerSpeed,
-            tmax,
-            numPoints,
-            numSimulationPoints=1000,
+        _, intercepted, endPoint, endTime, pathHistory, _, _ = (
+            send_low_priority_agent_boundary(
+                start_pos,
+                heading,
+                speed,
+                pursuerPosition,
+                pursuerHeading,
+                minimumTurnRadius,
+                0.0,
+                pursuerRange,
+                pursuerSpeed,
+                tmax,
+                numPoints,
+                numSimulationPoints=1000,
+            )
         )
         return endPoint, intercepted
 
@@ -2724,6 +2799,12 @@ def trajectory_fisher_information_mean(
     return D_gain - beta * penalty
 
 
+if interceptionOnBoundary:
+    send_lp_agent = send_low_priority_agent_boundary
+else:
+    send_lp_agent = send_low_priority_agent_expected_intercept
+
+
 def trajectory_fisher_information(
     start_pos,
     heading,
@@ -2758,7 +2839,8 @@ def trajectory_fisher_information(
             futurePathHistorie,
             futureInterceptionPointEZ,
             futureInterceptionTimeEZ,
-        ) = send_low_priority_agent_expected_intercept(
+            # ) = send_low_priority_agent_expected_intercept(
+        ) = send_lp_agent(
             start_pos,
             heading,
             speed,
@@ -3314,6 +3396,7 @@ def optimize_next_low_priority_path(
     diff_threshold = 10.0
 
     if not interceptionOnBoundary:
+        # if True:
         # ----- gating by entropy (bits) -----
         # trajectory_entropy must return a scalar in [0,1] bits for each candidate
         gateStart = time.time()
@@ -3481,9 +3564,9 @@ def optimize_next_low_priority_path(
     #     flattenLearingLossAmount,
     #     endPoints[interceptedList],
     # )
-    print("Best start pos:", best_start_pos)
-    print("Best heading:", best_heading)
-    print("score at best:", jnp.max(scores))
+    # print("Best start pos:", best_start_pos)
+    # print("Best heading:", best_heading)
+    # print("score at best:", jnp.max(scores))
     # print(
     #     "Best start pos after optimization:",
     #     center + radius * jnp.array([jnp.cos(best_angle_opt), jnp.sin(best_angle_opt)]),
@@ -4199,7 +4282,7 @@ def run_simulation_with_random_pursuer(
                 pathHistory,
                 interceptionPointEZ,
                 interceptionTimeEZ,
-            ) = send_low_priority_agent(
+            ) = send_low_priority_agent_boundary(
                 startPosition,
                 heading,
                 agentSpeed,
@@ -4482,10 +4565,10 @@ def main(seed):
         seed=seed,
         numLowPriorityAgents=20,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-9,
+        keepLossThreshold=1e-2,
         plotEvery=1,
         dataDir="results",
-        saveDir="boundary/knownSpeed",
+        saveDir="boundary/unknownSpeed",
         # saveDir="knownSpeed",
     )
 
@@ -4869,15 +4952,15 @@ if __name__ == "__main__":
 
     else:
         maxSteps = 20
-        results_dir = "results/boundary/knownSpeed/"
+        results_dir = "results/boundary/unknownSpeed/"
         plot_median_rmse_and_abs_errors(
             results_dir,
             max_steps=maxSteps,
             epsilon=0.15,
             positionAndHeadingOnly=False,
-            knownSpeed=True,
+            knownSpeed=False,
         )
-        results_dir = "results/boundary/no_percent_data/knownSpeed"
+        results_dir = "results/boundary/no_percent_data/unknownSpeed/"
         plot_median_rmse_and_abs_errors(
             results_dir,
             max_steps=maxSteps,
