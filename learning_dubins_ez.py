@@ -1,3 +1,4 @@
+from jax._src.config import int_env
 import tqdm
 from functools import partial
 import sys
@@ -43,9 +44,26 @@ positionAndHeadingOnly = False
 knownSpeed = False
 interceptionOnBoundary = True
 randomPath = False
-noisyMeasurementsFlag = False
-saveResults = False
+noisyMeasurementsFlag = True
+saveResults = True
 plotAllFlag = True
+dataDir = "results"
+if interceptionOnBoundary:
+    saveDir = "boundary/"
+else:
+    saveDir = "interior/"
+
+if positionAndHeadingOnly:
+    saveDir += "knownSpeedAndShape"
+elif knownSpeed:
+    saveDir += "knownSpeed"
+else:
+    saveDir += "unknownSpeed"
+if noisyMeasurementsFlag:
+    saveDir += "WithNoise"
+
+print("saving data to: ", saveDir)
+
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
 elif knownSpeed:
@@ -581,7 +599,7 @@ def dubinsEZ_from_pursuerX(
     pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange = (
         pursuerX_to_params(pursuerX, trueParams)
     )
-    ez = dubinsEZ.in_dubins_engagement_zone(
+    ez = dubinsEZ.in_dubins_engagement_zone_agumented(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -692,6 +710,49 @@ def learning_loss_on_boundary_function_single_EZ(
     flattenLearingLossAmount=0.0,
     verbose=False,
 ):
+    # headings = heading * jnp.ones(pathHistory.shape[0])
+    # ezFirst = dubinsEZ_from_pursuerX(
+    #     pursuerX, jnp.array([ezPoint]), jnp.array([headings[-1]]), speed, trueParams
+    # ).squeeze()
+    # #
+    #
+    # ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
+    #
+    # inEZ = pathTime >= ezTime
+    #
+    # interceptedLossEZFirst = activation(
+    #     ezFirst - flattenLearingLossAmount
+    # ) + activation(-ezFirst - flattenLearingLossAmount)
+    #
+    # interceptedLossTrajectory = jnp.where(
+    #     inEZ,
+    #     0.0,
+    #     activation(-ezAll - flattenLearingLossAmount),
+    # )
+    # interceptedLossTrajectory = jnp.mean(interceptedLossTrajectory)
+    #
+    # pred_ezTime = (
+    #     pathTime[-1] - (ezFirst + pursuerX[5]) / pursuerX[3]
+    # )  # estimate time of EZ crossing
+    # time_loss = time_loss_with_flatten(
+    #     pred_ezTime, ezTime, flattenLearingLossAmount / pursuerX[3]
+    # )
+    #
+    # interceptedLossEZ = (
+    #     interceptedPathWeight * interceptedLossTrajectory
+    #     + interceptedLossEZFirst
+    #     + time_loss
+    # )
+    #
+    # survivedLossEZ = jnp.mean(
+    #     activation(-ezAll - flattenLearingLossAmount)
+    # )  # loss if survived in EZ
+    #
+    # lossEZ = jax.lax.cond(
+    #     intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
+    # )
+    #
+    # return lossEZ
     headings = heading * jnp.ones(pathHistory.shape[0])
     ezFirst = dubinsEZ_from_pursuerX(
         pursuerX, jnp.array([ezPoint]), jnp.array([headings[-1]]), speed, trueParams
@@ -700,7 +761,7 @@ def learning_loss_on_boundary_function_single_EZ(
 
     ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
 
-    outEZ = pathTime < ezTime - 3 * np.sqrt(0.00000000000001)
+    outEZ = pathTime < ezTime - 2.0 * 0.001
 
     interceptedLossEZFirst = activation(
         ezFirst - flattenLearingLossAmount
@@ -713,12 +774,18 @@ def learning_loss_on_boundary_function_single_EZ(
     )
     interceptedLossTrajectory = jnp.max(interceptedLossTrajectory)
 
-    pred_ezTime = (
-        pathTime[-1] - (ezFirst + pursuerX[5]) / pursuerX[3]
-    )  # estimate time of EZ crossing
+    # pred_ezTime = (
+    #     pathTime[-1] - (ezFirst + pursuerX[5]) / pursuerX[3]
+    # )  # estimate time of EZ crossing
+    # pred_ezTime = pathTime[-1] - jnp.linalg.norm(ezPoint - pathHistory[-1]) / speed
+    # time_loss = time_loss_with_flatten(
+    #     pred_ezTime, ezTime, flattenLearingLossAmount / pursuerX[3]
+    # )
+    pred_ezTime = pathTime[-1] - pursuerX[5] / pursuerX[3]
     time_loss = time_loss_with_flatten(
-        pred_ezTime, ezTime, flattenLearingLossAmount / pursuerX[3]
+        pred_ezTime, ezTime, 2.0 * 0.001 + flattenLearingLossAmount / pursuerX[3]
     )
+    time_loss = 0.0
 
     interceptedLossEZ = (
         interceptedPathWeight * interceptedLossTrajectory
@@ -733,8 +800,22 @@ def learning_loss_on_boundary_function_single_EZ(
     lossEZ = jax.lax.cond(
         intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
     )
+    lossRS = learning_loss_on_boundary_function_single(
+        pursuerX,
+        heading,
+        speed,
+        intercepted,
+        pathTime,
+        pathHistory,
+        interceptedPoint,
+        ezPoint,
+        ezTime,
+        trueParams,
+        interceptedPathWeight,
+        flattenLearingLossAmount,
+    )
 
-    return lossEZ
+    return lossEZ + lossRS
 
 
 @jax.jit
@@ -1391,7 +1472,24 @@ def solve_measurement(
     return pursuerXList[idx], lossList[idx], lossListNoFlatten[idx]
 
 
-def percent_of_true_rs_covered(true_params, pursuerXList, numPoints):
+def percent_of_true_rs_covered(
+    true_params,
+    pursuerXList,
+    numPoints,
+    startPositions,
+    interceptedList,
+    endPoints,
+    pathHistories,
+    pursuerPosition,
+    pursuerHeading,
+    pursuerRange,
+    pursuerTurnRadius,
+    headings,
+    speeds,
+    interceptionPointEZList,
+    trueParams,
+    mean,
+):
     testPointsx = np.linspace(-5, 5, numPoints)
     testPointsy = np.linspace(-5, 5, numPoints)
     gridCellArea = (testPointsx[1] - testPointsx[0]) * (testPointsy[1] - testPointsy[0])
@@ -1417,15 +1515,34 @@ def percent_of_true_rs_covered(true_params, pursuerXList, numPoints):
     discrepancy = jnp.sum(jnp.logical_and(insideTrue, outsideAll))
     totalInsideTrue = jnp.sum(insideTrue)
     perercentOutside = discrepancy / totalInsideTrue
-    print("percent of true RS outside all predicted RS:", perercentOutside * 100, "%")
+    print(
+        "percent of true RS inside all predicted RS:", (1 - perercentOutside) * 100, "%"
+    )
     # plot
     # fig, ax = plt.subplots()
+    # fig, ax = plot_all(
+    #     startPositions,
+    #     interceptedList,
+    #     endPoints,
+    #     pathHistories,
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     pursuerRange,
+    #     pursuerTurnRadius,
+    #     headings,
+    #     speeds,
+    #     pursuerXList,
+    #     None,
+    #     None,
+    #     trueParams,
+    #     mean,
+    # )
     # ax.contour(
     #     testPointsx.reshape((numPoints, numPoints)),
     #     testPointsy.reshape((numPoints, numPoints)),
     #     insideAny.reshape((numPoints, numPoints)),
     #     levels=[0.5],
-    #     colors="blue",
+    #     colors="magenta",
     # )
     # ax.contour(
     #     testPointsx.reshape((numPoints, numPoints)),
@@ -3853,7 +3970,7 @@ def plot_all(
     #         speeds[i],
     #         ax,
     #     )
-    return fig
+    return fig, ax
 
 
 def plot_pursuer_parameters_spread(
@@ -4162,8 +4279,8 @@ def run_simulation_with_random_pursuer(
     numOptimizerStarts=200,
     keepLossThreshold=1e-5,
     plotEvery=1,
-    dataDir="results",
-    saveDir="run",
+    # dataDir="results",
+    # saveDir="run",
 ):
     rng = np.random.default_rng(seed)
     trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
@@ -4235,8 +4352,17 @@ def run_simulation_with_random_pursuer(
                 else searchCircleCenter
             )
             # searchCenter = searchCircleCenter
+            numKeep = np.minimum(100, len(pursuerXListZeroLossCollapsed))
+            tempPurseurX = pursuerXListZeroLossCollapsed[
+                (
+                    np.random.choice(
+                        len(pursuerXListZeroLossCollapsed), numKeep, replace=False
+                    ),
+                )
+            ]
             startPosition, heading = optimize_next_low_priority_path(
-                pursuerXListZeroLossCollapsed,
+                # pursuerXListZeroLossCollapsed[:numKeep],
+                tempPurseurX,
                 jnp.array(headings),
                 jnp.array(speeds),
                 jnp.array(interceptedList),
@@ -4414,7 +4540,23 @@ def run_simulation_with_random_pursuer(
         lossListZeroLoss = lossList[lossList <= keepLossThreshold]
 
         percent, proportionOfAreaCoverd = percent_of_true_rs_covered(
-            trueParams, pursuerXListZeroLoss, 1000
+            trueParams,
+            pursuerXListZeroLoss,
+            1000,
+            startPositions,
+            interceptedList,
+            endPoints,
+            pathHistories,
+            pursuerPosition,
+            pursuerHeading,
+            pursuerRange,
+            pursuerTurnRadius,
+            headings,
+            speeds,
+            # pursuerXListZeroLoss,
+            lossListZeroLoss,
+            trueParams,
+            mean,
         )
         percentOfTrueRsCovered.append(percent)
         proportionOfAreaCoverdHistory.append(proportionOfAreaCoverd)
@@ -4431,6 +4573,7 @@ def run_simulation_with_random_pursuer(
         print("num zero loss pursuerXList:", len(pursuerXListZeroLoss))
         print("num collapsed pursuerXListZeroLoss:", len(pursuerXListZeroLossCollapsed))
         mean, cov, std, angleMean, angleKappa = find_mean_and_std(pursuerXListZeroLoss)
+
         print("trueParams", trueParams)
         print("mean:", mean)
         print("std dev", std)
@@ -4468,7 +4611,7 @@ def run_simulation_with_random_pursuer(
         #
         # Plot
         if i % plotEvery == 0 and plotAllFlag:
-            fig = plot_all(
+            fig, ax = plot_all(
                 startPositions,
                 interceptedList,
                 endPoints,
@@ -4563,14 +4706,85 @@ def main(seed):
         upperBoundsAll,
         parameterMask,
         seed=seed,
-        numLowPriorityAgents=20,
+        numLowPriorityAgents=15,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-2,
+        keepLossThreshold=1e-4,
         plotEvery=1,
-        dataDir="results",
-        saveDir="boundary/unknownSpeed",
+        # dataDir="results",
+        # saveDir="boundary/unknownSpeed",
         # saveDir="knownSpeed",
     )
+
+
+def plot_histogram_of_percent_rs_covered(results_dir, max_steps):
+    p_histories = []
+
+    for filename in os.listdir(results_dir):
+        if filename.endswith("_results.json"):
+            if int(filename.split("_")[0]) <= 550:
+                filepath = os.path.join(results_dir, filename)
+                with open(filepath, "r") as f:
+                    data = json.load(f)
+                    p_history = data.get("percent_of_true_rs_covered", [])
+                    if np.any(np.array(p_history) < 0.95):
+                        print(
+                            "low coverage found in file",
+                            filename,
+                            np.min(np.array(p_history)),
+                        )
+                    for p in p_history:
+                        p_histories.append(p)
+    p_histories = np.array(p_histories) * 100.0
+    p_histories = p_histories.flatten()
+    print(
+        "percenet above .90",
+        len(p_histories[p_histories > 0.95 * 100]) / len(p_histories),
+    )
+    fig, ax = plt.subplots()
+    ax.hist(p_histories, bins=100, range=(np.min(p_histories), 100))
+    ax.set_xlabel("Percent of True Rs Covered (%)")
+    ax.set_ylabel("Count")
+    ax.set_title("Histogram of Percent of True Rs Covered")
+    # ax.boxplot(p_histories, vert=False, positions=[5], widths=5)
+
+
+def plot_median_outer_approximation_size(results_dir, max_steps):
+    p_histories = []
+
+    for filename in os.listdir(results_dir):
+        if filename.endswith("_results.json"):
+            if int(filename.split("_")[0]) <= 550:
+                filepath = os.path.join(results_dir, filename)
+                with open(filepath, "r") as f:
+                    data = json.load(f)
+                    p_history = data.get("proportion_of_area_covered", [])
+                    p_history_padded = p_history[:max_steps]
+                    if len(p_history_padded) < max_steps:
+                        p_history_padded += [p_history_padded[-1]] * (
+                            max_steps - len(p_history_padded)
+                        )
+                    p_histories.append(p_history_padded)
+
+    median_p = np.median(np.array(p_histories), axis=0) * 100.0
+    first_quartile_p = np.percentile(np.array(p_histories), 25, axis=0) * 100.0
+    third_quartile_p = np.percentile(np.array(p_histories), 75, axis=0) * 100.0
+    min_p = np.min(np.array(p_histories), axis=0) * 100.0
+    max_p = np.max(np.array(p_histories), axis=0) * 100.0
+    fig, ax = plt.subplots()
+    ax.set_xlabel("Num Agents")
+    ax.set_ylabel("Size of Outer Approximation (% of True)")
+    ax.set_xticks(np.arange(1, max_steps + 1))
+    ax.plot(np.arange(1, max_steps + 1), median_p, label="Median", color="tab:blue")
+    ax.fill_between(
+        np.arange(1, max_steps + 1),
+        first_quartile_p,
+        third_quartile_p,
+        color="tab:blue",
+        alpha=0.2,
+        label="IQR",
+    )
+    ax.plot(np.arange(1, max_steps + 1), min_p, linestyle=":", color="tab:blue")
+    ax.plot(np.arange(1, max_steps + 1), max_p, linestyle=":", color="tab:blue")
 
 
 def plot_median_rmse_and_abs_errors(
@@ -4594,7 +4808,7 @@ def plot_median_rmse_and_abs_errors(
     for filename in os.listdir(results_dir):
         count += 1
         if filename.endswith("_results.json"):
-            if int(filename.split("_")[0]) <= 550:
+            if int(filename.split("_")[0]) <= 0:
                 filepath = os.path.join(results_dir, filename)
                 with open(filepath, "r") as f:
                     data = json.load(f)
@@ -4655,12 +4869,11 @@ def plot_median_rmse_and_abs_errors(
     # === Plot ===
     if positionAndHeadingOnly:
         fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-        labels = ["RMSE", "x error", "y error", "heading error"]
+        labels = ["x error", "y error", "heading error"]
         colors = ["tab:blue", "tab:green", "tab:orange", "tab:red"]
     elif knownSpeed:
         fig, axes = plt.subplots(3, 2, figsize=(12, 8))
         labels = [
-            "RMSE",
             "x error",
             "y error",
             "heading error",
@@ -4676,9 +4889,8 @@ def plot_median_rmse_and_abs_errors(
             "tab:brown",
         ]
     else:
-        fig, axes = plt.subplots(4, 2, figsize=(12, 10))
+        fig, axes = plt.subplots(3, 2, figsize=(12, 10))
         labels = [
-            "RMSE",
             "x error",
             "y error",
             "heading error",
@@ -4951,8 +5163,8 @@ if __name__ == "__main__":
             plt.show()
 
     else:
-        maxSteps = 20
-        results_dir = "results/boundary/unknownSpeed/"
+        maxSteps = 15
+        results_dir = "results/boundary/unknownSpeedWithNoise"
         plot_median_rmse_and_abs_errors(
             results_dir,
             max_steps=maxSteps,
@@ -4960,13 +5172,15 @@ if __name__ == "__main__":
             positionAndHeadingOnly=False,
             knownSpeed=False,
         )
-        results_dir = "results/boundary/no_percent_data/unknownSpeed/"
+        plot_median_outer_approximation_size(results_dir, max_steps=maxSteps)
+        plot_histogram_of_percent_rs_covered(results_dir, max_steps=maxSteps)
+        results_dir = "results/boundary/no_percent_data/unknownSpeedWithNoise/"
         plot_median_rmse_and_abs_errors(
             results_dir,
             max_steps=maxSteps,
             epsilon=0.15,
             positionAndHeadingOnly=False,
-            knownSpeed=True,
+            knownSpeed=False,
         )
         # plot_box_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.1)
         # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
