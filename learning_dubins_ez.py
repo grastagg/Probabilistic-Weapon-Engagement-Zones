@@ -46,7 +46,7 @@ interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = True
 saveResults = True
-plotAllFlag = True
+plotAllFlag = False
 dataDir = "results"
 if interceptionOnBoundary:
     saveDir = "boundary/"
@@ -719,17 +719,24 @@ def learning_loss_on_boundary_function_single_EZ(
 
     ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
 
-    inEZ = pathTime >= ezTime
+    # inEZ = pathTime >= ezTime + 2 * 0.001
+    outEZ = pathTime < ezTime - 0.0 * 0.001
 
     interceptedLossEZFirst = activation(
         ezFirst - flattenLearingLossAmount
     ) + activation(-ezFirst - flattenLearingLossAmount)
 
+    # interceptedLossTrajectory = jnp.where(
+    #     inEZ,
+    #     0.0,
+    #     activation(-ezAll - flattenLearingLossAmount),
+    # )
     interceptedLossTrajectory = jnp.where(
-        inEZ,
-        0.0,
+        outEZ,
         activation(-ezAll - flattenLearingLossAmount),
+        0.0,
     )
+
     interceptedLossTrajectory = jnp.mean(interceptedLossTrajectory)
 
     pred_ezTime = (
@@ -4709,7 +4716,7 @@ def main(seed):
         seed=seed,
         numLowPriorityAgents=15,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-7,
+        keepLossThreshold=1e-10,
         plotEvery=1,
         # dataDir="results",
         # saveDir="boundary/unknownSpeed",
@@ -4809,7 +4816,7 @@ def plot_median_rmse_and_abs_errors(
     for filename in os.listdir(results_dir):
         count += 1
         if filename.endswith("_results.json"):
-            if int(filename.split("_")[0]) <= 300:
+            if int(filename.split("_")[0]) <= 1:
                 filepath = os.path.join(results_dir, filename)
                 with open(filepath, "r") as f:
                     data = json.load(f)
