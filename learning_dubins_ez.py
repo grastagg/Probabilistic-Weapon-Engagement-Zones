@@ -630,6 +630,7 @@ def smooth_min(x, alpha=10.0):
 
 
 def activation(x):
+    return jax.nn.relu(x)  # ReLU activation function
     return jax.nn.relu(x) ** 2  # ReLU activation function
 
 
@@ -710,49 +711,49 @@ def learning_loss_on_boundary_function_single_EZ(
     flattenLearingLossAmount=0.0,
     verbose=False,
 ):
-    # headings = heading * jnp.ones(pathHistory.shape[0])
-    # ezFirst = dubinsEZ_from_pursuerX(
-    #     pursuerX, jnp.array([ezPoint]), jnp.array([headings[-1]]), speed, trueParams
-    # ).squeeze()
-    # #
+    headings = heading * jnp.ones(pathHistory.shape[0])
+    ezFirst = dubinsEZ_from_pursuerX(
+        pursuerX, jnp.array([ezPoint]), jnp.array([headings[-1]]), speed, trueParams
+    ).squeeze()
     #
-    # ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
-    #
-    # inEZ = pathTime >= ezTime
-    #
-    # interceptedLossEZFirst = activation(
-    #     ezFirst - flattenLearingLossAmount
-    # ) + activation(-ezFirst - flattenLearingLossAmount)
-    #
-    # interceptedLossTrajectory = jnp.where(
-    #     inEZ,
-    #     0.0,
-    #     activation(-ezAll - flattenLearingLossAmount),
-    # )
-    # interceptedLossTrajectory = jnp.mean(interceptedLossTrajectory)
-    #
-    # pred_ezTime = (
-    #     pathTime[-1] - (ezFirst + pursuerX[5]) / pursuerX[3]
-    # )  # estimate time of EZ crossing
-    # time_loss = time_loss_with_flatten(
-    #     pred_ezTime, ezTime, flattenLearingLossAmount / pursuerX[3]
-    # )
-    #
-    # interceptedLossEZ = (
-    #     interceptedPathWeight * interceptedLossTrajectory
-    #     + interceptedLossEZFirst
-    #     + time_loss
-    # )
-    #
-    # survivedLossEZ = jnp.mean(
-    #     activation(-ezAll - flattenLearingLossAmount)
-    # )  # loss if survived in EZ
-    #
-    # lossEZ = jax.lax.cond(
-    #     intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
-    # )
-    #
-    # return lossEZ
+
+    ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
+
+    inEZ = pathTime >= ezTime
+
+    interceptedLossEZFirst = activation(
+        ezFirst - flattenLearingLossAmount
+    ) + activation(-ezFirst - flattenLearingLossAmount)
+
+    interceptedLossTrajectory = jnp.where(
+        inEZ,
+        0.0,
+        activation(-ezAll - flattenLearingLossAmount),
+    )
+    interceptedLossTrajectory = jnp.mean(interceptedLossTrajectory)
+
+    pred_ezTime = (
+        pathTime[-1] - (ezFirst + pursuerX[5]) / pursuerX[3]
+    )  # estimate time of EZ crossing
+    time_loss = time_loss_with_flatten(
+        pred_ezTime, ezTime, flattenLearingLossAmount / pursuerX[3]
+    )
+
+    interceptedLossEZ = (
+        interceptedPathWeight * interceptedLossTrajectory
+        + interceptedLossEZFirst
+        + time_loss
+    )
+
+    survivedLossEZ = jnp.mean(
+        activation(-ezAll - flattenLearingLossAmount)
+    )  # loss if survived in EZ
+
+    lossEZ = jax.lax.cond(
+        intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
+    )
+
+    return lossEZ
     headings = heading * jnp.ones(pathHistory.shape[0])
     ezFirst = dubinsEZ_from_pursuerX(
         pursuerX, jnp.array([ezPoint]), jnp.array([headings[-1]]), speed, trueParams
@@ -4708,7 +4709,7 @@ def main(seed):
         seed=seed,
         numLowPriorityAgents=15,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-4,
+        keepLossThreshold=1e-7,
         plotEvery=1,
         # dataDir="results",
         # saveDir="boundary/unknownSpeed",
@@ -4808,7 +4809,7 @@ def plot_median_rmse_and_abs_errors(
     for filename in os.listdir(results_dir):
         count += 1
         if filename.endswith("_results.json"):
-            if int(filename.split("_")[0]) <= 0:
+            if int(filename.split("_")[0]) <= 300:
                 filepath = os.path.join(results_dir, filename)
                 with open(filepath, "r") as f:
                     data = json.load(f)
