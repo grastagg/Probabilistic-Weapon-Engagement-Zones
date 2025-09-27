@@ -46,7 +46,7 @@ interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = True
 saveResults = True
-plotAllFlag = False
+plotAllFlag = True
 dataDir = "results"
 if interceptionOnBoundary:
     saveDir = "boundary/"
@@ -719,9 +719,8 @@ def learning_loss_on_boundary_function_single_EZ(
 
     ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
 
-    # inEZ = pathTime >= ezTime + 2 * 0.001
-    outEZ = pathTime < ezTime - 0.0 * 0.001
-
+    inEZ = pathTime >= ezTime + 2 * 0.001
+    outEZ = pathTime < ezTime - 2.3 * 0.001
     interceptedLossEZFirst = activation(
         ezFirst - flattenLearingLossAmount
     ) + activation(-ezFirst - flattenLearingLossAmount)
@@ -745,6 +744,7 @@ def learning_loss_on_boundary_function_single_EZ(
     time_loss = time_loss_with_flatten(
         pred_ezTime, ezTime, flattenLearingLossAmount / pursuerX[3]
     )
+    time_loss = 0.0
 
     interceptedLossEZ = (
         interceptedPathWeight * interceptedLossTrajectory
@@ -2388,6 +2388,41 @@ def which_lp_path_maximizes_dist_to_next_intercept(
     numPoints=100,
     pastInterceptedPoints=None,
 ):
+    def intercpetion_point(pursuerX):
+        (
+            pursuerPosition,
+            pursuerHeading,
+            pursuerSpeed,
+            minimumTurnRadius,
+            pursuerRange,
+        ) = pursuerX_to_params(pursuerX, trueParams)
+        _, intercepted, endPoint, endTime, pathHistory, _, _ = (
+            send_low_priority_agent_boundary(
+                start_pos,
+                heading,
+                speed,
+                pursuerPosition,
+                pursuerHeading,
+                minimumTurnRadius,
+                0.0,
+                pursuerRange,
+                pursuerSpeed,
+                tmax,
+                numPoints,
+                numSimulationPoints=1000,
+            )
+        )
+        return endPoint, intercepted
+
+    interceptedPoints, intercepteds = jax.vmap(intercpetion_point)(pursuerXList)
+    interceptedPoints = jnp.where(intercepteds[:, None], interceptedPoints, jnp.nan)
+    # interceptedPoints = jnp.array(interceptedPoints)[jnp.array(intercepteds)]
+
+    diffs = interceptedPoints[:, None, :] - pastInterceptedPoints[None, :, :]
+    dists = jnp.linalg.norm(diffs, axis=-1)
+    total_distances = jnp.min(dists)  # Sum distances to all other points
+    return total_distances
+
     def intercpetion_point(pursuerX):
         (
             pursuerPosition,
@@ -4292,11 +4327,7 @@ def run_simulation_with_random_pursuer(
 ):
     rng = np.random.default_rng(seed)
     trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
-    # trueParams[1] = 1.7
-    # trueParams[0] = trueParams[0] + 0.8
-    # trueParams[4] = trueParams[4] * 0.7
-    # trueParams[5] = trueParams[5] * 0.7
-    #
+
     pursuerPosition = np.array([trueParams[0], trueParams[1]])
     pursuerHeading = trueParams[2]
     pursuerSpeed = trueParams[3]
@@ -4314,7 +4345,7 @@ def run_simulation_with_random_pursuer(
         lowPriorityAgentPositionCov = np.array([[0.001, 0.0], [0.0, 0.001]])
         lowPriorityAgentTimeVar = 0.001
         flattenLearingLossAmount = find_learning_loss_flatten_amount(
-            lowPriorityAgentPositionCov, beta=2.0
+            lowPriorityAgentPositionCov, beta=2.3
         )
         maxStdDevThreshold = 0.05
     else:
@@ -4575,7 +4606,7 @@ def run_simulation_with_random_pursuer(
         # )
 
         pursuerXListZeroLossCollapsed, _ = get_unique_rows_by_proximity(
-            pursuerXListZeroLoss, lossListZeroLoss, rtol=0.1
+            pursuerXListZeroLoss, lossListZeroLoss, rtol=0.01
         )
         # pursuerXListZeroLossCollapsed = pursuerXListZeroLoss
         print("num zero loss pursuerXList:", len(pursuerXListZeroLoss))
@@ -4716,7 +4747,7 @@ def main(seed):
         seed=seed,
         numLowPriorityAgents=15,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-10,
+        keepLossThreshold=1e-7,
         plotEvery=1,
         # dataDir="results",
         # saveDir="boundary/unknownSpeed",
@@ -4816,7 +4847,7 @@ def plot_median_rmse_and_abs_errors(
     for filename in os.listdir(results_dir):
         count += 1
         if filename.endswith("_results.json"):
-            if int(filename.split("_")[0]) <= 1:
+            if int(filename.split("_")[0]) <= 111:
                 filepath = os.path.join(results_dir, filename)
                 with open(filepath, "r") as f:
                     data = json.load(f)
@@ -5192,4 +5223,4 @@ if __name__ == "__main__":
         )
         # plot_box_rmse_and_abs_errors(results_dir, max_steps=15, epsilon=0.1)
         # plot_filtered_box_rmse_and_abs_errors(results_dir, max_steps=10, epsilon=0.05)
-        plt.show()
+plt.show()
