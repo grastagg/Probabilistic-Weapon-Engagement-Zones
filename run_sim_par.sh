@@ -9,7 +9,7 @@ SEEDS=(91 338 273 257 488 147 258 280 292 140 102 49 388 64 165 358 88 415 68 31
 
 commandIndex=0
 commandList=()
-for SEED in {100..500}; do
+for SEED in {49..500}; do
   # for SEED in "${SEEDS[@]}"; do
   commandList+=("nohup python3 -u learning_dubins_ez.py $SEED 1 > logs/$SEED.log 2>&1")
   commandIndex=$((commandIndex + 1))

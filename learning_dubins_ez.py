@@ -54,9 +54,9 @@ jax.config.update("jax_enable_x64", True)
 
 positionAndHeadingOnly = False
 knownSpeed = False
-interceptionOnBoundary = True
+interceptionOnBoundary = False
 randomPath = False
-noisyMeasurementsFlag = False
+noisyMeasurementsFlag = True
 saveResults = True
 plotAllFlag = True
 
@@ -89,9 +89,8 @@ def plot_low_priority_paths(
     startPositions, interceptedList, endPoints, pathHistories, ax
 ):
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("X", fontsize=34)
-    ax.set_ylabel("Y", fontsize=34)
-    ax.tick_params(labelsize=18)
+    # ax.set_ylabel("Y", fontsize=34)
+    # ax.tick_params(labelsize=18)
     # set x and y limits
     ax.set_xlim(-5.0, 5.0)
     ax.set_ylim(-5.0, 5.0)
@@ -114,7 +113,6 @@ def plot_low_priority_paths(
                     pathHistory[:, 0],
                     pathHistory[:, 1],
                     c="blue",
-                    label="Intercepted",
                     s=10,
                 )
             else:
@@ -127,9 +125,7 @@ def plot_low_priority_paths(
             interceptedCounter += 1
         else:
             if survivedCounter == 0:
-                ax.scatter(
-                    pathHistory[:, 0], pathHistory[:, 1], c="g", label="Survived", s=5
-                )
+                ax.scatter(pathHistory[:, 0], pathHistory[:, 1], c="g", s=5)
             else:
                 ax.scatter(
                     pathHistory[:, 0],
@@ -272,23 +268,6 @@ def send_low_priority_agent_interioir(
 
     # if firstTrueIndex != -1:
     if intercepted:
-        nz = np.flatnonzero(inRS)  # 1D indices of True
-        idx = rng.choice(nz)
-        interceptionPoint = pathHistory[idx]
-        interceptionTime = t[idx]
-        pathHistoryNew, headings = simulate_trajectory_fn(
-            startPosition, heading, speed, interceptionTime, numPoints
-        )
-        direction = np.array([np.cos(heading), np.sin(heading)])  # shape (2,)
-        pursuerDistTraveled = dubinsEZ.find_shortest_dubins_path(
-            pursuerPosition, pursuerHeading, interceptionPoint, minimumTurnRadius
-        )
-        # t_p = pursuerDistTraveled / pursuerSpeed
-        t_p = pursuerRange / pursuerSpeed
-        interceptionPointEZ = interceptionPoint - t_p * speed * direction
-
-        interceptionTimeEZ = interceptionTime - t_p
-
         # nz = np.flatnonzero(inRS)  # 1D indices of True
         # idx = rng.choice(nz)
         # interceptionPoint = pathHistory[idx]
@@ -300,10 +279,27 @@ def send_low_priority_agent_interioir(
         # pursuerDistTraveled = dubinsEZ.find_shortest_dubins_path(
         #     pursuerPosition, pursuerHeading, interceptionPoint, minimumTurnRadius
         # )
-        # t_p = pursuerDistTraveled / pursuerSpeed
+        # # t_p = pursuerDistTraveled / pursuerSpeed
+        # t_p = pursuerRange / pursuerSpeed
         # interceptionPointEZ = interceptionPoint - t_p * speed * direction
         #
         # interceptionTimeEZ = interceptionTime - t_p
+        #
+        nz = np.flatnonzero(inRS)  # 1D indices of True
+        idx = rng.choice(nz)
+        interceptionPoint = pathHistory[idx]
+        interceptionTime = t[idx]
+        pathHistoryNew, headings = simulate_trajectory_fn(
+            startPosition, heading, speed, interceptionTime, numPoints
+        )
+        direction = np.array([np.cos(heading), np.sin(heading)])  # shape (2,)
+        pursuerDistTraveled = dubinsEZ.find_shortest_dubins_path(
+            pursuerPosition, pursuerHeading, interceptionPoint, minimumTurnRadius
+        )
+        t_p = pursuerDistTraveled / pursuerSpeed
+        interceptionPointEZ = interceptionPoint - t_p * speed * direction
+
+        interceptionTimeEZ = interceptionTime - t_p
     else:
         interceptionPoint = pathHistory[-1]
         interceptionTime = t[-1]
@@ -504,12 +500,19 @@ def send_low_priority_agent_boundary(
             startPosition, heading, speed, interceptionTime, numPoints
         )
 
-        deltaXEZ = EZ[firstTrueIndexEZ - 1] - EZ[firstTrueIndexEZ]
-        zeroCrossingEZ = (EZ[firstTrueIndexEZ - 1]) / deltaXEZ
-        interceptionPointEZ = pathHistory[firstTrueIndexEZ - 1] + zeroCrossingEZ * (
-            speed * simulationDt * direction
+        pursuerDistTraveled = dubinsEZ.find_shortest_dubins_path(
+            pursuerPosition, pursuerHeading, interceptionPoint, minimumTurnRadius
         )
-        interceptionTimeEZ = t[firstTrueIndexEZ - 1] + zeroCrossingEZ * simulationDt
+        t_p = pursuerDistTraveled / pursuerSpeed
+        interceptionPointEZ = interceptionPoint - t_p * speed * direction
+        interceptionTimeEZ = interceptionTime - t_p
+
+        # deltaXEZ = EZ[firstTrueIndexEZ - 1] - EZ[firstTrueIndexEZ]
+        # zeroCrossingEZ = (EZ[firstTrueIndexEZ - 1]) / deltaXEZ
+        # interceptionPointEZ = pathHistory[firstTrueIndexEZ - 1] + zeroCrossingEZ * (
+        #     speed * simulationDt * direction
+        # )
+        # interceptionTimeEZ = t[firstTrueIndexEZ - 1] + zeroCrossingEZ * simulationDt
         return (
             intercepted,
             interceptionPoint,
@@ -721,6 +724,7 @@ def time_loss_with_flatten(predicted_ezTime, ezTime, flatten_amount):
     of width `flatten_amount`.
     """
     diff = jnp.abs(predicted_ezTime - ezTime) - flatten_amount
+    return jax.nn.relu(diff)
     return jnp.square(jax.nn.relu(diff))
 
 
@@ -740,50 +744,72 @@ def learning_loss_on_boundary_function_single_EZ(
     flattenLearingLossAmount=0.0,
     verbose=False,
 ):
-    headings = heading * jnp.ones(pathHistory.shape[0])
-    ezFirst = dubinsEZ_from_pursuerX(
-        pursuerX, jnp.array([ezPoint]), jnp.array([headings[-1]]), speed, trueParams
-    ).squeeze()
+    # headings = heading * jnp.ones(pathHistory.shape[0])
+    # ezFirst = dubinsEZ_from_pursuerX(
+    #     pursuerX, jnp.array([ezPoint]), jnp.array([headings[-1]]), speed, trueParams
+    # ).squeeze()
+    # #
     #
+    # ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
+    #
+    # outEZ = pathTime < ezTime - 0.0 * 0.001
+    #
+    # interceptedLossEZFirst = activation(
+    #     ezFirst - flattenLearingLossAmount
+    # ) + activation(-ezFirst - flattenLearingLossAmount)
+    #
+    # interceptedLossTrajectory = jnp.where(
+    #     outEZ, activation(-ezAll - flattenLearingLossAmount), 0
+    # )
+    # interceptedLossTrajectory = jnp.max(interceptedLossTrajectory)
 
-    ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
-
-    outEZ = pathTime < ezTime - 0.0 * 0.001
-
-    interceptedLossEZFirst = activation(
-        ezFirst - flattenLearingLossAmount
-    ) + activation(-ezFirst - flattenLearingLossAmount)
-
-    interceptedLossTrajectory = jnp.where(
-        outEZ, activation(-ezAll - flattenLearingLossAmount), 0
+    predPursuerDistanceTraveled = dubinsEZ.find_shortest_dubins_path(
+        pursuerX[0:2], pursuerX[2], interceptedPoint, pursuerX[4]
     )
-    interceptedLossTrajectory = jnp.max(interceptedLossTrajectory)
+    pred_ezTime = pathTime[-1] - (predPursuerDistanceTraveled) / pursuerX[3]
+    # pred_ezTime = (
+    #     pathTime[-1] - (ezFirst + pursuerX[5]) / pursuerX[3]
+    # )  # estimate time of EZ crossing
 
-    pred_ezTime = (
-        pathTime[-1] - (ezFirst + pursuerX[5]) / pursuerX[3]
-    )  # estimate time of EZ crossing
     # pred_ezTime = pathTime[-1] - jnp.linalg.norm(ezPoint - pathHistory[-1]) / speed
     # time_loss = time_loss_with_flatten(
     #     pred_ezTime, ezTime, flattenLearingLossAmount / pursuerX[3]
     # )
     # pred_ezTime = pathTime[-1] - pursuerX[5] / pursuerX[3]
     time_loss = time_loss_with_flatten(
-        pred_ezTime, ezTime, flattenLearingLossAmount / pursuerX[3]
+        # pred_ezTime,
+        # ezTime,
+        # 0.001 * 2.3,
+        pred_ezTime,
+        ezTime,
+        flattenLearingLossAmount / pursuerX[3] + 0.001 * 2.5,
     )
 
-    interceptedLossEZ = (
-        interceptedPathWeight * interceptedLossTrajectory
-        + interceptedLossEZFirst
-        + time_loss
-    )
+    def verbose_fn():
+        jax.debug.print(
+            "pred_ezTime: {}, ezTime: {}, time_loss: {}, predPursuerDistanceTraveled: {}",
+            pred_ezTime,
+            ezTime,
+            time_loss,
+            predPursuerDistanceTraveled,
+        )
 
-    survivedLossEZ = jnp.max(
-        activation(-ezAll - flattenLearingLossAmount)
-    )  # loss if survived in EZ
+    jax.lax.cond(verbose, verbose_fn, lambda: None)
 
-    lossEZ = jax.lax.cond(
-        intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
-    )
+    lossEZ = time_loss
+    # lossEZ = 0.0
+
+    # interceptedLossEZ = (
+    #     interceptedPathWeight * interceptedLossTrajectory
+    #     + interceptedLossEZFirst
+    #     + time_loss
+    # )
+    #
+    # survivedLossEZ = jnp.max(
+    #     activation(-ezAll - flattenLearingLossAmount)
+    # )  # loss if survived in EZ
+    #
+    lossEZ = jax.lax.cond(intercepted, lambda: time_loss, lambda: 0.0)
     lossRS = learning_loss_on_boundary_function_single(
         pursuerX,
         heading,
@@ -865,38 +891,6 @@ def learning_loss_function_single_ez(
     flattenLearingLossAmount=0.0,
     verbose=False,
 ):
-    headings = heading * jnp.ones(pathHistory.shape[0])
-    ezFirst = dubinsEZ_from_pursuerX(
-        pursuerX, jnp.array([ezPoint]), jnp.array([heading]), speed, trueParams
-    ).squeeze()
-    #
-
-    ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
-
-    interceptedLossEZFirst = activation(ezFirst - flattenLearingLossAmount)
-
-    # pred_ezTime = (
-    #     pathTime[-1] - (ezFirst + pursuerX[5]) / pursuerX[3]
-    # )  # estimate time of EZ crossing
-    # pred_ezTime = pathTime[-1] - jnp.linalg.norm(ezPoint - pathHistory[-1]) / speed
-    # time_loss = time_loss_with_flatten(
-    #     pred_ezTime, ezTime, flattenLearingLossAmount / pursuerX[3]
-    # )
-    # pred_ezTime = pathTime[-1] - pursuerX[5] / pursuerX[3]
-    # time_loss = time_loss_with_flatten(
-    #     pred_ezTime, ezTime, flattenLearingLossAmount / pursuerX[3]
-    # )
-    time_loss = 0.0
-
-    interceptedLossEZ = interceptedLossEZFirst + time_loss
-
-    survivedLossEZ = jnp.max(
-        activation(-ezAll - flattenLearingLossAmount)
-    )  # loss if survived in EZ
-
-    lossEZ = jax.lax.cond(
-        intercepted, lambda: interceptedLossEZ, lambda: survivedLossEZ
-    )
     lossRS = learning_loss_function_single(
         pursuerX,
         heading,
@@ -911,14 +905,33 @@ def learning_loss_function_single_ez(
         interceptedPathWeight,
         flattenLearingLossAmount,
     )
+    pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange = (
+        pursuerX_to_params(pursuerX, trueParams)
+    )
+    predPursuerDistanceTraveled = dubinsEZ.find_shortest_dubins_path(
+        pursuerPosition, pursuerHeading, interceptedPoint, minimumTurnRadius
+    )
+    pred_ezTime = pathTime[-1] - (predPursuerDistanceTraveled) / pursuerSpeed
+
+    time_loss = time_loss_with_flatten(
+        # pred_ezTime,
+        # ezTime,
+        # 0.001 * 2.3,
+        pred_ezTime,
+        ezTime,
+        flattenLearingLossAmount / pursuerX[3] + 0.001 * 2.5,
+    )
+
+    lossEZ = jax.lax.cond(intercepted, lambda: time_loss, lambda: 0.0)
 
     def verbose_fn():
         jax.debug.print(
-            "lossEZ: {}, lossRS: {}, ezFirst: {},ezPoint: {}",
+            "intercepted: {},pred_ezTime: {}, ezTime: {}, time_loss: {}, predPursuerDistanceTraveled: {}",
+            intercepted,
+            pred_ezTime,
+            ezTime,
             lossEZ,
-            lossRS,
-            ezFirst,
-            ezPoint,
+            predPursuerDistanceTraveled,
         )
 
     jax.lax.cond(verbose, verbose_fn, lambda: None)
@@ -931,7 +944,7 @@ if interceptionOnBoundary:
     if knownSpeed:
         batched_loss = jax.jit(
             jax.vmap(
-                learning_loss_on_boundary_function_single,
+                learning_loss_on_boundary_function_single_EZ,
                 in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None),
             )
         )
@@ -1026,6 +1039,7 @@ def run_optimization_hueristic(
         # lowerLimitSub = np.array([0.5, 0.5, 0, 0.2, 0.2])
     else:
         lowerLimitSub = np.array([0.5, 0.5, 0.2, 0.2, 0.2, 0.2])
+        lowerLimitSub = np.array([1.0, 1.0, 0.0, 0.0, 0.0, 0.0])
 
     initialLoss = total_learning_loss(
         initialPursuerX,
@@ -1549,7 +1563,6 @@ def percent_of_true_rs_covered(
     insideAny = jnp.logical_not(outsideAll)
     insideArea = jnp.sum(insideAny) * gridCellArea
     trueArea = jnp.sum(trueRs <= 0) * gridCellArea
-    print("True area", trueArea)
     insideProportion = insideArea / trueArea
     outsideTrueRs = trueRs > 0
     insideTrue = jnp.logical_not(outsideTrueRs)
@@ -1792,7 +1805,7 @@ if interceptionOnBoundary:
     info_for_trajectory = info_for_trajectory_bound
 else:
     if knownSpeed:
-        info_for_trajectory = info_for_trajectory_int
+        info_for_trajectory = info_for_trajectory_int_ez
     else:
         info_for_trajectory = info_for_trajectory_int_ez
 
@@ -1861,11 +1874,6 @@ def find_average_approximate_FIM(
     averageFIM = jnp.sum(averageFIM, axis=0)
     # averageFIM /= len(initialPursuerXList)
     return averageFIM
-    # print("average FIM over all initial pursuerX:\n", averageFIM)
-    # # e vales of fim
-    # eval, evect = np.linalg.eig(averageFIM)
-    # print("eigenvalues of average FIM:", eval)
-    # print("eigenvectors of average FIM:\n", evect)
 
 
 def learn_ez(
@@ -1932,8 +1940,6 @@ def learn_ez(
     #     initialPursuerXList,
     # )
     # eval, evect = np.linalg.eig(fim)
-    # print("eigenvalues of average FIM:\n", eval)
-    # print("eigenvectors of average FIM:\n", evect)
 
     # initialPursuerXList: (N, d_max)
     #
@@ -1996,8 +2002,6 @@ def learn_ez(
     #     pursuerXList[lossList < 1e-5],
     # )
     # eval, evect = np.linalg.eig(fim)
-    # print("eigenvalues of average FIM:\n", eval)
-    # print("eigenvectors of average FIM:\n", evect)
 
     pursuerXList = np.array(pursuerXList).squeeze()
     lossList = np.array(lossList).squeeze()
@@ -3482,8 +3486,6 @@ def run_sacrificial_path_optimization(
     flattenLearingLossAmount=0.0,
     endPoints=None,
 ):
-    print("endPointsa", endPoints)
-
     def objfunc(xDict):
         x = xDict["x"]
         # loss = traj_info_objective(
@@ -3685,7 +3687,7 @@ def optimize_next_low_priority_path(
             float(jnp.nanmax(gate_score)),
         )
 
-        hmin_bits = 0.5  # minimum entropy to keep
+        hmin_bits = -0.1  # minimum entropy to keep
         mask = jnp.isfinite(gate_score) & (gate_score >= hmin_bits)
 
         if not jnp.any(mask):
@@ -3776,13 +3778,6 @@ def optimize_next_low_priority_path(
         #     previousFims,
         #     flattenLearingLossAmount,
         # )
-        # print(
-        #     "angle before sacrificial optimization:",
-        #     jnp.arctan2(best_start_pos[1] - center[1], best_start_pos[0] - center[0]),
-        # )
-        # print("angle after sacrificial optimization:", angle)
-        # print("best score before sacrificial optimization:", tie_score[local_best])
-        # print("best score after sacrificial optimization:", score)
 
     else:
         print("Using heuristic  scoring")
@@ -3858,15 +3853,6 @@ def optimize_next_low_priority_path(
     #     flattenLearingLossAmount,
     #     endPoints[interceptedList],
     # )
-    # print("Best start pos:", best_start_pos)
-    # print("Best heading:", best_heading)
-    # print("score at best:", jnp.max(scores))
-    # print(
-    #     "Best start pos after optimization:",
-    #     center + radius * jnp.array([jnp.cos(best_angle_opt), jnp.sin(best_angle_opt)]),
-    # )
-    # print("Best heading after optimization:", best_heading_opt)
-    # print("score after optimization:", opt_score)
 
     print("time to optimize next low-priority path:", time.time() - start)
     return best_start_pos, best_heading
@@ -4056,7 +4042,8 @@ def plot_all(
     numPlots = min(numPlots, 10)
     # fig1, axes = make_axes(numPlots)
 
-    fig, ax = plt.subplots(layout="tight")
+    fig, ax = plt.subplots(figsize=(3, 3))
+
     # colors = ["blue", "orange", "red", "purple", "brown", "pink", "gray"]
 
     alpha = 1.0 / len(pursuerXList)
@@ -4080,13 +4067,13 @@ def plot_all(
         ax,
         colors=["red"],
     )
+    ax.set_xlim(-5.0, 5.0)
+    ax.set_ylim(-5.0, 5.0)
 
     for i in range(len(pursuerXList)):
         # pick ax
         # ax = axes[i]
 
-        ax.set_xlim(-5.0, 5.0)
-        ax.set_ylim(-5.0, 5.0)
         pursuerX = pursuerXList[i].squeeze()
         (
             pursuerPositionLearned1,
@@ -4132,6 +4119,43 @@ def plot_all(
     plot_low_priority_paths(
         startPositions, interceptedList, endPoints, pathHistories, ax
     )
+
+    # proxies for legend
+    linewidithSize = 5
+    ax.plot(
+        [],
+        [],
+        color="blue",
+        label="Intercepted Trajectory",
+        linewidth=linewidithSize,
+    )
+    ax.plot(
+        [],
+        [],
+        color="green",
+        label="Survived Trajectory",
+        linewidth=linewidithSize,
+    )
+    ax.plot([], [], color="red", label="True RS", linewidth=linewidithSize)
+    ax.plot(
+        [],
+        [],
+        color="magenta",
+        label="Feasible Learned RS",
+        linewidth=linewidithSize,
+    )
+    ax.plot(
+        [],
+        [],
+        color="orange",
+        label="Mean Learned RS",
+        linewidth=linewidithSize,
+    )
+    # ax.legend(loc="lower left")
+    ax.set_aspect("equal", "box")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_title("True and Learned Pursuer Reachable Sets")
 
     # ax.scatter(ezPoints[:, 0], ezPoints[:, 1], color="green", s=50, label="EZ Points")
     # for i in range(len(headings)):
@@ -4184,7 +4208,7 @@ def plot_pursuer_parameters_spread(
                 ("Pursuer Turn Radius", 4, 4),
                 ("Pursuer Range", 5, 5),
             ]
-            fig, axes = plt.subplots(3, 2, figsize=(10, 8), sharex=True)
+            fig, axes = plt.subplots(3, 2, figsize=(8, 6), sharex=True)
             axes = axes.flatten()
 
         for idx, (title, lidx, tidx) in enumerate(param_info):
@@ -4566,8 +4590,6 @@ def run_simulation_with_random_pursuer(
                 previousCov=cov,
                 meanPursuerX=mean,
             )
-        print("startPosition", startPosition)
-        print("heading", heading)
 
         # Send agent
         startPositions.append(startPosition)
@@ -4619,20 +4641,6 @@ def run_simulation_with_random_pursuer(
                 numPoints,
                 rng=rng,
             )
-        # print("intercepted", intercepted)
-        # print("pathTime", pathTime)
-        # print("endPoint", endPoint)
-        # print("endTime", endTime)
-        # print("pathHistory", pathHistory)
-        # print("interceptionPointEZ", interceptionPointEZ)
-        # print("interceptionTimeEZ", interceptionTimeEZ)
-        print("TEST")
-        print("endTime", endTime)
-        print("ezTime", interceptionTimeEZ)
-        print("pursuerSPeed true", pursuerSpeed)
-        print(
-            "test pursuer speed from ez", pursuerRange / (endTime - interceptionTimeEZ)
-        )
 
         endPoint = endPoint + rng.multivariate_normal(
             np.zeros(2), lowPriorityAgentPositionCov
@@ -5024,6 +5032,7 @@ def plot_median_rmse_and_abs_errors(
     fig=None,
     axes=None,
     noisy=False,
+    interior=False,
 ):
     """
     Plot median, IQR, and min/max for RMSE and absolute errors in a 2x2 grid.
@@ -5098,7 +5107,9 @@ def plot_median_rmse_and_abs_errors(
     max_abs = np.max(abs_error_array, axis=0)
 
     # === Plot ===
+    rowXlabel = 1
     if positionAndHeadingOnly:
+        rowXlabel = 0
         if axes is None:
             fig, axes = plt.subplots(1, 3, figsize=(9, 3), layout="tight")
         labels = ["X Position Error", "Y Position Error", "Heading Error"]
@@ -5155,10 +5166,11 @@ def plot_median_rmse_and_abs_errors(
         labell = "No Noise"
 
     countPlot = 0
+    print("rowXlabe", rowXlabel)
     for ax, (median, q1, q3, minv, maxv), label in zip(axes.flat, stat_data, labels):
         plotColIndex = countPlot // 3
         plotRowIndex = countPlot % 3
-        if plotColIndex == 0:
+        if plotColIndex == rowXlabel:
             ax.set_xlabel("Number of Sacrificial Agents")
         if plotRowIndex == 0:
             ax.set_ylabel("Absolute Error")
@@ -5174,14 +5186,16 @@ def plot_median_rmse_and_abs_errors(
         ax.grid(True)
         ax.set_ylim([0, 1.5])
 
-        # ax.set_aspect(6)
-        ax.set_aspect(10)
+        if interior:
+            ax.set_aspect(10)
+        else:
+            ax.set_aspect(6)
+        # ax.set_aspect(10)
         countPlot += 1
 
         # ax.legend()
         print("final error", label, median[-1])
     ax.plot([], [], label=labell, color=color, linewidth=2)
-    # fig.suptitle(alltitle, fontsize=24)
     ax.legend(loc="upper right", ncols=1)
 
     plt.tight_layout()
@@ -5404,6 +5418,8 @@ def plot_outer_union_approximation_size():
     folder = "interior"
     results_dir = "results/" + folder + "/knownSpeedAndShape"
     maxSteps = 15
+    if folder == "interior":
+        maxSteps = 25
     plot_median_outer_approximation_size(
         results_dir,
         max_steps=maxSteps,
@@ -5443,32 +5459,37 @@ def plot_outer_union_approximation_size():
         title="Known Speed",
     )
     results_dir = "results/" + folder + "/unknownSpeed"
-    # plot_median_outer_approximation_size(
-    #     results_dir,
-    #     max_steps=maxSteps,
-    #     color="blue",
-    #     label="No Noise",
-    #     fig=fig,
-    #     ax=axes[2],
-    # )
+    plot_median_outer_approximation_size(
+        results_dir,
+        max_steps=maxSteps,
+        color="blue",
+        label="No Noise",
+        fig=fig,
+        ax=axes[2],
+    )
     results_dir = "results/" + folder + "/unknownSpeedWithNoise"
-    # plot_median_outer_approximation_size(
-    #     results_dir,
-    #     max_steps=maxSteps,
-    #     color="orange",
-    #     label="Noise",
-    #     fig=fig,
-    #     ax=axes[2],
-    #     legend=True,
-    #     title="All Unknown",
-    # )
+    plot_median_outer_approximation_size(
+        results_dir,
+        max_steps=maxSteps,
+        color="orange",
+        label="Noise",
+        fig=fig,
+        ax=axes[2],
+        legend=True,
+        title="All Unknown",
+    )
 
 
 def plot_error():
-    maxSteps = 25
-    knownShape = True
-    knownSpeed = True
+    maxSteps = 15
+    knownShape = False
+    knownSpeed = False
     folder = "interior"
+    # folder = "boundary"
+    interior = folder == "interior"
+    eps = 0.05
+    if interior:
+        maxSteps = 25
     if knownShape:
         results_dir = "results/" + folder + "/knownSpeedAndShape"
     elif knownSpeed:
@@ -5478,30 +5499,34 @@ def plot_error():
     fig, axes = plot_median_rmse_and_abs_errors(
         results_dir,
         max_steps=maxSteps,
-        epsilon=0.15,
+        epsilon=eps,
         positionAndHeadingOnly=knownShape,
         knownSpeed=knownSpeed,
         color="blue",
         noisy=False,
+        interior=interior,
     )
-    if knownShape:
-        results_dir = "results/" + folder + "/knownSpeedAndShapeWithNoise"
-    elif knownSpeed:
-        results_dir = "results/" + folder + "/knownSpeedWithNoise"
-    else:
-        results_dir = "results/" + folder + "/unknownSpeedWithNoise"
+    results_dir += "WithNoise"
+    # if knownShape:
+    #     results_dir = "results/" + folder + "/knownSpeedAndShapeWithNoise"
+    # elif knownSpeed:
+    #     results_dir = "results/" + folder + "/knownSpeedWithNoise"
+    # else:
+    #     results_dir = "results/" + folder + "/unknownSpeedWithNoise"
 
     fig, axes = plot_median_rmse_and_abs_errors(
         results_dir,
         max_steps=maxSteps,
-        epsilon=0.15,
+        epsilon=eps,
         positionAndHeadingOnly=knownShape,
         knownSpeed=knownSpeed,
         fig=fig,
         axes=axes,
         color="orange",
         noisy=True,
+        interior=interior,
     )
+    #
 
 
 if __name__ == "__main__":

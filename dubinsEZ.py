@@ -821,9 +821,9 @@ def plot_dubins_reachable_set(
     # c = ax.contourf(X, Y, Z, levels=np.linspace(-1, 1, 101), alpha=0.5)
     # c = ax.pcolormesh(X, Y, Z, alpha=0.5, cmap="coolwarm", vmin=-1, vmax=1)
     # cbar = plt.colorbar(c, ax=ax)
-    contour_proxy = plt.plot(
-        [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
-    )
+    # contour_proxy = plt.plot(
+    #     [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
+    # )
     ax.set_aspect("equal", "box")
     return ax
 
