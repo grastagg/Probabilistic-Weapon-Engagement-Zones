@@ -4,6 +4,7 @@ from functools import partial
 import sys
 import time
 import jax
+from tabulate import tabulate
 
 
 import getpass
@@ -23,7 +24,7 @@ matplotlib.rcParams["axes.labelsize"] = 12
 matplotlib.rcParams["legend.fontsize"] = 10
 matplotlib.rcParams["ytick.labelsize"] = 10
 matplotlib.rcParams["xtick.labelsize"] = 10
-from pyDOE2 import lhs  # or pyDOE2
+from pyDOE3 import lhs  # or pyDOE2
 import os
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -34,10 +35,6 @@ os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("MPLBACKEND", "Agg")  # avoid X11 ("Invalid MIT-MAGIC-COOKIE-1")
 # GPU + headless settings BEFORE any heavy imports
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.10"  # tune for worker count
-os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
-os.environ.setdefault("MPLBACKEND", "Agg")
 # os.environ["QT_QPA_PLATFORM"] = "offscreen"
 # os.environ.pop("DISPLAY", None)
 import multiprocessing as mp
@@ -53,12 +50,12 @@ jax.config.update("jax_enable_x64", True)
 #
 
 positionAndHeadingOnly = False
-knownSpeed = False
-interceptionOnBoundary = False
+knownSpeed = True
+interceptionOnBoundary = True
 randomPath = False
-noisyMeasurementsFlag = True
+noisyMeasurementsFlag = False
 saveResults = True
-plotAllFlag = True
+plotAllFlag = False
 
 dataDir = "results"
 if interceptionOnBoundary:
@@ -324,7 +321,7 @@ def send_low_priority_agent_interioir(
     )
 
 
-@partial(jax.jit, static_argnames=("tmax", "numPoints", "numSimulationPoints"))
+@partial(jax.jit, static_argnames=("numPoints", "numSimulationPoints"))
 def send_low_priority_agent_expected_intercept(
     startPosition,
     heading,
@@ -666,7 +663,7 @@ def activation(x):
     return jax.nn.relu(x) ** 2  # ReLU activation function
 
 
-def activation_smooth(z, tau=0.5):
+def activation_smooth(z, tau=0.1):
     """Smooth approximation to ReLU/hinge: log(1 + exp(z/tau)) * tau"""
     return tau * jax.nn.softplus(z / tau)
 
@@ -875,6 +872,35 @@ def learning_loss_function_single(
     return lossRS
 
 
+def pred_launch_time(interceptedPoint, pursuerX, trueParams, pathTime):
+    pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange = (
+        pursuerX_to_params(pursuerX, trueParams)
+    )
+    sigma = 0.001 * 3
+    angles = jnp.linspace(0.0, 2 * jnp.pi, 64, endpoint=False)
+    offsets = sigma * jnp.stack([jnp.cos(angles), jnp.sin(angles)], axis=1)
+
+    def path_len_for_offset(dxy):
+        ip = interceptedPoint + dxy
+        return dubinsEZ.find_shortest_dubins_path(
+            pursuerPosition, pursuerHeading, ip, minimumTurnRadius
+        )
+
+    # Vectorize over offsets and average
+    path_lens = jax.vmap(path_len_for_offset)(offsets)
+    predPursuerDistanceTraveled = jnp.min(path_lens)
+    # predPursuerDistanceTraveled = dubinsEZ.find_shortest_dubins_path(
+    #     pursuerPosition, pursuerHeading, interceptedPoint, minimumTurnRadius
+    # )
+    pred_ezTime = pathTime[-1] - (predPursuerDistanceTraveled) / pursuerSpeed
+    return (
+        pred_ezTime,
+        predPursuerDistanceTraveled,
+        path_lens,
+        interceptedPoint + offsets,
+    )
+
+
 @jax.jit
 def learning_loss_function_single_ez(
     pursuerX,
@@ -905,13 +931,9 @@ def learning_loss_function_single_ez(
         interceptedPathWeight,
         flattenLearingLossAmount,
     )
-    pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange = (
-        pursuerX_to_params(pursuerX, trueParams)
+    pred_ezTime, predPursuerDistanceTraveled, path_lens, points = pred_launch_time(
+        interceptedPoint, pursuerX, trueParams, pathTime
     )
-    predPursuerDistanceTraveled = dubinsEZ.find_shortest_dubins_path(
-        pursuerPosition, pursuerHeading, interceptedPoint, minimumTurnRadius
-    )
-    pred_ezTime = pathTime[-1] - (predPursuerDistanceTraveled) / pursuerSpeed
 
     time_loss = time_loss_with_flatten(
         # pred_ezTime,
@@ -926,12 +948,15 @@ def learning_loss_function_single_ez(
 
     def verbose_fn():
         jax.debug.print(
-            "intercepted: {},pred_ezTime: {}, ezTime: {}, time_loss: {}, predPursuerDistanceTraveled: {}",
+            "intercepted: {},pred_ezTime: {}, ezTime: {}, time_loss: {}, predPursuerDistanceTraveled: {},path_lens: {},interceptedPoint: {}, points: {}",
             intercepted,
             pred_ezTime,
             ezTime,
             lossEZ,
             predPursuerDistanceTraveled,
+            path_lens,
+            interceptedPoint,
+            points,
         )
 
     jax.lax.cond(verbose, verbose_fn, lambda: None)
@@ -944,7 +969,7 @@ if interceptionOnBoundary:
     if knownSpeed:
         batched_loss = jax.jit(
             jax.vmap(
-                learning_loss_on_boundary_function_single_EZ,
+                learning_loss_on_boundary_function_single,
                 in_axes=(None, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None),
             )
         )
@@ -1038,8 +1063,8 @@ def run_optimization_hueristic(
         lowerLimitSub = np.array([0.5, 0.5, 0, 0.2, 0.2])
         # lowerLimitSub = np.array([0.5, 0.5, 0, 0.2, 0.2])
     else:
-        lowerLimitSub = np.array([0.5, 0.5, 0.2, 0.2, 0.2, 0.2])
-        lowerLimitSub = np.array([1.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+        lowerLimitSub = np.array([0.5, 0.5, 0.0, 0.2, 0.2, 0.2])
+        # lowerLimitSub = np.array([1.0, 1.0, 0.0, 0.0, 0.0, 0.0])
 
     initialLoss = total_learning_loss(
         initialPursuerX,
@@ -1439,7 +1464,7 @@ def solve_one(x0):
         _G["trueParams"],
         interceptedPathWeight=_G["interceptedPathWeight"],
         flattenLearingLossAmount=_G["flattenLearningLossAmount"],
-        verbose=True,
+        verbose=False,
     )
 
 
@@ -3687,7 +3712,7 @@ def optimize_next_low_priority_path(
             float(jnp.nanmax(gate_score)),
         )
 
-        hmin_bits = -0.1  # minimum entropy to keep
+        hmin_bits = -0.5  # minimum entropy to keep
         mask = jnp.isfinite(gate_score) & (gate_score >= hmin_bits)
 
         if not jnp.any(mask):
@@ -4059,14 +4084,6 @@ def plot_all(
     #     trueParams,
     #     ax,
     # )
-    dubinsEZ.plot_dubins_reachable_set(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerRange,
-        pursuerTurnRadius,
-        ax,
-        colors=["red"],
-    )
     ax.set_xlim(-5.0, 5.0)
     ax.set_ylim(-5.0, 5.0)
 
@@ -4156,6 +4173,14 @@ def plot_all(
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_title("True and Learned Pursuer Reachable Sets")
+    dubinsEZ.plot_dubins_reachable_set(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerRange,
+        pursuerTurnRadius,
+        ax,
+        colors=["red"],
+    )
 
     # ax.scatter(ezPoints[:, 0], ezPoints[:, 1], color="green", s=50, label="EZ Points")
     # for i in range(len(headings)):
@@ -4569,8 +4594,8 @@ def run_simulation_with_random_pursuer(
                 trueParams,
                 searchCenter,
                 searchCircleRadius,
-                35,
-                35,
+                36,
+                36,
                 # 1,
                 # 1,
                 agentSpeed,
@@ -4898,7 +4923,7 @@ def main(seed):
         seed=seed,
         numLowPriorityAgents=25,
         numOptimizerStarts=100,
-        keepLossThreshold=1e-8,
+        keepLossThreshold=1e-4,
         plotEvery=1,
         # dataDir="results",
         # saveDir="boundary/unknownSpeed",
@@ -4928,7 +4953,7 @@ def load_rs_history_data(results_dir, max_steps):
 
     for filename in os.listdir(results_dir):
         if filename.endswith("_results.json"):
-            if int(filename.split("_")[0]) <= 550:
+            if int(filename.split("_")[0]) <= 500:
                 filepath = os.path.join(results_dir, filename)
                 with open(filepath, "r") as f:
                     data = json.load(f)
@@ -5048,7 +5073,7 @@ def plot_median_rmse_and_abs_errors(
     for filename in os.listdir(results_dir):
         count += 1
         if filename.endswith("_results.json"):
-            if int(filename.split("_")[0]) <= 100:
+            if int(filename.split("_")[0]) <= 500:
                 filepath = os.path.join(results_dir, filename)
                 with open(filepath, "r") as f:
                     data = json.load(f)
@@ -5405,11 +5430,88 @@ def plot_filtered_box_rmse_and_abs_errors(
             print(f"  {fname}: RMSE = {val:.4f}")
 
 
-def plot_percent_covered():
-    fig, ax = plt.subplots(figsize=(4, 3), layout="constrained")
-    results_dir = "results/boundary/knownSpeedAndShapeWithNoise"
-    p_histories = load_rs_history_data(results_dir, max_steps=15)
-    violin_with_percentiles([0], [p_histories], ax=ax)
+def summarize_percent_covered_columns(
+    data_dir="boundary", thresholds=(95, 90, 85), max_steps=15
+):
+    """
+    Build a LaTeX table where each column is a scenario (results dir),
+    and rows are coverage thresholds (e.g., ≥99%, ≥95%, ≥90%).
+    """
+    results_dirs = [
+        "knownSpeedAndShape",
+        "knownSpeedAndShapeWithNoise",
+        "knownSpeed",
+        "knownSpeedWithNoise",
+        "unknownSpeed",
+        "unknownSpeedWithNoise",
+    ]
+    results_dirs = [f"results/{data_dir}/{d}" for d in results_dirs]
+    labels = ["Case 1A", "Case 1B", "Case 2A", "Case 2B", "Case 3A", "Case 3B"]
+
+    # Collect percentages per scenario
+    scenario_percents = []  # list of [perc_at_99, perc_at_95, perc_at_90] for each scenario
+    for d in results_dirs:
+        p_histories = load_rs_history_data(
+            d, max_steps=max_steps
+        )  # shape: (num_runs, num_steps)
+        num_runs = len(p_histories)
+        print("num_runs for dir", d, num_runs)
+        if num_runs == 0:
+            scenario_percents.append([np.nan] * len(thresholds))
+            continue
+
+        percs = []
+        for p in thresholds:
+            thresh = p
+            count = np.sum(p_histories >= thresh)
+            percs.append(100.0 * count / num_runs)
+        scenario_percents.append(percs)
+
+    # Build table rows: one row per threshold
+    rows = []
+    for i, p in enumerate(thresholds):
+        row = [f"{p}%"]
+        for s in range(len(results_dirs)):
+            v = scenario_percents[s][i]
+            cell = "---" if np.isnan(v) else f"{v:.2f}%"
+            row.append(cell)
+        rows.append(row)
+
+    headers = ["Coverage Threshold"] + labels
+    latex = tabulate(
+        rows, headers=headers, tablefmt="latex_booktabs", stralign="center"
+    )
+    print(latex)
+    return latex
+
+
+# def plot_percent_covered():
+#     results_dir = "results/boundary/knownSpeedAndShape"
+#     p_histories = load_rs_history_data(results_dir, max_steps=25)
+#     print(p_histories)
+#
+#     # p_histories shape: (num_runs, num_steps)
+#     percentiles = [99, 95, 90]
+#     num_runs = p_histories.shape[0]
+#
+#     # Find for each run when coverage passes thresholds
+#     rows = []
+#     for p in percentiles:
+#         thresh = p
+#         count = np.sum(p_histories >= thresh)
+#         percent_achieved = 100 * count / num_runs
+#         rows.append([f"{p}%", f"{percent_achieved:.1f}%"])
+#
+#     # Create LaTeX table
+#     table = tabulate(
+#         rows,
+#         headers=["Coverage Threshold", "Percent of Runs ≥ Threshold"],
+#         tablefmt="latex_booktabs",
+#         stralign="center",
+#     )
+#
+#     print(table)
+#
 
 
 def plot_outer_union_approximation_size():
@@ -5487,7 +5589,7 @@ def plot_error():
     folder = "interior"
     # folder = "boundary"
     interior = folder == "interior"
-    eps = 0.05
+    eps = 0.1
     if interior:
         maxSteps = 25
     if knownShape:
@@ -5549,36 +5651,10 @@ if __name__ == "__main__":
         _EXECUTOR.shutdown(wait=True)
         if plotAllFlag:
             plt.show()
-
+        #
     else:
-        # plot_outer_union_approximation_size()
-        # plot_percent_covered()
+        plot_outer_union_approximation_size()
         plot_error()
-        # results_dir = "results/interioir/entropy_mutual_info_tie/knownShapeAndSpeed"
-        # fig, axes = plot_median_rmse_and_abs_errors(
-        #     results_dir, max_steps=15, noisy=True
-        # )
-        # maxSteps = 25
-        # results_dir = "results/interior/knownSpeed"
-        # fig, axes = plot_median_rmse_and_abs_errors(
-        #     results_dir,
-        #     max_steps=maxSteps,
-        #     noisy=False,
-        #     color="blue",
-        #     epsilon=0.15,
-        #     knownSpeed=True,
-        #     positionAndHeadingOnly=False,
-        # )
-        # results_dir = "results/interioir/combined_score/knownSpeed"
-        # plot_median_rmse_and_abs_errors(
-        #     results_dir,
-        #     max_steps=maxSteps,
-        #     noisy=True,
-        #     color="orange",
-        #     fig=fig,
-        #     axes=axes,
-        #     epsilon=0.15,
-        #     knownSpeed=True,
-        #     positionAndHeadingOnly=False,
-        # )
+        summarize_percent_covered_columns("interior")
+
 plt.show()

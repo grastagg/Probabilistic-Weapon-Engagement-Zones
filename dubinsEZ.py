@@ -11,6 +11,17 @@ import jax.numpy as jnp
 
 # import dubinsReachable
 # import testDubins
+# get rid of type 3 fonts
+import matplotlib
+
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+# set font size for title, axis labels, and legend, and tick labels
+matplotlib.rcParams["axes.titlesize"] = 14
+matplotlib.rcParams["axes.labelsize"] = 12
+matplotlib.rcParams["legend.fontsize"] = 10
+matplotlib.rcParams["ytick.labelsize"] = 10
+matplotlib.rcParams["xtick.labelsize"] = 10
 
 
 jax.config.update("jax_enable_x64", True)
@@ -734,12 +745,12 @@ def plot_dubins_EZ(
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
     colors = ["green"]
-    colors = ["red"]
-    ax.contour(X, Y, ZTrue, levels=[0], colors=colors, zorder=10000)
+    # colors = ["red"]
+    ax.contour(X, Y, ZTrue, levels=[0], colors=colors, zorder=10000, linewidths=3)
     # ax.contourf(
     #     X, Y, ZTrue, levels=np.linspace(np.min(ZTrue), np.max(ZTrue), 100), alpha=0.5
     # )
-    contour_proxy = plt.plot([0], [0], color=colors[0], linestyle="-", label="CSBEZ")
+    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=3, label="CSBEZ")
     # add label so it can be added to legend
 
     # # ax.contour(X, Y, ZGeometric, cmap="summer")
@@ -824,6 +835,7 @@ def plot_dubins_reachable_set(
     # contour_proxy = plt.plot(
     #     [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
     # )
+    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=3, label="RS")
     ax.set_aspect("equal", "box")
     return ax
 
@@ -1101,11 +1113,12 @@ def plot_theta_and_vectors_left_turn(
 def main_EZ():
     pursuerPosition = np.array([0, 0])
 
-    pursuerHeading = 0
+    pursuerHeading = np.pi / 4
+
     pursuerSpeed = 2
 
-    pursuerRange = 2
-    minimumTurnRadius = 0.4
+    pursuerRange = 2.5
+    minimumTurnRadius = 0.6
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 1
@@ -1125,7 +1138,7 @@ def main_EZ():
     #     tangentPoint,
     # )
     #
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots(figsize=(3, 3), layout="constrained")
     # plotEngagementZone(
     #     evaderHeading,
     #     pursuerPosition,
@@ -1160,24 +1173,13 @@ def main_EZ():
         evaderSpeed,
         ax,
     )
-    plot_dubins_EZ(
-        pursuerPosition,
-        pursuerHeading,
-        3.0,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        evaderHeading,
-        evaderSpeed,
-        ax,
-    )
-    plt.xlabel("X", fontsize=20)
-    plt.ylabel("Y", fontsize=20)
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    ax.set_xlim([-3, 3])
+    ax.set_ylim([-3, 3])
     # set tick fonhtsize
-    ax.tick_params(axis="both", which="major", labelsize=18)
-    ax.legend(
-        loc="upper left", bbox_to_anchor=(1.05, 1.0), borderaxespad=0.0, fontsize=18
-    )
+    ax.tick_params(axis="both", which="major")
+    ax.legend(loc="lower right")
     plt.show()
 
 
