@@ -14,6 +14,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 
+import learned_dubins_ez_path_planner
+
 
 # get rid of type 3 fonts
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -49,19 +51,24 @@ jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax.config.update("jax_platform_name", "gpu")")
 #
 
-positionAndHeadingOnly = False
+positionAndHeadingOnly = True
 knownSpeed = True
 interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = False
 saveResults = True
 plotAllFlag = False
+planHPPath = True
 
 dataDir = "results"
-if interceptionOnBoundary:
-    saveDir = "boundary/"
+if not planHPPath:
+    saveDir = ""
 else:
-    saveDir = "interior/"
+    saveDir = "plannedHP/"
+if interceptionOnBoundary:
+    saveDir += "boundary/"
+else:
+    saveDir += "interior/"
 
 if positionAndHeadingOnly:
     saveDir += "knownSpeedAndShape"
@@ -4060,6 +4067,9 @@ def plot_all(
     trueParams,
     meanPursuerX,
     ezPoints,
+    plotLPPaths=True,
+    ax=None,
+    fig=None,
 ):
     numPlots = len(pursuerXList)
     # make 2 rows and ceil(numPlots/2) columns
@@ -4067,7 +4077,8 @@ def plot_all(
     numPlots = min(numPlots, 10)
     # fig1, axes = make_axes(numPlots)
 
-    fig, ax = plt.subplots(figsize=(3, 3))
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(3, 3))
 
     # colors = ["blue", "orange", "red", "purple", "brown", "pink", "gray"]
 
@@ -4116,26 +4127,27 @@ def plot_all(
         #     pursuerHeadingLearned1,
         #     ax,
         # )
-    (
-        pursuerPositionLearned1,
-        pursuerHeadingLearned1,
-        pursuerSpeedLearned1,
-        minimumTurnRadiusLearned1,
-        pursuerRangeLearned1,
-    ) = pursuerX_to_params(meanPursuerX, trueParams)
-    dubinsEZ.plot_dubins_reachable_set(
-        pursuerPositionLearned1,
-        pursuerHeadingLearned1,
-        pursuerRangeLearned1,
-        minimumTurnRadiusLearned1,
-        ax,
-        colors=["orange"],
-        # colors=[colors[i % len(colors)]],
-        alpha=1,
-    )
-    plot_low_priority_paths(
-        startPositions, interceptedList, endPoints, pathHistories, ax
-    )
+    # (
+    #     pursuerPositionLearned1,
+    #     pursuerHeadingLearned1,
+    #     pursuerSpeedLearned1,
+    #     minimumTurnRadiusLearned1,
+    #     pursuerRangeLearned1,
+    # ) = pursuerX_to_params(meanPursuerX, trueParams)
+    # dubinsEZ.plot_dubins_reachable_set(
+    #     pursuerPositionLearned1,
+    #     pursuerHeadingLearned1,
+    #     pursuerRangeLearned1,
+    #     minimumTurnRadiusLearned1,
+    #     ax,
+    #     colors=["orange"],
+    #     # colors=[colors[i % len(colors)]],
+    #     alpha=1,
+    # )
+    if plotLPPaths:
+        plot_low_priority_paths(
+            startPositions, interceptedList, endPoints, pathHistories, ax
+        )
 
     # proxies for legend
     linewidithSize = 5
@@ -4495,6 +4507,75 @@ def find_mean_and_std(pursuerXListZeroLoss):
     return mean, cov, std, angleMean, angleKappa
 
 
+def plan_path_around_all_learned_pursuer_params(
+    pursuerXList, trueParams, previousSpline
+):
+    startingLocation = np.array([-5.0, -5.0])
+    endingLocation = np.array([5.0, 5.0])
+    initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
+    initialVelocity = endingLocation - startingLocation
+
+    agentSpeed = 1.0
+    numControlPoints = 8
+    splineOrder = 3
+    turn_rate_constraints = (-50.0, 50.0)
+    curvature_constraints = (-10.0, 10.0)
+    velocity_constraints = (agentSpeed - 0.01, agentSpeed + 0.01)
+
+    num_constraint_samples = 50
+
+    start = time.time()
+    spline, pathTime, violatedTrueEZ = (
+        learned_dubins_ez_path_planner.optimize_spline_path(
+            startingLocation,
+            endingLocation,
+            initialVelocity,
+            numControlPoints,
+            splineOrder,
+            velocity_constraints,
+            turn_rate_constraints,
+            curvature_constraints,
+            num_constraint_samples,
+            pursuerXList,
+            trueParams,
+            agentSpeed,
+            previousSpline,
+        )
+    )
+    print("time to plan path around all learned pursuer params:", time.time() - start)
+    print("planned path time:", pathTime)
+    print("violated true EZ:", violatedTrueEZ)
+    if plotAllFlag:
+        fig, ax = plt.subplots()
+        learned_dubins_ez_path_planner.plot_spline(
+            spline,
+            ax,
+        )
+        plot_all(
+            None,
+            None,
+            None,
+            None,
+            trueParams[0:2],
+            trueParams[2],
+            trueParams[5],
+            trueParams[4],
+            None,
+            None,
+            pursuerXList,
+            None,
+            trueParams,
+            None,
+            None,
+            plotLPPaths=False,
+            ax=ax,
+            fig=fig,
+        )
+
+        plt.show()
+    return spline, pathTime, violatedTrueEZ
+
+
 def run_simulation_with_random_pursuer(
     lower_bounds_all,
     upper_bounds_all,
@@ -4549,6 +4630,8 @@ def run_simulation_with_random_pursuer(
     downSampledPathTimes = []
     percentOfTrueRsCovered = []
     proportionOfAreaCoverdHistory = []
+    hpOptPathTimes = []
+    hpViolatedTrueEZs = []
 
     pursuerXListZeroLoss = None
     pursuerXListZeroLossCollapsed = None
@@ -4558,6 +4641,7 @@ def run_simulation_with_random_pursuer(
     cov = None
     angleKappa = None
     angleMean = None
+    splinePath = None
 
     while i < numLowPriorityAgents and not singlePursuerX:
         # keepLossThreshold = 2 * (i + 1) * lossThreshAmount
@@ -4753,6 +4837,14 @@ def run_simulation_with_random_pursuer(
                 break
         pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
         lossListZeroLoss = lossList[lossList <= keepLossThreshold]
+        if planHPPath:
+            splinePath, optPathTime, violatedTrueEZ = (
+                plan_path_around_all_learned_pursuer_params(
+                    pursuerXListZeroLoss, trueParams, splinePath
+                )
+            )
+            hpOptPathTimes.append(optPathTime)
+            hpViolatedTrueEZs.append(violatedTrueEZ)
 
         percent, proportionOfAreaCoverd = percent_of_true_rs_covered(
             trueParams,
@@ -4894,6 +4986,8 @@ def run_simulation_with_random_pursuer(
         "rmse_history": rmse_history.tolist(),
         "percent_of_true_rs_covered": percentOfTrueRsCovered,
         "proportion_of_area_covered": proportionOfAreaCoverdHistory,
+        "hp_opt_path_times": hpOptPathTimes,
+        "hp_violated_true_ezs": hpViolatedTrueEZs,
     }
 
     if saveResults:
