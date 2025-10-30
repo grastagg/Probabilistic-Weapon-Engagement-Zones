@@ -142,21 +142,21 @@ def get_turn_rate_velocity_and_headings(
     out_d2 = evaluate_spline_derivative(
         controlPoints, knotPoints, 3, 2, numSamplesPerInterval
     )
-    v = np.linalg.norm(out_d1, axis=1)
-    u = np.cross(out_d1, out_d2) / (v**2)
-    heading = np.arctan2(out_d1[:, 1], out_d1[:, 0])
+    v = jnp.linalg.norm(out_d1, axis=1)
+    u = jnp.cross(out_d1, out_d2) / (v**2)
+    heading = jnp.arctan2(out_d1[:, 1], out_d1[:, 0])
     return u, v, heading
 
 
-dVelocityDControlPoints = jacfwd(get_spline_velocity)
-dVelocityDtf = jacfwd(get_spline_velocity, argnums=1)
+dVelocityDControlPoints = jax.jit(jacfwd(get_spline_velocity), static_argnums=(2, 3))
+dVelocityDtf = jax.jit(jacfwd(get_spline_velocity, argnums=1), static_argnums=(2, 3))
 
 
-dTurnRateDControlPoints = jacfwd(get_spline_turn_rate)
-dTurnRateTf = jacfwd(get_spline_turn_rate, argnums=1)
+dTurnRateDControlPoints = jax.jit(jacfwd(get_spline_turn_rate), static_argnums=(2, 3))
+dTurnRateTf = jax.jit(jacfwd(get_spline_turn_rate, argnums=1), static_argnums=(2, 3))
 
-dCurvatureDControlPoints = jacfwd(get_spline_curvature)
-dCurvatureDtf = jacfwd(get_spline_curvature, argnums=1)
+dCurvatureDControlPoints = jax.jit(jacfwd(get_spline_curvature), static_argnums=(2, 3))
+dCurvatureDtf = jax.jit(jacfwd(get_spline_curvature, argnums=1), static_argnums=(2, 3))
 
 
 def assure_velocity_constraint(

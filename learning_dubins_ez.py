@@ -1,4 +1,5 @@
 from jax._src.config import int_env
+from jax._src.prng import random_wrap
 import tqdm
 from functools import partial
 import sys
@@ -13,6 +14,9 @@ import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
+
+# set maplotlib to faster backend
+matplotlib.use("Agg")
 
 import learned_dubins_ez_path_planner
 
@@ -51,11 +55,11 @@ jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax.config.update("jax_platform_name", "gpu")")
 #
 
-positionAndHeadingOnly = True
+positionAndHeadingOnly = False
 knownSpeed = True
-interceptionOnBoundary = True
+interceptionOnBoundary = False
 randomPath = False
-noisyMeasurementsFlag = False
+noisyMeasurementsFlag = True
 saveResults = True
 plotAllFlag = False
 planHPPath = True
@@ -1226,7 +1230,7 @@ def run_optimization_hueristic(
     opt.options["warm_start_init_point"] = "yes"
     opt.options["mu_init"] = 1e-1
     opt.options["nlp_scaling_method"] = "gradient-based"
-    opt.options["tol"] = 1e-6
+    opt.options["tol"] = 1e-8
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
@@ -4507,25 +4511,78 @@ def find_mean_and_std(pursuerXListZeroLoss):
     return mean, cov, std, angleMean, angleKappa
 
 
-def plan_path_around_all_learned_pursuer_params(
-    pursuerXList, trueParams, previousSpline
+startingLocation = np.array([-5.0, -5.0])
+endingLocation = np.array([5.0, 5.0])
+initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
+initialVelocity = endingLocation - startingLocation
+
+agentSpeed = 1.0
+numControlPoints = 14
+splineOrder = 3
+turn_rate_constraints = (-50.0, 50.0)
+curvature_constraints = (-10.0, 10.0)
+velocity_constraints = (agentSpeed - 0.01, agentSpeed + 0.01)
+
+num_constraint_samples = 50
+
+
+def plan_path_around_all_learned_pursuer_params_fist(
+    pursuerXList, trueParams, lowerLimit, upperLimit
 ):
-    startingLocation = np.array([-5.0, -5.0])
-    endingLocation = np.array([5.0, 5.0])
-    initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
-    initialVelocity = endingLocation - startingLocation
+    # startingLocation = np.array([-5.0, -5.0])
+    # endingLocation = np.array([5.0, 5.0])
+    # initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
+    # initialVelocity = endingLocation - startingLocation
 
-    agentSpeed = 1.0
-    numControlPoints = 8
-    splineOrder = 3
-    turn_rate_constraints = (-50.0, 50.0)
-    curvature_constraints = (-10.0, 10.0)
-    velocity_constraints = (agentSpeed - 0.01, agentSpeed + 0.01)
+    if positionAndHeadingOnly:
+        width = abs(lowerLimit[0])
+        pursuerRange = trueParams[5]
 
-    num_constraint_samples = 50
+        box_halfwidths = np.array([width + pursuerRange, width + pursuerRange])
+    else:
+        width = abs(lowerLimit[0])
+        pursuerRange = upperLimit[5]
+        box_halfwidths = np.array([width + pursuerRange, width + pursuerRange])
 
+    # agentSpeed = 1.0
+    # numControlPoints = 14
+    # splineOrder = 3
+    # turn_rate_constraints = (-50.0, 50.0)
+    # curvature_constraints = (-10.0, 10.0)
+    # velocity_constraints = (agentSpeed - 0.01, agentSpeed + 0.01)
+
+    # num_constraint_samples = 50
+    spline, pathTime = learned_dubins_ez_path_planner.optimize_spline_path_fist(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        box_halfwidths,
+        agentSpeed,
+        previous_spline=None,
+    )
+    print("planned path time:", pathTime)
+    if plotAllFlag:
+        fig, ax = plt.subplots()
+        learned_dubins_ez_path_planner.plot_spline(
+            spline,
+            ax,
+        )
+        plt.show()
+
+    return spline, pathTime
+
+
+def plan_path_around_all_learned_pursuer_params(
+    pursuerXList, trueParams, previousSpline, splineRightPrev, splineLeftPrev
+):
     start = time.time()
-    spline, pathTime, violatedTrueEZ = (
+    splineRight, pathTimeRight, violatedTrueEZRight = (
         learned_dubins_ez_path_planner.optimize_spline_path(
             startingLocation,
             endingLocation,
@@ -4539,13 +4596,43 @@ def plan_path_around_all_learned_pursuer_params(
             pursuerXList,
             trueParams,
             agentSpeed,
-            previousSpline,
+            right=True,
+            previous_spline=splineRightPrev,
         )
     )
+    splineLeft, pathTimeLeft, violatedTrueEZLeft = (
+        learned_dubins_ez_path_planner.optimize_spline_path(
+            startingLocation,
+            endingLocation,
+            initialVelocity,
+            numControlPoints,
+            splineOrder,
+            velocity_constraints,
+            turn_rate_constraints,
+            curvature_constraints,
+            num_constraint_samples,
+            pursuerXList,
+            trueParams,
+            agentSpeed,
+            right=False,
+            previous_spline=splineLeftPrev,
+        )
+    )
+    print("pathTimeRight:", pathTimeRight)
+    print("pathTimeLeft:", pathTimeLeft)
+    if pathTimeRight < pathTimeLeft:
+        spline = splineRight
+        pathTime = pathTimeRight
+        violatedTrueEZ = violatedTrueEZRight
+    else:
+        spline = splineLeft
+        pathTime = pathTimeLeft
+        violatedTrueEZ = violatedTrueEZLeft
+
     print("time to plan path around all learned pursuer params:", time.time() - start)
     print("planned path time:", pathTime)
     print("violated true EZ:", violatedTrueEZ)
-    if plotAllFlag:
+    if False:
         fig, ax = plt.subplots()
         learned_dubins_ez_path_planner.plot_spline(
             spline,
@@ -4573,7 +4660,63 @@ def plan_path_around_all_learned_pursuer_params(
         )
 
         plt.show()
-    return spline, pathTime, violatedTrueEZ
+    return spline, pathTime, violatedTrueEZ, splineRight, splineLeft
+
+
+def plan_path_around_all_true_ez(trueParams, seed):
+    start = time.time()
+    splineRight, pathTimeRight, violatedTrueEZRight = (
+        learned_dubins_ez_path_planner.optimize_spline_path(
+            startingLocation,
+            endingLocation,
+            initialVelocity,
+            numControlPoints,
+            splineOrder,
+            velocity_constraints,
+            turn_rate_constraints,
+            curvature_constraints,
+            num_constraint_samples,
+            jnp.array([trueParams[parameterMask]]),
+            trueParams,
+            agentSpeed,
+            right=True,
+        )
+    )
+    splineLeft, pathTimeLeft, violatedTrueEZLeft = (
+        learned_dubins_ez_path_planner.optimize_spline_path(
+            startingLocation,
+            endingLocation,
+            initialVelocity,
+            numControlPoints,
+            splineOrder,
+            velocity_constraints,
+            turn_rate_constraints,
+            curvature_constraints,
+            num_constraint_samples,
+            jnp.array([trueParams[parameterMask]]),
+            trueParams,
+            agentSpeed,
+            right=False,
+        )
+    )
+    print("pathTimeRight:", pathTimeRight)
+    print("pathTimeLeft:", pathTimeLeft)
+    if pathTimeRight < pathTimeLeft:
+        spline = splineRight
+        pathTime = pathTimeRight
+        violatedTrueEZ = violatedTrueEZRight
+    else:
+        spline = splineLeft
+        pathTime = pathTimeLeft
+        violatedTrueEZ = violatedTrueEZLeft
+
+    print("time to plan path around all learned pursuer params:", time.time() - start)
+    print("planned path time:", pathTime)
+    print("violated true EZ:", violatedTrueEZ)
+    # save path time for later plotting
+    np.savetxt(
+        "results/plannedHP/true" + str(seed) + "_pathTime.txt", np.array([pathTime])
+    )
 
 
 def run_simulation_with_random_pursuer(
@@ -4590,6 +4733,7 @@ def run_simulation_with_random_pursuer(
 ):
     rng = np.random.default_rng(seed)
     trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
+    # plan_path_around_all_true_ez(trueParams, seed)
 
     pursuerPosition = np.array([trueParams[0], trueParams[1]])
     pursuerHeading = trueParams[2]
@@ -4642,6 +4786,17 @@ def run_simulation_with_random_pursuer(
     angleKappa = None
     angleMean = None
     splinePath = None
+    splineRightPrev = None
+    splineLeftPrev = None
+    if planHPPath:
+        splinePath, pathTime = plan_path_around_all_learned_pursuer_params_fist(
+            [jnp.array(trueParams[parameterMask])],
+            trueParams,
+            lower_bounds_all,
+            upper_bounds_all,
+        )
+        print("Initial HP planned path time:", pathTime)
+        hpOptPathTimes.append(pathTime)
 
     while i < numLowPriorityAgents and not singlePursuerX:
         # keepLossThreshold = 2 * (i + 1) * lossThreshAmount
@@ -4837,14 +4992,6 @@ def run_simulation_with_random_pursuer(
                 break
         pursuerXListZeroLoss = pursuerXList[lossList <= keepLossThreshold]
         lossListZeroLoss = lossList[lossList <= keepLossThreshold]
-        if planHPPath:
-            splinePath, optPathTime, violatedTrueEZ = (
-                plan_path_around_all_learned_pursuer_params(
-                    pursuerXListZeroLoss, trueParams, splinePath
-                )
-            )
-            hpOptPathTimes.append(optPathTime)
-            hpViolatedTrueEZs.append(violatedTrueEZ)
 
         percent, proportionOfAreaCoverd = percent_of_true_rs_covered(
             trueParams,
@@ -4889,6 +5036,22 @@ def run_simulation_with_random_pursuer(
         pursuerParameterStdDev_history.append(std)
         pursuerParameter_history.append(pursuerXList)
         lossList_history.append(lossList)
+        if planHPPath:
+            (
+                splinePath,
+                optPathTime,
+                violatedTrueEZ,
+                splineRightPrev,
+                splineLeftPrev,
+            ) = plan_path_around_all_learned_pursuer_params(
+                pursuerXListZeroLoss,
+                trueParams,
+                splinePath,
+                splineRightPrev,
+                splineLeftPrev,
+            )
+            hpOptPathTimes.append(optPathTime)
+            hpViolatedTrueEZs.append(violatedTrueEZ)
         #####plot_loss
         # if i > 20:
         #    ijPairs = [[3, 4]]
@@ -5015,8 +5178,8 @@ def main(seed):
         upperBoundsAll,
         parameterMask,
         seed=seed,
-        numLowPriorityAgents=25,
-        numOptimizerStarts=100,
+        numLowPriorityAgents=15,
+        numOptimizerStarts=150,
         keepLossThreshold=1e-4,
         plotEvery=1,
         # dataDir="results",
@@ -5611,10 +5774,12 @@ def summarize_percent_covered_columns(
 def plot_outer_union_approximation_size():
     fig, axes = plt.subplots(1, 3, figsize=(9, 3), layout="tight")
 
-    folder = "interior"
+    folder = "boundary"
     results_dir = "results/" + folder + "/knownSpeedAndShape"
     maxSteps = 15
+    saveDir = "/home/ggs24/Desktop/learningez_figures/size_all.pdf"
     if folder == "interior":
+        saveDir = "/home/ggs24/Desktop/learningez_figures/size_all_int.pdf"
         maxSteps = 25
     plot_median_outer_approximation_size(
         results_dir,
@@ -5674,24 +5839,136 @@ def plot_outer_union_approximation_size():
         legend=True,
         title="All Unknown",
     )
+    fig.savefig(saveDir)
+
+
+def load_path_time_vs_number_of_agents(results_dir, max_steps):
+    path_times = []
+    violatedTrueEZ = []
+    for filename in os.listdir(results_dir):
+        if filename.endswith("_results.json"):
+            # get seed number _results.json
+            seed = int(filename.split("_")[0])
+            trueOptPathTime = np.genfromtxt(
+                "results/plannedHP/true/true" + str(seed) + "_pathTime.txt",
+                delimiter=",",
+            )
+            if int(filename.split("_")[0]) <= 550:
+                filepath = os.path.join(results_dir, filename)
+                with open(filepath, "r") as f:
+                    data = json.load(f)
+                    pathTime = data.get("hp_opt_path_times", [])
+                    pathTime = pathTime[:max_steps]
+                    if len(pathTime) < max_steps:
+                        pathTime += [pathTime[-1]] * (max_steps - len(pathTime))
+                    path_times.append(pathTime / trueOptPathTime)
+                    violated = data.get("hp_violated_true_ezs", [])
+                    violated = violated[:max_steps]
+                    if np.any(violated):
+                        print("found violated true EZ in file", filename)
+                    violatedTrueEZ.append(violated)
+    return np.array(path_times), np.concatenate(violatedTrueEZ)
+
+
+def plot_path_time_vs_number_of_agents_single(
+    results_dir, max_steps, ax, color, label=None
+):
+    path_times, violatedTrueEZ = load_path_time_vs_number_of_agents(
+        results_dir, max_steps
+    )
+    # count the nuymber of true values in array
+    print(
+        "percent violated true EZ known speed and shape:",
+        1 - (np.count_nonzero(violatedTrueEZ) / (violatedTrueEZ.size)),
+    )
+    median_path_times = np.median(path_times, axis=0)
+    first_quartile_path_times = np.percentile(path_times, 25, axis=0)
+    third_quartile_path_times = np.percentile(path_times, 75, axis=0)
+    ax.plot(jnp.arange(0, max_steps), median_path_times, color=color, label=label)
+    ax.fill_between(
+        np.arange(0, max_steps),
+        first_quartile_path_times,
+        third_quartile_path_times,
+        color=color,
+        alpha=0.1,
+    )
+    # plot red dotted line at y=1
+    ax.plot(jnp.arange(0, max_steps), jnp.ones(max_steps), linestyle=":", color="red")
+
+
+def plot_path_time_vs_number_of_agents():
+    boundary = False
+    if boundary:
+        folder = "plannedHP/boundary/"
+        saveDir = "/home/ggs24/Desktop/learningez_figures/path_time_vs_number_of_agents_boundary.pdf"
+        max_steps = 10
+    else:
+        folder = "plannedHP/interior/"
+        saveDir = "/home/ggs24/Desktop/learningez_figures/path_time_vs_number_of_agents_interior.pdf"
+        max_steps = 10
+    results_dir = "results/" + folder + "/unknownSpeedWithNoise"
+    fig, axes = plt.subplots(1, 3, figsize=(9, 3), layout="tight")
+
+    results_dir = "results/" + folder + "/knownSpeedAndShape"
+    plot_path_time_vs_number_of_agents_single(
+        results_dir, max_steps, axes[0], color="blue"
+    )
+    results_dir = "results/" + folder + "/knownSpeedAndShapeWithNoise"
+    plot_path_time_vs_number_of_agents_single(
+        results_dir, max_steps, axes[0], color="orange"
+    )
+    results_dir = "results/" + folder + "/knownSpeed"
+    plot_path_time_vs_number_of_agents_single(
+        results_dir, max_steps, axes[1], color="blue"
+    )
+    results_dir = "results/" + folder + "/knownSpeedWithNoise"
+    plot_path_time_vs_number_of_agents_single(
+        results_dir, max_steps, axes[1], color="orange"
+    )
+    results_dir = "results/" + folder + "/unknownSpeed"
+    plot_path_time_vs_number_of_agents_single(
+        results_dir, max_steps, axes[2], color="blue", label="No Noise"
+    )
+    # results_dir = "results/" + folder + "/unknownSpeedWithNoise"
+    # plot_path_time_vs_number_of_agents_single(
+    #     results_dir, max_steps, axes[2], color="orange", label="Noise"
+    # )
+    # set title of all x
+    titles = ["Known Speed and Shape", "Known Speed", "All Unknown"]
+    for ax in axes:
+        ax.set_xlabel("Number of Sacrificial Agents")
+        ax.grid(True)
+        ax.set_ylim(0.98, 1.5)
+        ax.set_title(titles[axes.tolist().index(ax)])
+    axes[0].set_ylabel("Normalized Path Time")
+    plt.legend(loc="upper right", ncols=1)
+    fig.savefig(saveDir)
 
 
 def plot_error():
     maxSteps = 15
     knownShape = False
     knownSpeed = False
-    folder = "interior"
+    folder = "boundary"
     # folder = "boundary"
     interior = folder == "interior"
     eps = 0.1
-    if interior:
-        maxSteps = 25
     if knownShape:
         results_dir = "results/" + folder + "/knownSpeedAndShape"
+        saveDir = "/home/ggs24/Desktop/learningez_figures/error_known_shape"
     elif knownSpeed:
         results_dir = "results/" + folder + "/knownSpeed"
+        saveDir = "/home/ggs24/Desktop/learningez_figures/error_known_speed"
     else:
         results_dir = "results/" + folder + "/unknownSpeed"
+        saveDir = "/home/ggs24/Desktop/learningez_figures/error_unknown_speed"
+    if interior:
+        maxSteps = 25
+        saveDir = saveDir + "_int.pdf"
+    else:
+        saveDir = saveDir + ".pdf"
+    print("results_dir", results_dir)
+    print("saveDir", saveDir)
     fig, axes = plot_median_rmse_and_abs_errors(
         results_dir,
         max_steps=maxSteps,
@@ -5703,12 +5980,6 @@ def plot_error():
         interior=interior,
     )
     results_dir += "WithNoise"
-    # if knownShape:
-    #     results_dir = "results/" + folder + "/knownSpeedAndShapeWithNoise"
-    # elif knownSpeed:
-    #     results_dir = "results/" + folder + "/knownSpeedWithNoise"
-    # else:
-    #     results_dir = "results/" + folder + "/unknownSpeedWithNoise"
 
     fig, axes = plot_median_rmse_and_abs_errors(
         results_dir,
@@ -5722,6 +5993,7 @@ def plot_error():
         noisy=True,
         interior=interior,
     )
+    fig.savefig(saveDir)
     #
 
 
@@ -5745,10 +6017,11 @@ if __name__ == "__main__":
         _EXECUTOR.shutdown(wait=True)
         if plotAllFlag:
             plt.show()
-        #
+        # #
     else:
-        plot_outer_union_approximation_size()
-        plot_error()
-        summarize_percent_covered_columns("interior")
+        plot_path_time_vs_number_of_agents()
+        # plot_outer_union_approximation_size()
+        # plot_error()
+        # summarize_percent_covered_columns("boundary")
 
 plt.show()
