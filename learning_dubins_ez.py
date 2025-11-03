@@ -56,13 +56,13 @@ jax.config.update("jax_enable_x64", True)
 #
 
 positionAndHeadingOnly = False
-knownSpeed = True
-interceptionOnBoundary = False
+knownSpeed = False
+interceptionOnBoundary = True
 randomPath = False
-noisyMeasurementsFlag = True
+noisyMeasurementsFlag = False
 saveResults = True
 plotAllFlag = False
-planHPPath = True
+planHPPath = False
 
 dataDir = "results"
 if not planHPPath:
@@ -5179,7 +5179,7 @@ def main(seed):
         parameterMask,
         seed=seed,
         numLowPriorityAgents=15,
-        numOptimizerStarts=150,
+        numOptimizerStarts=100,
         keepLossThreshold=1e-4,
         plotEvery=1,
         # dataDir="results",
@@ -5929,10 +5929,10 @@ def plot_path_time_vs_number_of_agents():
     plot_path_time_vs_number_of_agents_single(
         results_dir, max_steps, axes[2], color="blue", label="No Noise"
     )
-    # results_dir = "results/" + folder + "/unknownSpeedWithNoise"
-    # plot_path_time_vs_number_of_agents_single(
-    #     results_dir, max_steps, axes[2], color="orange", label="Noise"
-    # )
+    results_dir = "results/" + folder + "/unknownSpeedWithNoise"
+    plot_path_time_vs_number_of_agents_single(
+        results_dir, max_steps, axes[2], color="orange", label="Noise"
+    )
     # set title of all x
     titles = ["Known Speed and Shape", "Known Speed", "All Unknown"]
     for ax in axes:

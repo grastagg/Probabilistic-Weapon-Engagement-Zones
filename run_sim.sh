@@ -8,7 +8,7 @@ SEEDS=(3 4 5 8 11 14 21 25 26 30 41 44 46 47 51 54 70 72 77 78 92 93 95 102 114 
 SEEDS=(22)
 # SEEDS=(18)
 
-for SEED in {12..12}; do
+for SEED in {101..101}; do
   # for SEED in "${SEEDS[@]}"; do
   python3 learning_dubins_ez.py $SEED 1
 done

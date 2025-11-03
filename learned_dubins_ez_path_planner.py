@@ -441,7 +441,7 @@ def optimize_spline_path(
 
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
-    opt.options["max_iter"] = 500
+    opt.options["max_iter"] = 100
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
@@ -701,7 +701,7 @@ def optimize_spline_path_fist(
 
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
-    opt.options["max_iter"] = 500
+    opt.options["max_iter"] = 100
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"

@@ -218,6 +218,30 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
     # return sofmin(*lengths, 0.01)
     return jnp.min(lengths)
     # return jnp.nanmin(lengths)
+    #
+
+
+@jax.jit
+def find_shortest_dubins_path_and_turn_amount(
+    pursuerPosition, pursuerHeading, goalPosition, radius
+):
+    straitLeftLength, leftTheta = find_dubins_path_length_right_strait(
+        pursuerPosition, pursuerHeading, goalPosition, radius
+    )
+    straitRightLength, rightTheta = find_dubins_path_length_left_strait(
+        pursuerPosition, pursuerHeading, goalPosition, radius
+    )
+
+    lengths = jnp.array([straitLeftLength, straitRightLength])
+
+    def left():
+        return straitLeftLength, leftTheta
+
+    def right():
+        return straitRightLength, rightTheta
+
+    leftShorter = straitLeftLength < straitRightLength
+    return jax.lax.cond(leftShorter, left, right)
 
 
 # Vectorized version over goalPosition
@@ -463,61 +487,6 @@ def find_dubins_path_length_augmented(
     )
     right = side < 0.0
     return jnp.where(right, rightLength, leftLength)
-
-    # lengths = jnp.array([rightLength, leftLength])
-    #
-    # dubinsPathLength = jnp.nanmin(lengths)
-    # return dubinsPathLength
-
-
-#
-# @jax.jit
-# def find_dubins_path_length_augmented(
-#     startPosition, startHeading, turnRadius, pursuerRange, goalPosition
-# ):
-#     rightCenter = jnp.array(
-#         [
-#             startPosition[0] + turnRadius * jnp.sin(startHeading),
-#             startPosition[1] - turnRadius * jnp.cos(startHeading),
-#         ]
-#     )
-#     leftCenter = jnp.array(
-#         [
-#             startPosition[0] - turnRadius * jnp.sin(startHeading),
-#             startPosition[1] + turnRadius * jnp.cos(startHeading),
-#         ]
-#     )
-#     theta1Left, theta2Left = compute_theta1_theta2_left(
-#         leftCenter, startPosition, pursuerRange, turnRadius
-#     )
-#     theta1Right, theta2Right = compute_theta1_theta2_right(
-#         rightCenter, startPosition, pursuerRange, turnRadius
-#     )
-#     straitRightLength, arcRight = find_dubins_path_length_right_strait(
-#         startPosition, startHeading, goalPosition, turnRadius
-#     )
-#     # straighPath = straitRightLength - arcRight * turnRadius
-#     # turnPath = arcRight * turnRadius
-#     # straitRightLength = straighPath + turnPath / straitRightLength * pursuerRange
-#     distanceToRightArc = (
-#         distance_to_arc(goalPosition, rightCenter, turnRadius, theta1Right, theta2Right)
-#         + pursuerRange
-#     )
-#     distanceToLeftArc = (
-#         distance_to_arc(goalPosition, leftCenter, turnRadius, theta1Left, theta2Left)
-#         + pursuerRange
-#     )
-#     straitLeftLength, arcLeft = find_dubins_path_length_left_strait(
-#         startPosition, startHeading, goalPosition, turnRadius
-#     )
-#     # straighPath = straitLeftLength - arcLeft * turnRadius
-#     # turnPath = arcLeft * turnRadius
-#     # straitLeftLength = straighPath + turnPath / straitLeftLength * pursuerRange
-#     lengths = jnp.array(
-#         [straitRightLength, straitLeftLength, distanceToRightArc, distanceToLeftArc]
-#     )
-#     dubinsPathLength = jnp.nanmin(lengths)
-#     return dubinsPathLength
 
 
 @jax.jit
