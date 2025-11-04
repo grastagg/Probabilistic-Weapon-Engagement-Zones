@@ -5,6 +5,7 @@ import matplotlib
 import numpy as np
 
 from matplotlib.patches import Arc, Circle
+import fast_pursuer
 
 # get rid of type 3 fonts
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -147,6 +148,112 @@ def intersection_arcs(centers, radii, tol=1e-9):
     return arcs
 
 
+def is_between_angles_radians(start_angle, stop_angle, angle):
+    """
+    Checks if a third angle lies between a start and stop angle counter-clockwise (radians).
+
+    Args:
+        start_angle: The starting angle in radians (0 to 2*pi).
+        stop_angle: The stopping angle in radians (0 to 2*pi).
+        angle: The angle to check if it lies between start and stop (0 to 2*pi).
+
+    Returns:
+        True if the angle lies between start and stop counter-clockwise, False otherwise.
+    """
+
+    # Normalize angles to 0-2*pi range
+    start_angle = start_angle % (2 * jnp.pi)
+    stop_angle = stop_angle % (2 * jnp.pi)
+    angle = angle % (2 * jnp.pi)
+
+    flag = stop_angle < start_angle
+    same = jnp.isclose(start_angle, stop_angle, rtol=1e-9)
+
+    def same_case():
+        return jnp.ones_like(angle, dtype=bool)
+
+    def not_same_case():
+        def true_case():
+            return jnp.logical_or(angle > start_angle, angle < stop_angle)
+
+        def false_case():
+            return jnp.logical_and(start_angle < angle, angle < stop_angle)
+
+        return jax.lax.cond(flag, true_case, false_case)
+
+    return jax.lax.cond(same, same_case, not_same_case)
+
+
+def dist_point_to_arc(point, center, radius, theta1, theta2):
+    endPointA = center + radius * jnp.array([jnp.cos(theta1), jnp.sin(theta1)])
+    endPointB = center + radius * jnp.array([jnp.cos(theta2), jnp.sin(theta2)])
+
+    theta = jnp.arctan2(point[1] - center[1], point[0] - center[0])
+    inRange = is_between_angles_radians(theta1, theta2, theta)
+
+    dist_A = jnp.linalg.norm(point - endPointA)
+    dist_B = jnp.linalg.norm(point - endPointB)
+
+    def in_range_case():
+        intersectionPoint = (
+            center + radius * jnp.array([jnp.cos(theta), jnp.sin(theta)]).T
+        )
+        return jnp.linalg.norm(intersectionPoint - point)
+
+    def out_of_range_case():
+        return jnp.minimum(dist_A, dist_B)
+
+    return jax.lax.cond(inRange, in_range_case, out_of_range_case)
+
+
+dists_point_to_arcs = jax.vmap(dist_point_to_arc, in_axes=(None, 0, 0, 0, 0))
+
+
+def dist_point_to_arcs(point, centers, radii, theta_start, theta_end):
+    dists = dists_point_to_arcs(point, centers, radii, theta_start, theta_end)
+    min_dist = jnp.min(dists)
+    min_index = jnp.argmin(dists)
+    return min_dist, min_index
+
+
+signed_distance_to_arcs_vmap = jax.vmap(
+    dist_point_to_arcs, in_axes=(0, None, None, None, None)
+)
+
+
+def potential_reachable_region(
+    points, centers, radii, theta_start, theta_end, pursuerRange
+):
+    dists, _ = signed_distance_to_arcs_vmap(
+        points, centers, radii, theta_start, theta_end
+    )
+    return dists - pursuerRange
+
+
+def potential_pursuer_engagment_zone(
+    evaderPositions,
+    evaderHeadings,
+    evaderSpeed,
+    centers,
+    radii,
+    theta_start,
+    theta_end,
+    pursuerRange,
+    pursuerSpeed,
+):
+    speedRatio = evaderSpeed / pursuerSpeed
+    futureEvaderPositions = (
+        evaderPositions
+        + speedRatio
+        * pursuerRange
+        * jnp.vstack([jnp.cos(evaderHeadings), jnp.sin(evaderHeadings)]).T
+    )
+    ez = potential_reachable_region(
+        futureEvaderPositions, centers, radii, theta_start, theta_end, pursuerRange
+    )
+    return ez
+
+
 def plot_in_circle_intersection(centers, radaii, fig, ax):
     numPoints = 500
     x = jnp.linspace(-5, 5, numPoints)
@@ -172,6 +279,14 @@ def plot_pursuer_reachable_region(pursuerPosition, pursuerRange, fig, ax):
         linestyle="--",
     )
     ax.add_artist(circle)
+    ax.scatter(
+        pursuerPosition[0],
+        pursuerPosition[1],
+        color="blue",
+        marker="o",
+        label="Pursuer Position",
+    )
+    ax.plot([], color="blue", label="True Pursuer Reachable Region")
 
 
 def plot_circle_intersection_arcs(
@@ -189,7 +304,7 @@ def plot_circle_intersection_arcs(
     radii : list of float, optional
         Circle radii, only needed if show_circles=True.
     show_circles : bool, optional
-        If True, overlay the full circle outlines and centers.
+        If True, o  verlay the full circle outlines and centers.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; one is created if None.
 
@@ -198,19 +313,6 @@ def plot_circle_intersection_arcs(
     ax : matplotlib.axes.Axes
         The axes with the plot.
     """
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(6, 6))
-        ax.set_aspect("equal")
-
-    # Plot full circles (optional)
-    if show_circles and centers is not None and radii is not None:
-        for i, (c, r) in enumerate(zip(centers, radii)):
-            circ = Circle(c, r, fill=False, ls="--", color="gray", alpha=0.5)
-            ax.add_patch(circ)
-            ax.plot(*c, "ko", ms=4)
-            ax.text(
-                c[0], c[1], f"C{i}", ha="center", va="center", fontsize=8, color="k"
-            )
 
     # Plot the intersection arcs
     for a in arcs:
@@ -222,30 +324,183 @@ def plot_circle_intersection_arcs(
         extent = (t2 - t1) % 360  # ensure positive CCW extent
 
         arc_patch = Arc(
-            c, 2 * r, 2 * r, angle=0, theta1=t1, theta2=t1 + extent, color="C0", lw=2
+            c, 2 * r, 2 * r, angle=0, theta1=t1, theta2=t1 + extent, color="red", lw=2
         )
         ax.add_patch(arc_patch)
 
-        # Optionally show endpoints
+    # proxy for legend
+    ax.plot([], [], color="red", lw=2, label="Potential Pursuer Position")
 
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.autoscale()
+    # Optionally show endpoints
+
     return ax
 
 
-def main():
-    pursuerRange = 2.0
-    pursuerPosition = np.array([0.0, 0.0])
-    interceptionPositions = np.array([[-1.3, 1.3], [1.3, -1.3]])
+def arcs_to_arrays(arcs):
+    """
+    Convert list of arc dictionaries into NumPy arrays suitable for
+    signed_distance_to_arcs_jax().
 
-    arcs = intersection_arcs(interceptionPositions, [pursuerRange] * 2)
-    print("found arcs")
+    Parameters
+    ----------
+    arcs : list of dict
+        Each arc has keys:
+          {
+            'center': array_like, shape (2,),
+            'radius': float,
+            'theta_start': float,
+            'theta_end': float
+          }
+
+    Returns
+    -------
+    centers : ndarray, shape (N, 2)
+    radii : ndarray, shape (N,)
+    theta_start : ndarray, shape (N,)
+    theta_end : ndarray, shape (N,)
+    """
+    N = len(arcs)
+    if N == 0:
+        raise ValueError("No arcs provided — intersection is empty.")
+
+    centers = np.stack([np.asarray(a["center"], float) for a in arcs])
+    radii = np.array([a["radius"] for a in arcs], float)
+    theta_start = np.array([a["theta_start"] for a in arcs], float)
+    theta_end = np.array([a["theta_end"] for a in arcs], float)
+
+    return centers, radii, theta_start, theta_end
+
+
+def plot_potential_pursuer_engagement_zone(
+    arcs,
+    pursuerRange,
+    pursuerSpeed,
+    evaderHeading,
+    evaderSpeed,
+    xlim,
+    ylim,
+    numPoints=200,
+    ax=None,
+):
+    centers, radii, theta_start, theta_end = arcs_to_arrays(arcs)
+    x = jnp.linspace(xlim[0], xlim[1], numPoints)
+    y = jnp.linspace(ylim[0], ylim[1], numPoints)
+    [X, Y] = jnp.meshgrid(x, y)
+    points = jnp.vstack((X.flatten(), Y.flatten())).T
+    headings = evaderHeading * jnp.ones((points.shape[0],))
+    ez = potential_pursuer_engagment_zone(
+        points,
+        headings,
+        evaderSpeed,
+        centers,
+        radii,
+        theta_start,
+        theta_end,
+        pursuerRange,
+        pursuerSpeed,
+    )
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 6))
+    # c = ax.pcolormesh(
+    #     X.reshape((numPoints, numPoints)),
+    #     Y.reshape((numPoints, numPoints)),
+    #     dists.reshape((numPoints, numPoints)),
+    # )
+    ax.contour(
+        X.reshape((numPoints, numPoints)),
+        Y.reshape((numPoints, numPoints)),
+        ez.reshape((numPoints, numPoints)),
+        levels=[0],
+        colors="green",
+    )
+    ax.plot([], color="green", label="Potential Pursuer Engagement Zone")
+    # plt.colorbar(c, ax=ax, label="Signed Distance")
+
+
+def plot_potential_pursuer_reachable_region(
+    arcs, pursuerRange, xlim, ylim, numPoints=200, ax=None
+):
+    centers, radii, theta_start, theta_end = arcs_to_arrays(arcs)
+    x = jnp.linspace(xlim[0], xlim[1], numPoints)
+    y = jnp.linspace(ylim[0], ylim[1], numPoints)
+    [X, Y] = jnp.meshgrid(x, y)
+    points = jnp.vstack((X.flatten(), Y.flatten())).T
+    rr = potential_reachable_region(
+        points, centers, radii, theta_start, theta_end, pursuerRange
+    )
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 6))
+    # c = ax.pcolormesh(
+    #     X.reshape((numPoints, numPoints)),
+    #     Y.reshape((numPoints, numPoints)),
+    #     dists.reshape((numPoints, numPoints)),
+    # )
+    ax.contour(
+        X.reshape((numPoints, numPoints)),
+        Y.reshape((numPoints, numPoints)),
+        rr.reshape((numPoints, numPoints)),
+        levels=[0],
+        colors="magenta",
+    )
+    ax.plot([], color="magenta", label="Potential Pursuer Reachable Region")
+    # plt.colorbar(c, ax=ax, label="Signed Distance")
+
+
+def plot_interception_points(interceptionPositions, pursuerRange, ax):
+    ax.scatter(
+        interceptionPositions[:, 0],
+        interceptionPositions[:, 1],
+        color="red",
+        label="Interception Locations",
+        marker="x",
+    )
+    for pos in interceptionPositions:
+        Circle = plt.Circle(pos, pursuerRange, color="red", fill=False, linestyle=":")
+        ax.add_artist(Circle)
+
+
+def main():
+    pursuerRange = 1.5
+    pursuerPosition = np.array([0.0, 0.0])
+    interceptionPositions = np.array([[1.0, 1.0]])
+    pursuerSpeed = 2.0
+    evaderHeading = 0.0
+    evaderSpeed = 1.5
+
+    interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0]])
+    # interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0]])
+    # interceptionPositions = np.array(
+    #     [[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0]]
+    # )
+    # interceptionPositions = np.random.uniform(-1, 1, (2, 2))
+    arcs = intersection_arcs(
+        interceptionPositions, [pursuerRange] * np.ones(len(interceptionPositions))
+    )
+    print("arcs:", arcs)
 
     fig, ax = plt.subplots(figsize=(6, 6))
-    plot_in_circle_intersection(interceptionPositions, pursuerRange, fig, ax)
+    ax.set_aspect("equal")
+    # plot_in_circle_intersection(interceptionPositions, pursuerRange, fig, ax)
+    plot_potential_pursuer_reachable_region(
+        arcs, pursuerRange, xlim=(-4, 4), ylim=(-4, 4), ax=ax
+    )
+    plot_potential_pursuer_engagement_zone(
+        arcs,
+        pursuerRange,
+        pursuerSpeed,
+        evaderHeading,
+        evaderSpeed,
+        xlim=(-4, 4),
+        ylim=(-4, 4),
+        ax=ax,
+    )
     plot_pursuer_reachable_region(pursuerPosition, pursuerRange, fig, ax)
+    fast_pursuer.plotEngagementZone(
+        evaderHeading, pursuerPosition, pursuerRange, 0.0, pursuerSpeed, evaderSpeed, ax
+    )
+    plot_interception_points(interceptionPositions, pursuerRange, ax)
     plot_circle_intersection_arcs(arcs, ax=ax)
+    plt.legend()
     plt.show()
 
 
