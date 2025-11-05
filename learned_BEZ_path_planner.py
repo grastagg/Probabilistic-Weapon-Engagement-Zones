@@ -789,7 +789,7 @@ def main():
     # interceptionPositions = np.array(
     #     [[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0]]
     # )
-    interceptionPositions = np.random.uniform(-1.1, 1.1, (4, 2))
+    interceptionPositions = np.random.uniform(-1.1, 1.1, (10, 2))
     spline, arcs = plan_path_from_interception_points(
         interceptionPositions,
         pursuerRange,
