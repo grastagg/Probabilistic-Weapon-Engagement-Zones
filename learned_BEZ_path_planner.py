@@ -446,8 +446,6 @@ def optimize_spline_path(
     opt.options["tol"] = 1e-6
 
     sol = opt(optProb, sens=sens)
-    if sol.optInform["value"] != 0:
-        print("Optimization failed")
 
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, sol.xStar["tf"][0], num_cont_points, 3
@@ -708,30 +706,21 @@ def optimize_spline_path_fist(
     )
 
 
-def main():
-    initialEvaderPosition = np.array([-5.0, -5.0])
-    finalEvaderPosition = np.array([5.0, 5.0])
-    initialEvaderHeading = 0.0
-    initialEvaderVelocity = np.array([1.0, 0.0])
-    pursuerRange = 1.5
-    pursuerPosition = np.array([0.0, 0.0])
-    interceptionPositions = np.array([[1.0, 1.0]])
-    pursuerSpeed = 2.0
-    evaderHeading = 0.0
-    evaderSpeed = 1.5
-
-    interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0]])
-    # interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0]])
-    # interceptionPositions = np.array(
-    #     [[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0]]
-    # )
-    # interceptionPositions = np.random.uniform(-1, 1, (2, 2))
+def plan_path_from_interception_points(
+    interceptionPositions,
+    pursuerRange,
+    initialEvaderPosition,
+    finalEvaderPosition,
+    initialEvaderVelocity,
+    evaderSpeed,
+    pursuerSpeed,
+):
     arcs = BEZ_learning.intersection_arcs(
         interceptionPositions, [pursuerRange] * np.ones(len(interceptionPositions))
     )
     centers, radii, theta_start, theta_end = BEZ_learning.arcs_to_arrays(arcs)
 
-    (spline, tf) = optimize_spline_path(
+    (splineRight, tfRight) = optimize_spline_path(
         initialEvaderPosition,
         finalEvaderPosition,
         initialEvaderVelocity,
@@ -751,8 +740,83 @@ def main():
         right=True,
         previous_spline=None,
     )
+    splineLeft, tfLeft = optimize_spline_path(
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        num_cont_points=8,
+        spline_order=3,
+        velocity_constraints=(0.5, 2.0),
+        turn_rate_constraints=(-1.0, 1.0),
+        curvature_constraints=(-0.5, 0.5),
+        num_constraint_samples=50,
+        evaderSpeed=evaderSpeed,
+        centers=centers,
+        radii=radii,
+        theta_start=theta_start,
+        theta_end=theta_end,
+        pursuerRange=pursuerRange,
+        pursuerSpeed=pursuerSpeed,
+        right=False,
+        previous_spline=None,
+    )
+    print("Right path time", tfRight)
+    print("Left path time", tfLeft)
+    if tfRight < tfLeft:
+        spline = splineRight
+        tf = tfRight
+    else:
+        spline = splineLeft
+        tf = tfLeft
+    print("path time", tf)
+    return spline, arcs
+
+
+def main():
+    initialEvaderPosition = np.array([-3.0, -3.0])
+    finalEvaderPosition = np.array([3.0, 3.0])
+    initialEvaderVelocity = np.array([1.0, 0.0])
+    pursuerRange = 1.5
+    pursuerPosition = np.array([0.0, 0.0])
+    interceptionPositions = np.array([[1.0, 1.0]])
+    pursuerSpeed = 2.0
+    evaderHeading = 0.0
+    evaderSpeed = 1.5
+
+    interceptionPositions = np.array([[1.0, 1.0]])
+    # interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0]])
+    interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0]])
+    # interceptionPositions = np.array(
+    #     [[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0]]
+    # )
+    interceptionPositions = np.random.uniform(-1.1, 1.1, (4, 2))
+    spline, arcs = plan_path_from_interception_points(
+        interceptionPositions,
+        pursuerRange,
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        evaderSpeed,
+        pursuerSpeed,
+    )
     fig, ax = plt.subplots(figsize=(10, 10))
     plot_spline(spline, ax)
+    # BEZ_learning.plot_potential_pursuer_engagement_zone(
+    #     arcs,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     xlim=(-6, 6),
+    #     ylim=(-6, 6),
+    #     ax=ax,
+    # )
+    BEZ_learning.plot_potential_pursuer_reachable_region(
+        arcs, pursuerRange, xlim=(-4, 4), ylim=(-4, 4), ax=ax
+    )
+    BEZ_learning.plot_pursuer_reachable_region(pursuerPosition, pursuerRange, fig, ax)
+    BEZ_learning.plot_interception_points(interceptionPositions, pursuerRange, ax)
+    BEZ_learning.plot_circle_intersection_arcs(arcs, ax=ax)
     plt.show()
 
 
