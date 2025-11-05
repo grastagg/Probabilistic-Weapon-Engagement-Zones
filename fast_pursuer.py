@@ -149,8 +149,8 @@ def plotEngagementZone(
     agentSpeed,
     ax,
 ):
-    x = np.linspace(-2, 2, 50)
-    y = np.linspace(-2, 2, 50)
+    x = np.linspace(-5, 5, 50)
+    y = np.linspace(-5, 5, 50)
     [X, Y] = np.meshgrid(x, y)
     agentPositions = jnp.vstack([X.flatten(), Y.flatten()]).T
     agentHeadings = jnp.ones(agentPositions.shape[0]) * agentHeading
@@ -183,9 +183,9 @@ def plotEngagementZone(
         colors=["green"],
         linewidths=2,
     )
-    ax.scatter(pursuerPosition[0], pursuerPosition[1], color="red")
-    c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
-    ax.add_artist(c)
+    # ax.scatter(pursuerPosition[0], pursuerPosition[1], color="red")
+    # c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
+    # ax.add_artist(c)
 
     return
 

@@ -222,12 +222,12 @@ signed_distance_to_arcs_vmap = jax.vmap(
 
 
 def potential_reachable_region(
-    points, centers, radii, theta_start, theta_end, pursuerRange
+    points, centers, radii, theta_start, theta_end, pursuerRange, pursuerCaptureRadius
 ):
     dists, _ = signed_distance_to_arcs_vmap(
         points, centers, radii, theta_start, theta_end
     )
-    return dists - pursuerRange
+    return dists - (pursuerRange + pursuerCaptureRadius)
 
 
 def potential_pursuer_engagment_zone(
@@ -239,6 +239,7 @@ def potential_pursuer_engagment_zone(
     theta_start,
     theta_end,
     pursuerRange,
+    pursuerCaptureRadius,
     pursuerSpeed,
 ):
     speedRatio = evaderSpeed / pursuerSpeed
@@ -249,7 +250,13 @@ def potential_pursuer_engagment_zone(
         * jnp.vstack([jnp.cos(evaderHeadings), jnp.sin(evaderHeadings)]).T
     )
     ez = potential_reachable_region(
-        futureEvaderPositions, centers, radii, theta_start, theta_end, pursuerRange
+        futureEvaderPositions,
+        centers,
+        radii,
+        theta_start,
+        theta_end,
+        pursuerRange,
+        pursuerCaptureRadius,
     )
     return ez
 
@@ -270,10 +277,12 @@ def plot_in_circle_intersection(centers, radaii, fig, ax):
     ax.scatter(centers[:, 0], centers[:, 1], color="red")
 
 
-def plot_pursuer_reachable_region(pursuerPosition, pursuerRange, fig, ax):
+def plot_pursuer_reachable_region(
+    pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
+):
     circle = plt.Circle(
         (pursuerPosition[0], pursuerPosition[1]),
-        pursuerRange,
+        pursuerRange + pursuerCaptureRadius,
         color="blue",
         fill=False,
         linestyle="--",
@@ -374,6 +383,7 @@ def arcs_to_arrays(arcs):
 def plot_potential_pursuer_engagement_zone(
     arcs,
     pursuerRange,
+    pursuerCaptureRadius,
     pursuerSpeed,
     evaderHeading,
     evaderSpeed,
@@ -397,6 +407,7 @@ def plot_potential_pursuer_engagement_zone(
         theta_start,
         theta_end,
         pursuerRange,
+        pursuerCaptureRadius,
         pursuerSpeed,
     )
     if ax is None:
@@ -412,13 +423,16 @@ def plot_potential_pursuer_engagement_zone(
         ez.reshape((numPoints, numPoints)),
         levels=[0],
         colors="green",
+        linestyles="--",
     )
-    ax.plot([], color="green", label="Potential Pursuer Engagement Zone")
+    ax.plot(
+        [], color="green", label="Potential Pursuer Engagement Zone", linestyle="--"
+    )
     # plt.colorbar(c, ax=ax, label="Signed Distance")
 
 
 def plot_potential_pursuer_reachable_region(
-    arcs, pursuerRange, xlim, ylim, numPoints=200, ax=None
+    arcs, pursuerRange, pursuerCaptureRadius, xlim, ylim, numPoints=200, ax=None
 ):
     centers, radii, theta_start, theta_end = arcs_to_arrays(arcs)
     x = jnp.linspace(xlim[0], xlim[1], numPoints)
@@ -426,7 +440,13 @@ def plot_potential_pursuer_reachable_region(
     [X, Y] = jnp.meshgrid(x, y)
     points = jnp.vstack((X.flatten(), Y.flatten())).T
     rr = potential_reachable_region(
-        points, centers, radii, theta_start, theta_end, pursuerRange
+        points,
+        centers,
+        radii,
+        theta_start,
+        theta_end,
+        pursuerRange,
+        pursuerCaptureRadius,
     )
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 6))
@@ -464,6 +484,7 @@ def main():
     pursuerPosition = np.array([0.0, 0.0])
     interceptionPositions = np.array([[1.0, 1.0]])
     pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.1
     evaderHeading = 0.0
     evaderSpeed = 1.5
 
@@ -474,7 +495,8 @@ def main():
     # )
     # interceptionPositions = np.random.uniform(-1, 1, (2, 2))
     arcs = intersection_arcs(
-        interceptionPositions, [pursuerRange] * np.ones(len(interceptionPositions))
+        interceptionPositions,
+        [pursuerRange + pursuerCaptureRadius] * np.ones(len(interceptionPositions)),
     )
     print("arcs:", arcs)
 
@@ -482,11 +504,12 @@ def main():
     ax.set_aspect("equal")
     # plot_in_circle_intersection(interceptionPositions, pursuerRange, fig, ax)
     plot_potential_pursuer_reachable_region(
-        arcs, pursuerRange, xlim=(-4, 4), ylim=(-4, 4), ax=ax
+        arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
     )
     plot_potential_pursuer_engagement_zone(
         arcs,
         pursuerRange,
+        pursuerCaptureRadius,
         pursuerSpeed,
         evaderHeading,
         evaderSpeed,
@@ -494,11 +517,21 @@ def main():
         ylim=(-4, 4),
         ax=ax,
     )
-    plot_pursuer_reachable_region(pursuerPosition, pursuerRange, fig, ax)
-    fast_pursuer.plotEngagementZone(
-        evaderHeading, pursuerPosition, pursuerRange, 0.0, pursuerSpeed, evaderSpeed, ax
+    plot_pursuer_reachable_region(
+        pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
     )
-    plot_interception_points(interceptionPositions, pursuerRange, ax)
+    fast_pursuer.plotEngagementZone(
+        evaderHeading,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        ax,
+    )
+    plot_interception_points(
+        interceptionPositions, pursuerRange + pursuerCaptureRadius, ax
+    )
     plot_circle_intersection_arcs(arcs, ax=ax)
     plt.legend()
     plt.show()

@@ -87,6 +87,7 @@ def potential_BEZ_along_spline(
     theta_start,
     theta_end,
     pursuerRange,
+    pursuerCaptureRadius,
     pursuerSpeed,
 ):
     numControlPoints = int(len(controlPoints) / 2)
@@ -109,12 +110,13 @@ def potential_BEZ_along_spline(
         theta_start,
         theta_end,
         pursuerRange,
+        pursuerCaptureRadius,
         pursuerSpeed,
     )
     return ez
 
 
-@jax.jit
+# @jax.jit
 def compute_spline_constraints_for_dubins_EZ_deterministic(
     controlPoints,
     knotPoints,
@@ -124,6 +126,7 @@ def compute_spline_constraints_for_dubins_EZ_deterministic(
     theta_start,
     theta_end,
     pursuerRange,
+    pursuerCaptureRadius,
     pursuerSpeed,
 ):
     pos = spline_opt_tools.evaluate_spline(
@@ -147,6 +150,7 @@ def compute_spline_constraints_for_dubins_EZ_deterministic(
         theta_start,
         theta_end,
         pursuerRange,
+        pursuerCaptureRadius,
         pursuerSpeed,
     )
 
@@ -230,6 +234,7 @@ def optimize_spline_path(
     theta_start,
     theta_end,
     pursuerRange,
+    pursuerCaptureRadius,
     pursuerSpeed,
     right=True,
     previous_spline=None,
@@ -257,6 +262,7 @@ def optimize_spline_path(
                 theta_start,
                 theta_end,
                 pursuerRange,
+                pursuerCaptureRadius,
                 pursuerSpeed,
             )
         )
@@ -294,6 +300,7 @@ def optimize_spline_path(
             theta_start,
             theta_end,
             pursuerRange,
+            pursuerCaptureRadius,
             pursuerSpeed,
         )
         dEZDtf = dBEZDtf(
@@ -305,6 +312,7 @@ def optimize_spline_path(
             theta_start,
             theta_end,
             pursuerRange,
+            pursuerCaptureRadius,
             pursuerSpeed,
         )
         dVelocityDControlPointsVal = spline_opt_tools.dVelocityDControlPoints(
@@ -432,7 +440,7 @@ def optimize_spline_path(
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 0
+    opt.options["print_level"] = 5
     opt.options["max_iter"] = 100
     username = getpass.getuser()
     opt.options["hsllib"] = (
@@ -709,11 +717,12 @@ def optimize_spline_path_fist(
 def plan_path_from_interception_points(
     interceptionPositions,
     pursuerRange,
+    pursuerCaptureRadius,
+    pursuerSpeed,
     initialEvaderPosition,
     finalEvaderPosition,
     initialEvaderVelocity,
     evaderSpeed,
-    pursuerSpeed,
 ):
     arcs = BEZ_learning.intersection_arcs(
         interceptionPositions, [pursuerRange] * np.ones(len(interceptionPositions))
@@ -736,6 +745,7 @@ def plan_path_from_interception_points(
         theta_start=theta_start,
         theta_end=theta_end,
         pursuerRange=pursuerRange,
+        pursuerCaptureRadius=pursuerCaptureRadius,
         pursuerSpeed=pursuerSpeed,
         right=True,
         previous_spline=None,
@@ -756,6 +766,7 @@ def plan_path_from_interception_points(
         theta_start=theta_start,
         theta_end=theta_end,
         pursuerRange=pursuerRange,
+        pursuerCaptureRadius=pursuerCaptureRadius,
         pursuerSpeed=pursuerSpeed,
         right=False,
         previous_spline=None,
@@ -780,6 +791,7 @@ def main():
     pursuerPosition = np.array([0.0, 0.0])
     interceptionPositions = np.array([[1.0, 1.0]])
     pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.0
     evaderHeading = 0.0
     evaderSpeed = 1.5
 
@@ -793,11 +805,12 @@ def main():
     spline, arcs = plan_path_from_interception_points(
         interceptionPositions,
         pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
         initialEvaderPosition,
         finalEvaderPosition,
         initialEvaderVelocity,
         evaderSpeed,
-        pursuerSpeed,
     )
     fig, ax = plt.subplots(figsize=(10, 10))
     plot_spline(spline, ax)
@@ -812,9 +825,11 @@ def main():
     #     ax=ax,
     # )
     BEZ_learning.plot_potential_pursuer_reachable_region(
-        arcs, pursuerRange, xlim=(-4, 4), ylim=(-4, 4), ax=ax
+        arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
     )
-    BEZ_learning.plot_pursuer_reachable_region(pursuerPosition, pursuerRange, fig, ax)
+    BEZ_learning.plot_pursuer_reachable_region(
+        pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
+    )
     BEZ_learning.plot_interception_points(interceptionPositions, pursuerRange, ax)
     BEZ_learning.plot_circle_intersection_arcs(arcs, ax=ax)
     plt.show()
