@@ -175,7 +175,6 @@ def assure_velocity_constraint(
         # combined_knot_points = self.create_unclamped_knot_points(0, tf, num_control_points,params.splineOrder)
         v = get_spline_velocity(controlPoints, tf, splineOrder, numSamplesPerInterval)
         # pd, u, v, pos = self.spline_constraints(radarList, controlPoints, combined_knot_points,params.numConstraintSamples)
-    print("max v", np.max(v))
     return tf
 
 
