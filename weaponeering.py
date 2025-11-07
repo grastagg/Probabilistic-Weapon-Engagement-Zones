@@ -25,7 +25,7 @@ from bspline.matrix_evaluation import (
 )
 
 import dubinsPEZ
-import nueral_network_EZ
+# import nueral_network_EZ
 
 import dubins_EZ_path_planning
 
@@ -88,23 +88,23 @@ def plot_spline(
             pursuerCaptureRadius,
         )
         print("max monte carlo pez", np.max(pez))
-        nnPez, _, _ = nueral_network_EZ.nueral_network_pez(
-            pos,
-            agentHeadings,
-            agentSpeed,
-            pursuerPosition,
-            pursuerPositionCov,
-            pursuerHeading,
-            pursuerHeadindgVar,
-            pursuerSpeed,
-            pursuerSpeedVar,
-            pursuerTurnRadius,
-            pursuerTurnRadiusVar,
-            pursuerRange,
-            pusuerRangeVar,
-            pursuerCaptureRadius,
-        )
-        print("max nn pez", np.max(nnPez))
+        # nnPez, _, _ = nueral_network_EZ.nueral_network_pez(
+        #     pos,
+        #     agentHeadings,
+        #     agentSpeed,
+        #     pursuerPosition,
+        #     pursuerPositionCov,
+        #     pursuerHeading,
+        #     pursuerHeadindgVar,
+        #     pursuerSpeed,
+        #     pursuerSpeedVar,
+        #     pursuerTurnRadius,
+        #     pursuerTurnRadiusVar,
+        #     pursuerRange,
+        #     pusuerRangeVar,
+        #     pursuerCaptureRadius,
+        # )
+        # print("max nn pez", np.max(nnPez))
 
         c = ax.scatter(x, y, c=pez, s=4, cmap="inferno")
         divider = make_axes_locatable(ax)
@@ -180,10 +180,10 @@ def max_dubins_PEZ_along_spline_nn(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    # pez, _, _ = dubinsPEZ.linear_dubins_pez(
-    # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
-    # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
-    pez, _, _ = nueral_network_EZ.nueral_network_pez(
+    pez, _, _ = dubinsPEZ.linear_dubins_pez(
+        # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
+        # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
+        # pez, _, _ = nueral_network_EZ.nueral_network_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -479,7 +479,7 @@ def main():
     pursuerRangeVar = 0.1
     pursuerCaptureRadius = 0.0
     pursuerSpeed = 2.0
-    # pursuerSpeedVar = 0.1
+    # pursuerSpeedVar = 0.
     pursuerSpeedVar = 0.3
     pursuerTurnRadius = 0.3
     pursuerTurnRadiusVar = 0.005
@@ -547,8 +547,8 @@ def main():
         0.0,
         agentSpeed,
         ax,
+        useLinear=True,
         # useNumerical=True,
-        useNueralNetwork=True,
         # useLinearPlusNueralNetwork=True,
     )
     plt.show()

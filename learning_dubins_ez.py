@@ -57,12 +57,12 @@ jax.config.update("jax_enable_x64", True)
 
 positionAndHeadingOnly = False
 knownSpeed = False
-interceptionOnBoundary = True
+interceptionOnBoundary = False
 randomPath = False
-noisyMeasurementsFlag = False
+noisyMeasurementsFlag = True
 saveResults = True
 plotAllFlag = False
-planHPPath = False
+planHPPath = True
 
 dataDir = "results"
 if not planHPPath:
@@ -5179,7 +5179,7 @@ def main(seed):
         parameterMask,
         seed=seed,
         numLowPriorityAgents=15,
-        numOptimizerStarts=100,
+        numOptimizerStarts=150,
         keepLossThreshold=1e-4,
         plotEvery=1,
         # dataDir="results",
@@ -5774,7 +5774,7 @@ def summarize_percent_covered_columns(
 def plot_outer_union_approximation_size():
     fig, axes = plt.subplots(1, 3, figsize=(9, 3), layout="tight")
 
-    folder = "boundary"
+    folder = "interior"
     results_dir = "results/" + folder + "/knownSpeedAndShape"
     maxSteps = 15
     saveDir = "/home/ggs24/Desktop/learningez_figures/size_all.pdf"
@@ -5897,7 +5897,7 @@ def plot_path_time_vs_number_of_agents_single(
 
 
 def plot_path_time_vs_number_of_agents():
-    boundary = False
+    boundary = True
     if boundary:
         folder = "plannedHP/boundary/"
         saveDir = "/home/ggs24/Desktop/learningez_figures/path_time_vs_number_of_agents_boundary.pdf"
@@ -6019,9 +6019,9 @@ if __name__ == "__main__":
             plt.show()
         # #
     else:
-        plot_path_time_vs_number_of_agents()
+        # plot_path_time_vs_number_of_agents()
         # plot_outer_union_approximation_size()
-        # plot_error()
-        # summarize_percent_covered_columns("boundary")
+        plot_error()
+        # summarize_percent_covered_columns("interior")
 
 plt.show()

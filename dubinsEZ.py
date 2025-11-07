@@ -1,3 +1,5 @@
+import os
+
 from jax.lax import random_gamma_grad
 import numpy as np
 import time

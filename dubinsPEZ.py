@@ -1,3 +1,6 @@
+import os
+
+
 from operator import inv
 from jax.profiler import start_trace, stop_trace
 
@@ -15,8 +18,9 @@ from scipy.stats import zmap
 
 
 import dubinsEZ
+
 import fast_pursuer
-# import nueral_network_EZ
+import nueral_network_EZ
 
 
 jax.config.update("jax_enable_x64", True)
@@ -3709,25 +3713,25 @@ def plot_all_error(
     #     axes[1],
     #     useNumerical=True,
     # )
-    # usEZ = plot_dubins_PEZ_diff(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     axes[2],
-    #     # useNumerical=True,
-    #     useNueralNetwork=True,
-    #     # useLinearPlusNueralNetwork=True,
-    # )
+    usEZ = plot_dubins_PEZ_diff(
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        captureRadius,
+        pursuerRange,
+        pursuerRangeVar,
+        evaderHeading,
+        evaderSpeed,
+        axes[2],
+        # useNumerical=True,
+        useNueralNetwork=True,
+        # useLinearPlusNueralNetwork=True,
+    )
     quadEZ = plot_dubins_PEZ_diff(
         pursuerPosition,
         pursuerPositionCov,

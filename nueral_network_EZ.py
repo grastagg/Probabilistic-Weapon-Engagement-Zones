@@ -1,15 +1,42 @@
+import os
+import logging
+import warnings
+import absl.logging
+
+# --- suppress TensorFlow/XLA logs ---
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+
+# --- disable Python's root logger BEFORE JAX imports ---
+logging.getLogger().handlers.clear()
+logging.basicConfig(level=logging.ERROR)
+logging.getLogger("jax").setLevel(logging.ERROR)
+logging.getLogger("jax._src").setLevel(logging.ERROR)
+logging.getLogger("jax._src.dispatch").setLevel(logging.ERROR)
+logging.getLogger("jax._src.compiler").setLevel(logging.ERROR)
+logging.getLogger("jax._src.cache_key").setLevel(logging.ERROR)
+
+# --- silence absl + warnings ---
+absl.logging.set_verbosity(absl.logging.ERROR)
+warnings.filterwarnings("ignore")
+
+
 import jax
-from jax._src.ad_checkpoint import saved_residuals
+
+# from jax._src.ad_checkpoint import saved_residuals
 from scipy.sparse import dia
 import tqdm
 import os
 import time
 import datetime
 
+
 import optax
 import jax.numpy as jnp
 from jax import random, grad, jit, vmap
 from jax import random, jit, vmap, grad, value_and_grad
+
 from flax import serialization
 import numpy as np
 from functools import partial
@@ -17,13 +44,23 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from scipy.stats import qmc
 
+print(jax.default_backend())  # "gpu", "cpu", or "tpu"
 
 import dubinsEZ
+
 import dubinsPEZ
+
 import mlp
+
 
 # turn off type 3 fonts
 import matplotlib as mpl
+
+print("here")
+
+print(jax.devices())
+print(jax.default_backend())  # "gpu", "cpu", or "tpu"
+
 
 mpl.rcParams["pdf.fonttype"] = 42  # Use TrueType fonts (safe for most publishers)
 mpl.rcParams["ps.fonttype"] = 42  # For EPS output
@@ -320,7 +357,7 @@ def create_input_output_data_full(
     # run batched MC‑PEZ
     y, z = batched_mc_dubins_pez(
         X,
-        batch_size=200,
+        batch_size=2000,
     )
     # append z to xData
     # X = np.hstack((X, z[:, None]))
@@ -329,10 +366,8 @@ def create_input_output_data_full(
     # save train and test data
     xTrainDataFile = "data/xTrainData.csv"
     yTrainDataFile = "data/yTrainData.csv"
-    ydotTrainDataFile = "data/ydotTrainData.csv"
     xTestDataFile = "data/xTestData.csv"
     yTestDataFile = "data/yTestData.csv"
-    ydotTestDataFile = "data/ydotTestData.csv"
     with open(xTrainDataFile, "ab") as f:
         np.savetxt(f, X_train, delimiter=",", newline="\n")
     with open(yTrainDataFile, "ab") as f:
@@ -610,10 +645,8 @@ def make_checkpoint_dir():
 def train_mlp(
     X_np: np.ndarray,  # shape (N, d)
     y_np: np.ndarray,  # shape (N,)
-    y_dot_np: np.ndarray,  # shape (N, d)
     X_test: np.ndarray,  # shape (N_test, d)
     y_test: np.ndarray,  # shape (N_test,)
-    y_dot_test: np.ndarray,  # shape (N_test, d)
     init_params=None,
     # num_blocks=6,
     # features=15,
@@ -627,7 +660,6 @@ def train_mlp(
     # 1) convert data to JAX
     X = jnp.array(X_np)
     y = jnp.array(y_np)
-    y_dot = jnp.array(y_dot_np)
 
     # 2) init model + optimizer
     width = 128
@@ -648,7 +680,7 @@ def train_mlp(
 
     # 3) define a jitted update step that *closes over* model & optimizer
     @jit
-    def update_step(params, opt_state, X_batch, y_batch, ydot_batch, epoch_num):
+    def update_step(params, opt_state, X_batch, y_batch, epoch_num):
         """
         One optimization step that fits both values and (non‑NaN) derivatives.
 
@@ -657,7 +689,6 @@ def train_mlp(
         opt_state   : Optax optimizer state
         X_batch     : jnp.ndarray, shape (B, D)
         y_batch     : jnp.ndarray, shape (B,)
-        ydot_batch  : jnp.ndarray, shape (B, D), may contain NaNs
 
         Returns:
         new_params, new_opt_state, loss_scalar
@@ -676,26 +707,7 @@ def train_mlp(
                 # returns shape (D,)
                 return grad(lambda x0: model.apply(p, x0[None, :])[0])(x)
 
-            dy_pred = vmap(single_grad, in_axes=0)(X_batch)  # (B, D)
-            # # create penalty for negative values
-            #
-            mu_grads = jnp.stack(
-                [
-                    dy_pred[:, 4],  # turn radius
-                    dy_pred[:, 6],  # range
-                    dy_pred[:, 8],  # speed
-                ],
-                axis=1,
-            )
-            mu_grads_true = jnp.stack(
-                [
-                    ydot_batch[:, 3],  # turn radius
-                    ydot_batch[:, 4],  # range
-                    ydot_batch[:, 5],  # speed
-                ]
-            ).T
-            grad_squared_error = jnp.mean((mu_grads - mu_grads_true) ** 2)
-            return L_val + lam * grad_squared_error
+            return L_val
             # value_and_grad to get both scalar loss and parameter gradients
 
         loss, grads = value_and_grad(loss_fn)(params)
@@ -721,14 +733,11 @@ def train_mlp(
         total_loss = 0.0
         for i in range(steps):
             idx = perm[i * batch_size : (i + 1) * batch_size]
-            Xb, yb, ydotb = (
+            Xb, yb = (
                 X[idx],
                 y[idx],
-                y_dot[idx],
             )
-            params, opt_state, loss = update_step(
-                params, opt_state, Xb, yb, ydotb, epoch
-            )
+            params, opt_state, loss = update_step(params, opt_state, Xb, yb, epoch)
             total_loss += loss
         loss_history.append(total_loss / steps)
         # compute test loss at epoch end
@@ -1059,7 +1068,7 @@ def load_model(folder, net):
 
 
 start = time.time()
-saveDir = "./checkpoints/20250429_151150/"
+saveDir = "./checkpoints/20251107_133023/"
 # saveDir = "./checkpoints/20250425_170039/"
 model, restored_params = load_model(saveDir, "mlp")
 print("load model time", time.time() - start)
@@ -1302,7 +1311,7 @@ def compute_loss_linear_pez(
     y_test,
     saveFig=False,
 ):
-    saveDir = "./checkpoints/20250429_151150/"
+    saveDir = "./checkpoints/20251107_133023/"
     model, restored_params = load_model(saveDir, "mlp")
     y_pred_nn = model.apply(restored_params, X_test)
     y_pred_lin, det, trace = linear_pez_from_x(X_test)
@@ -1420,7 +1429,7 @@ def main():
             (-np.pi, np.pi),  # evaderHeadingRange
             (0.5, 2),  # evaderSpeedRange
         )
-        numberOfSamples = 15000000
+        numberOfSamples = 2000000
         create_input_output_data_full(numberOfSamples, *rng_args)
         # generate_data where all but heading var is 0
         # rng_args = (
@@ -1440,14 +1449,12 @@ def main():
         # numberOfSamples = 1
         # create_input_output_data_full(numberOfSamples, *rng_args)
 
-    trainModel = True
+    trainModel = False
     if trainModel:
         X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
         y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
-        ydot_test = np.genfromtxt("data/ydotTestData.csv", delimiter=",")
         X_train = np.genfromtxt("data/xTrainData.csv", delimiter=",")
         y_train = np.genfromtxt("data/yTrainData.csv", delimiter=",")
-        ydot_train = np.genfromtxt("data/ydotTrainData.csv", delimiter=",")
         print("y number of nan", np.sum(np.isnan(y_train)))
         X_train = X_train[~np.isnan(y_train)]
         y_train = y_train[~np.isnan(y_train)]
@@ -1455,10 +1462,8 @@ def main():
         model, params, loss, test_loss, saveDir = train_mlp(
             X_train,
             y_train,
-            ydot_train,
             X_test,
             y_test,
-            ydot_test,
             epochs=300,
             batch_size=1024,
         )
@@ -1471,7 +1476,7 @@ def main():
         print("fine loss", loss[-1])
         print("fine test loss", test_loss[-1])
 
-    plotTest = False
+    plotTest = True
     if plotTest:
         pursuerPosition = np.array([0.0, 0.0])
         # pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
@@ -1501,7 +1506,6 @@ def main():
         evaderPosition = np.array([[-0.25, 0.35]])
         pursuerParams = create_pursuer_params(
             pursuerPositionCov,
-            pursuerHeading,
             pursuerHeadingVar,
             minimumTurnRadius,
             minimumTurnRadiusVar,
@@ -1510,7 +1514,7 @@ def main():
             pursuerSpeed,
             pursuerSpeedVar,
         )
-        # saveDir = "./checkpoints/20250423_171138/"
+        saveDir = "./checkpoints/20251107_133023/"
         loadDir = saveDir
         model, restored_params = load_model(loadDir, "mlp")
         #
@@ -1530,29 +1534,29 @@ def main():
 
 
 if __name__ == "__main__":
-    rng_args = (
-        0.5,  # pursuerPositionCovMax
-        0.5,  # pursuerHeadingVarMax
-        (0.1, 1.5),  # pursuerTurnRadiusRange
-        0.025,  # pursuerTurnRadiusVarMax
-        (1.0, 3.0),  # pursuerRangeRange
-        0.5,  # pursuerRangeVarMax
-        (0.5, 3),  # pursuerSpeedRange
-        0.5,  # pursuerSpeedVarMax
-        (-3, 3),  # evaderXPositionRange
-        (-3, 3),  # evaderYPositionRange
-        (-np.pi, np.pi),  # evaderHeadingRange
-        (0.5, 2),  # evaderSpeedRange
-    )
-    numberOfSamples = 500000
-    maxTrace = 1
-    create_plot_data(numberOfSamples, maxTrace, *rng_args)
-    X_test = np.genfromtxt("data/plot/xTrainData.csv", delimiter=",")
-    y_test = np.genfromtxt("data/plot/yTrainData.csv", delimiter=",")
-    # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")[:numberOfSamples, :]
-    # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")[:numberOfSamples]
-    # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
-    # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
-    # compute_loss_linear_pez(X_test, y_test, saveFig=False)
+    # rng_args = (
+    #     0.5,  # pursuerPositionCovMax
+    #     0.5,  # pursuerHeadingVarMax
+    #     (0.1, 1.5),  # pursuerTurnRadiusRange
+    #     0.025,  # pursuerTurnRadiusVarMax
+    #     (1.0, 3.0),  # pursuerRangeRange
+    #     0.5,  # pursuerRangeVarMax
+    #     (0.5, 3),  # pursuerSpeedRange
+    #     0.5,  # pursuerSpeedVarMax
+    #     (-3, 3),  # evaderXPositionRange
+    #     (-3, 3),  # evaderYPositionRange
+    #     (-np.pi, np.pi),  # evaderHeadingRange
+    #     (0.5, 2),  # evaderSpeedRange
+    # )
+    # numberOfSamples = 500000
+    # maxTrace = 1
+    # create_plot_data(numberOfSamples, maxTrace, *rng_args)
+    # X_test = np.genfromtxt("data/plot/xTrainData.csv", delimiter=",")
+    # y_test = np.genfromtxt("data/plot/yTrainData.csv", delimiter=",")
+    # # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")[:numberOfSamples, :]
+    # # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")[:numberOfSamples]
+    # # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
+    # # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
+    # # compute_loss_linear_pez(X_test, y_test, saveFig=False)
     main()
     # plt.show()

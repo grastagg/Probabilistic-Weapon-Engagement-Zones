@@ -13,7 +13,7 @@ from jax import vmap
 
 jax.config.update("jax_enable_x64", True)
 
-jax.config.update("jax_platform_name", "cpu")
+# jax.config.update("jax_platform_name", "cpu")
 # jax.default_device(jax.devices("cpu")[0])
 
 
