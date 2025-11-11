@@ -717,11 +717,11 @@ def plot_dubins_EZ(
     Y = Y.reshape(numPoints, numPoints)
     colors = ["green"]
     # colors = ["red"]
-    ax.contour(X, Y, ZTrue, levels=[0], colors=colors, zorder=10000, linewidths=3)
+    ax.contour(X, Y, ZTrue, levels=[0], colors=colors, linewidths=2)
     # ax.contourf(
     #     X, Y, ZTrue, levels=np.linspace(np.min(ZTrue), np.max(ZTrue), 100), alpha=0.5
     # )
-    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=3, label="CSBEZ")
+    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label="CSBEZ")
     # add label so it can be added to legend
 
     # # ax.contour(X, Y, ZGeometric, cmap="summer")
@@ -799,14 +799,14 @@ def plot_dubins_reachable_set(
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
 
-    ax.contour(X, Y, Z <= 0.0, colors=colors, levels=[0], alpha=alpha, linewidths=3)
+    ax.contour(X, Y, Z <= 0.0, colors=colors, levels=[0], alpha=alpha, linewidths=2)
     # c = ax.contourf(X, Y, Z, levels=np.linspace(-1, 1, 101), alpha=0.5)
     # c = ax.pcolormesh(X, Y, Z, alpha=0.5, cmap="coolwarm", vmin=-1, vmax=1)
     # cbar = plt.colorbar(c, ax=ax)
     # contour_proxy = plt.plot(
     #     [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
     # )
-    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=3, label="RS")
+    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label="RS")
     ax.set_aspect("equal", "box")
     return ax
 
@@ -949,7 +949,7 @@ def plot_test_grad(
 def add_arrow(ax, start, end, color, label, annotationFontSize):
     # Draw arrow on plot
     # arrow = FancyArrowPatch(start, end, arrowstyle="->", color=color, lw=2)
-    arrow = FancyArrowPatch(
+    arrow = patches.FancyArrowPatch(
         posA=start,
         posB=end,
         arrowstyle="->",
@@ -998,7 +998,7 @@ def plot_theta_and_vectors_left_turn(
     leftCircleX = C[0] + minimumTurnRadius * np.cos(circleTheta)
     leftCircleY = C[1] + minimumTurnRadius * np.sin(circleTheta)
 
-    annotationFontSize = 17
+    annotationFontSize = 12
 
     ax.scatter(*T, c="k")
     ax.scatter(*F, c="k")
@@ -1089,11 +1089,11 @@ def main_EZ():
     pursuerSpeed = 2
 
     pursuerRange = 2.5
-    minimumTurnRadius = 0.6
+    minimumTurnRadius = 0.5
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 1
-    evaderPosition = np.array([-0.8858, 0.8512])
+    evaderPosition = np.array([-2.8, 1.4])
     startTime = time.time()
 
     # length, tangentPoint = find_dubins_path_length_right_strait(
@@ -1109,24 +1109,13 @@ def main_EZ():
     #     tangentPoint,
     # )
     #
-    fig, ax = plt.subplots(figsize=(3, 3), layout="constrained")
+    fig, ax = plt.subplots(figsize=(6, 5), layout="constrained")
     # plotEngagementZone(
     #     evaderHeading,
     #     pursuerPosition,
     #     pursuerRange,
     #     captureRadius,
     #     pursuerSpeed,
-    #     evaderSpeed,
-    #     ax,
-    # )
-    # plot_theta_and_vectors_left_turn(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     pursuerSpeed,
-    #     minimumTurnRadius,
-    #     pursuerRange,
-    #     evaderPosition,
-    #     evaderHeading,
     #     evaderSpeed,
     #     ax,
     # )
@@ -1144,13 +1133,25 @@ def main_EZ():
         evaderSpeed,
         ax,
     )
+    plot_theta_and_vectors_left_turn(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        pursuerRange,
+        evaderPosition,
+        evaderHeading,
+        evaderSpeed,
+        ax,
+    )
     plt.xlabel("X")
     plt.ylabel("Y")
     ax.set_xlim([-3, 3])
     ax.set_ylim([-3, 3])
     # set tick fonhtsize
     ax.tick_params(axis="both", which="major")
-    ax.legend(loc="lower right")
+    # put legend outside the plot
+    ax.legend(loc="upper left", bbox_to_anchor=(1, 1))
     plt.show()
 
 
