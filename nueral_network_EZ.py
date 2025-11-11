@@ -2,6 +2,21 @@ import os
 import logging
 import warnings
 import absl.logging
+import seaborn as sns
+
+import matplotlib
+
+matplotlib.use("Agg")
+
+# get rid of type 3 fonts
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+# set font size for title, axis labels, and legend, and tick labels
+matplotlib.rcParams["axes.titlesize"] = 14
+matplotlib.rcParams["axes.labelsize"] = 12
+matplotlib.rcParams["legend.fontsize"] = 10
+matplotlib.rcParams["ytick.labelsize"] = 10
+matplotlib.rcParams["xtick.labelsize"] = 10
 
 # --- suppress TensorFlow/XLA logs ---
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -607,7 +622,6 @@ def create_plot_data(
             pursuerSpeedVarMax,
         ]
     )
-    print("maxVars", maxVars)
     X = create_plot_data_x_batch(
         key,
         traceRange,
@@ -621,14 +635,15 @@ def create_plot_data(
         evaderSpeedRange,
         maxVars,
     )
-    print(X.shape)
 
     y, z = batched_mc_dubins_pez(
         X,
         batch_size=200,
     )
+    print("saving")
     np.savetxt("data/plot/xTrainData.csv", X, delimiter=",", newline="\n")
     np.savetxt("data/plot/yTrainData.csv", y, delimiter=",", newline="\n")
+    print("saved")
 
 
 def make_checkpoint_dir():
@@ -960,7 +975,7 @@ def plot_results(evaderHeading, evaderSpeed, model, restored_params, pursuerPara
         Z,
         levels=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
     )
-    plt.clabel(c, inline=True, fontsize=20)
+    plt.clabel(c, inline=True)
     # ax.pcolormesh(X, Y, Z, shading="auto", cmap="viridis")
     pursuerPosition = np.array([0.0, 0.0])
     (
@@ -1003,7 +1018,7 @@ def plot_results(evaderHeading, evaderSpeed, model, restored_params, pursuerPara
         ZTrue,
         levels=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
     )
-    plt.clabel(c, inline=True, fontsize=20)
+    plt.clabel(c, inline=True)
     fig3, ax3 = plt.subplots()
     ax3.set_aspect("equal")
     ZMC = ZTrue
@@ -1017,7 +1032,6 @@ def plot_results(evaderHeading, evaderSpeed, model, restored_params, pursuerPara
         0.0,
         0.9,
         f"RMSE: {rmse:.4f}",
-        fontsize=12,
         ha="center",
         va="center",
         color="white",
@@ -1026,7 +1040,6 @@ def plot_results(evaderHeading, evaderSpeed, model, restored_params, pursuerPara
         0.0,
         0.7,
         f"Avg Abs Diff: {average_abs_diff:.4f}",
-        fontsize=12,
         ha="center",
         va="center",
         color="white",
@@ -1035,7 +1048,6 @@ def plot_results(evaderHeading, evaderSpeed, model, restored_params, pursuerPara
         0.0,
         0.5,
         f"Max Abs Diff: {max_abs_diff:.4f}",
-        fontsize=12,
         ha="center",
         va="center",
         color="white",
@@ -1069,7 +1081,6 @@ def load_model(folder, net):
 
 start = time.time()
 saveDir = "./checkpoints/20251107_133023/"
-# saveDir = "./checkpoints/20250425_170039/"
 model, restored_params = load_model(saveDir, "mlp")
 print("load model time", time.time() - start)
 
@@ -1267,8 +1278,9 @@ def binning(abs_error, trace):
     bin_means = []
     for i in range(len(bins) - 1):
         bin_mask = (trace >= bins[i]) & (trace < bins[i + 1])
-        bin_mean = jnp.mean(abs_error[bin_mask])
+        # bin_mean = jnp.mean(abs_error[bin_mask])
         # bin_mean = jnp.max(abs_error[bin_mask])
+        bin_mean = np.median(abs_error[bin_mask])
         print(f"Bin {i}: {bins[i]} - {bins[i + 1]}: {jnp.count_nonzero(bin_mask)}")
         bin_means.append(bin_mean)
     return bins, bin_means
@@ -1360,21 +1372,21 @@ def compute_loss_linear_pez(
 
     save_dir = os.path.expanduser("~/Desktop/cspez_plot")
     # Create figure and axis
-    fig2, ax2 = plt.subplots(figsize=(10, 6))
+    fig2, ax2 = plt.subplots(figsize=(4, 3))
 
     # Plot data
     ax2.plot(bins[:-1], bin_means_lin, label="LCSPEZ", linewidth=2)
-    ax2.plot(bins[:-1], bin_means_nn, label="NNCSPEZ", linewidth=2)
     ax2.plot(bins[:-1], bin_means_quad, label="QCSPEZ", linewidth=2)
+    ax2.plot(bins[:-1], bin_means_nn, label="NNCSPEZ", linewidth=2)
 
     # Axis labels and title
-    ax2.set_title("Average Absolute Error", fontsize=24)
-    ax2.set_xlabel(r"Trace of $\Sigma_{\Theta_P}$", fontsize=22)
-    ax2.set_ylabel("Average Absolute Error", fontsize=22)
-    ax2.tick_params(axis="both", which="major", labelsize=20)
+    ax2.set_xlabel(r"Trace of $\Sigma_{\Theta_P}$")
+    ax2.set_ylabel("Median Absolute Error")
+    ax2.tick_params(axis="both", which="major")
+    ax2.grid(True)
 
     # Legend
-    ax2.legend(fontsize=18)
+    ax2.legend()
     fig_path = os.path.join(save_dir, "avg_abs_error_vs_trace.pdf")
 
     fig2.tight_layout()
@@ -1382,32 +1394,35 @@ def compute_loss_linear_pez(
 
     # plot histogram of pursuer position covariance
     plot_all_histograms(X_test)
-    fig3, ax3 = plt.subplots()
-    # plot histogram of y_pred_lin
-    ax3.hist(y_test, bins=50, edgecolor="black", alpha=0.7)
 
-    # Create figure
-    fig4, ax4 = plt.subplots(figsize=(10, 6))  # adjust size as needed
-    fig4, ax4 = plt.subplots()
+    fig4, ax4 = plt.subplots(figsize=(4, 3), layout="constrained")
 
     # Boxplot
-    ax4.boxplot(
+    bp = ax4.boxplot(
         [abs_error_lin, abs_error_quad, abs_error_nn],
-        labels=["LCSPEZ", "QCSPEZ", "NNCSPEZ"],
+        vert=False,
+        showfliers=False,
         patch_artist=True,
+        labels=["LCSPEZ", "QCSPEZ", "NNCSPEZ"],
+        whiskerprops=dict(linewidth=2),
+        capprops=dict(linewidth=2),
+        medianprops=dict(linewidth=2),
     )
+    ax4.grid(True)
+
+    # sns.violinplot(
+    #     data=[abs_error_lin, abs_error_quad, abs_error_nn], inner="quart", cut=0
+    # )
 
     # Titles and labels
-    ax4.set_title("Absolute Error", fontsize=24)
-    ax4.set_xlabel("Model", fontsize=22)
-    ax4.set_ylabel("Absolute Error", fontsize=22)
-    ax4.tick_params(axis="both", which="major", labelsize=20)
+    ax4.set_xlabel("Absolute Error")
+    # plt.legend()
 
     # Save figure
     if saveFig:
         fig_path = os.path.join(save_dir, "abs_error_boxplot.pdf")
         fig4.tight_layout()
-        fig4.savefig(fig_path, format="pdf", bbox_inches="tight")
+        fig4.savefig(fig_path, format="pdf", dpi=300)
 
     plt.show()
 
@@ -1533,30 +1548,36 @@ def main():
         compute_loss_linear_pez(X_test, y_test)
 
 
-if __name__ == "__main__":
-    # rng_args = (
-    #     0.5,  # pursuerPositionCovMax
-    #     0.5,  # pursuerHeadingVarMax
-    #     (0.1, 1.5),  # pursuerTurnRadiusRange
-    #     0.025,  # pursuerTurnRadiusVarMax
-    #     (1.0, 3.0),  # pursuerRangeRange
-    #     0.5,  # pursuerRangeVarMax
-    #     (0.5, 3),  # pursuerSpeedRange
-    #     0.5,  # pursuerSpeedVarMax
-    #     (-3, 3),  # evaderXPositionRange
-    #     (-3, 3),  # evaderYPositionRange
-    #     (-np.pi, np.pi),  # evaderHeadingRange
-    #     (0.5, 2),  # evaderSpeedRange
-    # )
-    # numberOfSamples = 500000
+def error_vs_trace():
+    rng_args = (
+        0.5,  # pursuerPositionCovMax
+        0.5,  # pursuerHeadingVarMax
+        (0.1, 1.5),  # pursuerTurnRadiusRange
+        0.025,  # pursuerTurnRadiusVarMax
+        (1.0, 3.0),  # pursuerRangeRange
+        0.5,  # pursuerRangeVarMax
+        (0.5, 3),  # pursuerSpeedRange
+        0.5,  # pursuerSpeedVarMax
+        (-3, 3),  # evaderXPositionRange
+        (-3, 3),  # evaderYPositionRange
+        (-np.pi, np.pi),  # evaderHeadingRange
+        (0.5, 2),  # evaderSpeedRange
+    )
+    maxTrace = 1.0
+    numberOfSamples = 1000000
     # maxTrace = 1
     # create_plot_data(numberOfSamples, maxTrace, *rng_args)
-    # X_test = np.genfromtxt("data/plot/xTrainData.csv", delimiter=",")
-    # y_test = np.genfromtxt("data/plot/yTrainData.csv", delimiter=",")
-    # # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")[:numberOfSamples, :]
-    # # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")[:numberOfSamples]
-    # # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
-    # # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
-    # # compute_loss_linear_pez(X_test, y_test, saveFig=False)
-    main()
+    X_test = np.genfromtxt("data/plot/xTrainData.csv", delimiter=",")
+    y_test = np.genfromtxt("data/plot/yTrainData.csv", delimiter=",")
+    # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")[:numberOfSamples, :]
+    # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")[:numberOfSamples]
+    # X_test = np.genfromtxt("data/xTestData.csv", delimiter=",")
+    # y_test = np.genfromtxt("data/yTestData.csv", delimiter=",")
+    compute_loss_linear_pez(X_test, y_test, saveFig=True)
+
+
+if __name__ == "__main__":
+    error_vs_trace()
+
+    # main()
     # plt.show()

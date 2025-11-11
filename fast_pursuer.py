@@ -115,11 +115,11 @@ def plotMahalanobisDistance(
     # c = ax.pcolormesh(X, Y, malhalanobisDistance)
 
     # Mark the pursuer position with a dark red dot
-    ax.scatter(
-        pursuerPosition[0],
-        pursuerPosition[1],
-        color="darkred",
-    )
+    # ax.scatter(
+    #     pursuerPosition[0],
+    #     pursuerPosition[1],
+    #     color="darkred",
+    # )
 
     # Add a color bar and increase font size
     if plotColorbar:
@@ -128,16 +128,15 @@ def plotMahalanobisDistance(
         # fig.colorbar(c, cax=cax)
         # l, b, w, h = ax.get_position().bounds
         # cax = fig.add_axes([l + w + 0.02, b, 0.02, h])  # new colorbar axis
-        cbar = ax.colorbar(c, cax=cax, ticks=[0, 1, 2, 3])
-        cbar.set_label("Pursuer Std Dev", fontsize=26)
-        cbar.ax.tick_params(labelsize=22)
+        cbar = plt.colorbar(c, cax=cax, ticks=[0, 1, 2, 3], shrink=0.5)
+        cbar.set_label("Pursuer Std Dev")
+        cbar.ax.tick_params()
     # if plotColorbar:
     #     l, b, w, h = ax.get_position().bounds
     #     cax = fig.add_axes([l + w + 0.02, b, 0.02, h])
     #     # cbar = fig.colorbar(c, ax=cax, cax=cax, ticks=[0, 1, 2, 3], shrink=0.5)
     #     cbar = plt.colorbar(c, ax=cax, ticks=[0, 1, 2, 3])
     #     cbar.set_label("Pursuer Std Dev", fontsize=26)
-    #     cbar.ax.tick_params(labelsize=26)
 
 
 def plotEngagementZone(
@@ -562,7 +561,6 @@ def probabalisticEngagementZoneVectorizedTemp(
 #     # c = plt.Circle(pursuerPosition, pursuerRange+pursuerCaptureRange, fill=False)
 #     # ax.add_artist(c)
 #     c = ax.contour(X, Y, engagementZonePlot.reshape(50,50), levels=np.linspace(0,1,11))
-#     ax.clabel(c, inline=True, fontsize=8)
 
 
 #     return
@@ -627,7 +625,7 @@ def plotProbablisticEngagementZone(
     c = ax.contour(
         X, Y, engagementZonePlot_reshaped, levels=np.linspace(0.1, 1, 10), linewidths=2
     )
-    ax.clabel(c, inline=True, fontsize=22)
+    ax.clabel(c, inline=True)
 
     # Add circle representing pursuer's range
     # for i in range(3):
@@ -713,9 +711,7 @@ def plotMCProbablisticEngagementZone(
     c = ax.contour(
         X, Y, engagementZonePlot, levels=np.linspace(0.1, 1, 10), linewidths=2
     )
-    ax.clabel(c, inline=True, fontsize=22)
-    ax.tick_params(axis="x", labelsize=26)
-    ax.tick_params(axis="y", labelsize=26)
+    ax.clabel(c, inline=True)
     ax.add_artist(c)
 
     return engagementZonePlot
@@ -772,16 +768,12 @@ def plot_abs_diff(linPez, mcPez, ax, fig):
     X, Y = jnp.meshgrid(x, y)
     c = ax.pcolormesh(X, Y, absdiff.reshape(X.shape), cmap="viridis")
     cbar = fig.colorbar(c, ax=ax)
-    cbar.set_label("Absolute Difference", fontsize=26)
-    cbar.ax.tick_params(labelsize=22)
-    cbar.ax.tick_params(labelsize=22)
+    cbar.set_label("Absolute Difference")
 
     ax.set_aspect("equal")
-    ax.set_xlabel("X", fontsize=26)
-    ax.set_ylabel("Y", fontsize=26)
-    ax.tick_params(axis="x", labelsize=26)
-    ax.tick_params(axis="y", labelsize=26)
-    ax.set_title("Linear vs MC PEZ", fontsize=36)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_title("Linear vs MC PEZ")
 
 
 # probabalisticEngagementZone(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, np.array([[0.1, 0], [0, 0.1]]), pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
@@ -832,12 +824,10 @@ def main():
     #     agentSpeed,
     #     mcAx,
     # )
-    mcAx.set_xlabel("X", fontsize=26)
-    mcAx.set_ylabel("Y", fontsize=26)
-    mcAx.tick_params(axis="x", labelsize=26)
-    mcAx.tick_params(axis="y", labelsize=26)
+    mcAx.set_xlabel("X")
+    mcAx.set_ylabel("Y")
     mcAx.set_aspect("equal")
-    mcAx.set_title("Monte Carlo PEZ", fontsize=36)
+    mcAx.set_title("Monte Carlo PEZ")
     # linFig, linAx = plt.subplots(1, 1)
     linAx = ax[0]
     if np.any(pursuerPositionCov):
@@ -861,8 +851,6 @@ def main():
         agentSpeed,
         linAx,
     )
-    linAx.tick_params(axis="x", labelsize=26)
-    linAx.tick_params(axis="y", labelsize=26)
     # plotEngagementZone(
     #     agentInitialHeading,
     #     pursuerInitialPosition,
@@ -872,9 +860,9 @@ def main():
     #     agentSpeed,
     #     linAx,
     # )
-    linAx.set_xlabel("X", fontsize=26)
-    linAx.set_ylabel("Y", fontsize=26)
-    linAx.set_title("Linearized PEZ", fontsize=36)
+    linAx.set_xlabel("X")
+    linAx.set_ylabel("Y")
+    linAx.set_title("Linearized PEZ")
     fig.set_size_inches(20, 20)
     # plt.savefig("/home/ggs24/Desktop/PEZ.png", dpi=500, bbox_inches="tight")
     fig, ax = plt.subplots(1, 1)

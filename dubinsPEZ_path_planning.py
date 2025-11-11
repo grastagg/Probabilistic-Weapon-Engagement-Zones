@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -16,8 +17,19 @@ import jax
 
 import fast_pursuer
 
+
+matplotlib.use("Agg")
+
+# get rid of type 3 fonts
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
+# set font size for title, axis labels, and legend, and tick labels
+matplotlib.rcParams["axes.titlesize"] = 14
+matplotlib.rcParams["axes.labelsize"] = 12
+matplotlib.rcParams["legend.fontsize"] = 10
+matplotlib.rcParams["ytick.labelsize"] = 10
+matplotlib.rcParams["xtick.labelsize"] = 10
+
 
 from bspline.matrix_evaluation import (
     matrix_bspline_evaluation_for_dataset,
@@ -52,14 +64,11 @@ def plot_spline(
     ax,
     plotPEZ=True,
     pez_limit=0.2,
+    label=False,
 ):
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
-    ax.set_xlabel("X", fontsize=26)
-    ax.set_ylabel("Y", fontsize=26)
-    ax.tick_params(axis="x", labelsize=26)
-    ax.tick_params(axis="y", labelsize=26)
     # set tick values
     ax.set_xticks(np.arange(-4, 4, 1))
     ax.set_yticks(np.arange(-4, 4, 1))
@@ -133,17 +142,17 @@ def plot_spline(
         # cax = divider.append_axes("right", size="5%", pad=0.05)
         #
         # cbar = plt.colorbar(c, cax=cax)
-        # cbar.ax.tick_params(labelsize=16)
     # else:
     # ax.plot(x, y, label=f"CSPEZ Limit: {pez_limit}, Max MCCSPEZ: {maxMCpez}", linewidth=3)
-    ax.plot(x, y, label=f"CSPEZ Limit: {pez_limit}", linewidth=3)
+    if label:
+        # ax.plot(x, y, label=f"CSPEZ Limit: {pez_limit}", linewidth=2)
+        ax.plot(x, y, label=r"$\epsilon=$" + str(pez_limit), linewidth=2)
+    else:
+        ax.plot(x, y, linewidth=2)
 
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
-    ax.scatter(pursuerPosition[0], pursuerPosition[1], c="r")
     # ax.add_artist(c)
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
     # print max mc and linear pez in title
     # limit to 3 decimal places
 
@@ -753,10 +762,15 @@ def compare_pez_limits(
     quadraticPez=False,
     neuralNetworkPez=False,
     cax=None,
+    ylabel=False,
+    label=False,
 ):
     # numFigures = len(pez_limits)
     # # two rows
     # fig, axs = plt.subplots(2, numFigures // 2, layout="tight")
+    ax.set_xlabel("X")
+    if ylabel:
+        ax.set_ylabel("Y")
 
     for i, pez_limit in enumerate(pez_limits):
         print("pez limit", pez_limit)
@@ -806,29 +820,34 @@ def compare_pez_limits(
             ax,
             plotPEZ=True,
             pez_limit=pez_limit,
+            label=label,
         )
     if linearPez:
-        ax.set_title("LCSPEZ", fontsize=30)
+        ax.set_title("LCSPEZ")
         fast_pursuer.plotMahalanobisDistance(
             pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=False
         )
     elif quadraticPez:
-        ax.set_title("QCSPEZ", fontsize=30)
+        ax.set_title("QCSPEZ")
         fast_pursuer.plotMahalanobisDistance(
             pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=False
         )
     elif neuralNetworkPez:
-        ax.set_title("NNCSPEZ", fontsize=30)
-        ax.legend(fontsize=15)
+        ax.set_title("NNCSPEZ")
+        # ax.legend()
         fast_pursuer.plotMahalanobisDistance(
-            pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True, cax=cax
+            pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True
         )
+    ax.set_xlim([-4.5, 4.5])
+    ax.set_ylim([-4.5, 4.5])
+    ax.set_xticks(np.arange(-4, 5, 2))
+    ax.set_yticks(np.arange(-4, 5, 2))
 
 
 def main():
     pursuerPosition = np.array([0.0, 0.0])
-    # pursuerPositionCov = np.array([[0.05, -0.04], [-0.04, 0.4]])
-    pursuerPositionCov = np.array([[0.025, 0.04], [0.04, 0.1]])
+    pursuerPositionCov = np.array([[0.05, -0.04], [-0.04, 0.4]])
+    # pursuerPositionCov = np.array([[0.025, 0.04], [0.04, 0.1]])
     # pursuerHeading = 0 * np.pi / 2
     pursuerHeading = (10.0 / 20.0) * np.pi
     # pursuerHeadingVar = 0.3
@@ -900,14 +919,13 @@ def main():
     )
     print("time to plan deterministic spline", time.time() - start)
 
-    fig = plt.figure(figsize=(14, 5))
-    gs = gridspec.GridSpec(1, 4, width_ratios=[1, 1, 1, 0.05], wspace=0.3)
+    fig, axes = plt.subplots(1, 3, figsize=(6, 3), layout="constrained")
     pez_limits = [0.01, 0.05, 0.25, 0.5]
+    # pez_limits = [0.01]
+    ax1 = axes[0]
+    ax2 = axes[1]
+    ax3 = axes[2]
     # Create 3 subplots and 1 for the colorbar
-    ax1 = fig.add_subplot(gs[0, 0])
-    ax2 = fig.add_subplot(gs[0, 1])
-    ax3 = fig.add_subplot(gs[0, 2])
-    cax = fig.add_subplot(gs[0, 3])  # reserved space for colorbar
     # pez_limits = [0.01]
     print("LIENAR")
     compare_pez_limits(
@@ -938,6 +956,8 @@ def main():
         ax1,
         linearPez=True,
         fig=fig,
+        ylabel=True,
+        label=True,
     )
     print("QUADRATIC")
     compare_pez_limits(
@@ -998,67 +1018,16 @@ def main():
         ax3,
         neuralNetworkPez=True,
         fig=fig,
-        cax=cax,
     )
-
-    # pez_limit = 0.2
-    # splineDubins = optimize_spline_path(
-    #     startingLocation,
-    #     endingLocation,
-    #     initialVelocity,
-    #     numControlPoints,
-    #     splineOrder,
-    #     velocity_constraints,
-    #     turn_rate_constraints,
-    #     curvature_constraints,
-    #     num_constraint_samples,
-    #     pez_limit,
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     pursuerCaptureRadius,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     pursuerTurnRadius,
-    #     pursuerTurnRadiusVar,
-    #     agentSpeed,
-    #     detSpline.c.flatten(),
-    #     detSpline.t[-detSpline.k - 1],
-    # )
-    # pez_limit = 0.1
-    # start = time.time()
-    # splineDubins = optimize_spline_path(
-    #     startingLocation,
-    #     endingLocation,
-    #     initialVelocity,
-    #     numControlPoints,
-    #     splineOrder,
-    #     velocity_constraints,
-    #     turn_rate_constraints,
-    #     curvature_constraints,
-    #     num_constraint_samples,
-    #     pez_limit,
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     pursuerCaptureRadius,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     pursuerTurnRadius,
-    #     pursuerTurnRadiusVar,
-    #     agentSpeed,
-    #     detSpline.c.flatten(),
-    #     detSpline.t[-detSpline.k - 1],
-    # )
-    # print("time to plan probabilistic spline", time.time() - start)
-
-    fig.tight_layout()
+    fig.legend(
+        loc="lower center",
+        ncol=len(pez_limits),
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.02),
+    )
+    save_dir = os.path.expanduser("~/Desktop/cspez_plot")
+    fig_path = os.path.join(save_dir, "path_planning_comparison.pdf")
+    fig.savefig(fig_path, format="pdf")
     plt.show()
 
 

@@ -22,10 +22,24 @@ import dubinsEZ
 import fast_pursuer
 import nueral_network_EZ
 
+import matplotlib
+
+matplotlib.use("Agg")
+
+# get rid of type 3 fonts
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+# set font size for title, axis labels, and legend, and tick labels
+matplotlib.rcParams["axes.titlesize"] = 14
+matplotlib.rcParams["axes.labelsize"] = 12
+matplotlib.rcParams["legend.fontsize"] = 10
+matplotlib.rcParams["ytick.labelsize"] = 10
+matplotlib.rcParams["xtick.labelsize"] = 10
+
 
 jax.config.update("jax_enable_x64", True)
 
-numPoints = 100
+numPoints = 150
 # Vectorized function using vmap
 in_dubins_engagement_zone = jax.jit(
     jax.vmap(
@@ -2634,6 +2648,8 @@ def plot_dubins_PEZ(
     useNumerical=False,
     useNueralNetwork=False,
     useLinearPlusNueralNetwork=False,
+    labelX=True,
+    labelY=True,
 ):
     rangeX = 1.5
     x = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -2663,7 +2679,7 @@ def plot_dubins_PEZ(
         )
         time.sleep(1)
         print("linear_dubins_pez time", time.time() - start)
-        ax.set_title("LCSPEZ", fontsize=20)
+        ax.set_title("LCSPEZ")
     elif useUnscented:
         ZTrue, _, _ = uncented_dubins_pez(
             jnp.array([X, Y]).T,
@@ -2701,7 +2717,7 @@ def plot_dubins_PEZ(
             captureRadius,
         )
         print("mc_dubins_PEZ time", time.time() - start)
-        ax.set_title("MCCSPEZ", fontsize=20)
+        ax.set_title("MCCSPEZ")
     elif useQuadratic:
         start = time.time()
         ZTrue, _, _ = quadratic_dubins_pez(
@@ -2721,7 +2737,7 @@ def plot_dubins_PEZ(
             captureRadius,
         )
         print("quadratic_dubins_pez time", time.time() - start)
-        ax.set_title("QCSPEZ", fontsize=20)
+        ax.set_title("QCSPEZ")
     elif useNumerical:
         start = time.time()
         ZTrue, _, _ = dubins_pez_numerical_integration_sparse(
@@ -2744,7 +2760,7 @@ def plot_dubins_PEZ(
             weights,
         )
         print("numerical integration time", time.time() - start)
-        ax.set_title("Numerical Integration Dubins PEZ", fontsize=20)
+        ax.set_title("Numerical Integration Dubins PEZ")
     elif useNueralNetwork:
         start = time.time()
         ZTrue, _, _ = nueral_network_EZ.nueral_network_pez(
@@ -2763,7 +2779,7 @@ def plot_dubins_PEZ(
             pursuerRangeVar,
             captureRadius,
         )
-        ax.set_title("NNCSPEZ", fontsize=20)
+        ax.set_title("NNCSPEZ")
         print("nueral_network_EZ time", time.time() - start)
     elif useLinearPlusNueralNetwork:
         start = time.time()
@@ -2812,33 +2828,25 @@ def plot_dubins_PEZ(
         ZTrue,
         levels=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
     )
-    plt.clabel(c, inline=True, fontsize=20)
+    plt.clabel(c, inline=True)
     # c = ax.pcolormesh(X, Y, ZTrue)
-    # if useUnscented:
-    ax.set_xlabel("X", fontsize=26)
-    ax.set_ylabel("Y", fontsize=26)
+    if labelX:
+        ax.set_xlabel("X")
+    if labelY:
+        ax.set_ylabel("Y")
     # set tick size
-    ax.tick_params(axis="both", which="major", labelsize=20)
+    ax.tick_params(axis="both", which="major")
     ax.set_aspect("equal", "box")
+    ax.set_ylim([-1.5, 1.5])
+    ax.set_xlim([-1.5, 1.5])
+    ax.set_xticks(np.arange(-1.0, 2.0, 1.0))
+    ax.set_yticks(np.arange(-1.0, 2.0, 1.0))
 
     # ax.contour(X, Y, ZGeometric, cmap="summer")
-    ax.scatter(*pursuerPosition, c="r")
+    # ax.scatter(*pursuerPosition, c="r")
     ax.set_aspect("equal", "box")
     ax.set_aspect("equal", "box")
-    dubinsEZ.plot_dubins_EZ(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        evaderHeading,
-        evaderSpeed,
-        ax,
-    )
-    fast_pursuer.plotMahalanobisDistance(
-        pursuerPosition, pursuerPositionCov, ax, None, plotColorbar=False
-    )
+
     return ZTrue.flatten()
 
 
@@ -2863,8 +2871,10 @@ def plot_dubins_PEZ_diff(
     useNumerical=False,
     useNueralNetwork=False,
     useLinearPlusNueralNetwork=False,
+    plotColorBar=False,
+    ylabel=False,
 ):
-    rangeX = 1.0
+    rangeX = 1.5
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -2909,7 +2919,7 @@ def plot_dubins_PEZ_diff(
             pursuerRangeVar,
             captureRadius,
         )
-        ax.set_title("LCSPEZ", fontsize=20)
+        ax.set_title("LCSPEZ")
     elif useUnscented:
         print("Unscented")
         ZTrue, _, _ = uncented_dubins_pez(
@@ -2947,7 +2957,7 @@ def plot_dubins_PEZ_diff(
             pursuerRangeVar,
             captureRadius,
         )
-        ax.set_title("QCSPEZ", fontsize=20)
+        ax.set_title("QCSPEZ")
     elif useNumerical:
         print("Piecewise Linear")
         ZTrue, _, _ = dubins_pez_numerical_integration_sparse(
@@ -2969,7 +2979,7 @@ def plot_dubins_PEZ_diff(
             nodes,
             weights,
         )
-        ax.set_title("Numerical Dubins PEZ", fontsize=20)
+        ax.set_title("Numerical Dubins PEZ")
     elif useNueralNetwork:
         print("Neural Network")
         ZTrue, _, _ = nueral_network_EZ.nueral_network_pez(
@@ -2988,7 +2998,7 @@ def plot_dubins_PEZ_diff(
             pursuerRangeVar,
             captureRadius,
         )
-        ax.set_title("NNCSPEZ", fontsize=20)
+        ax.set_title("NNCSPEZ")
     elif useLinearPlusNueralNetwork:
         print("Linear + Neural Network")
         ZLinear, _, _ = linear_dubins_pez(
@@ -3035,29 +3045,30 @@ def plot_dubins_PEZ_diff(
     ZMC = ZMC.reshape(numPoints, numPoints)
     ZTrue = ZTrue.reshape(numPoints, numPoints)
     # write rmse on image
+    font = 8
     ax.text(
         0.0,
-        0.9,
+        1.35,
         f"RMSE: {rmse:.4f}",
-        fontsize=12,
+        fontsize=font,
         ha="center",
         va="center",
         color="white",
     )
     ax.text(
         0.0,
-        0.7,
+        1.15,
         f"Avg Abs Diff: {average_abs_diff:.4f}",
-        fontsize=12,
+        fontsize=font,
         ha="center",
         va="center",
         color="white",
     )
     ax.text(
         0.0,
-        0.5,
+        0.95,
         f"Max Abs Diff: {max_abs_diff:.4f}",
-        fontsize=12,
+        fontsize=font,
         ha="center",
         va="center",
         color="white",
@@ -3065,17 +3076,30 @@ def plot_dubins_PEZ_diff(
 
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
-    c = ax.pcolormesh(X, Y, jnp.abs(ZTrue - ZMC), vmin=0, vmax=0.5)
+    c = ax.pcolormesh(
+        X,
+        Y,
+        jnp.abs(ZTrue - ZMC),
+        vmin=0,
+        vmax=0.5,
+        shading="nearest",
+        edgecolors="none",
+        rasterized=True,
+    )
     # make colorbar smaller
-    cb = plt.colorbar(c, ax=ax, shrink=0.3)
+    #
+    if plotColorBar:
+        cb = plt.colorbar(c, ax=ax, shrink=0.5)
+
     # if useUnscented:
-    ax.set_xlabel("X", fontsize=20)
-    ax.set_ylabel("Y", fontsize=20)
-    # set tick size
-    ax.tick_params(axis="both", which="major", labelsize=18)
+    ax.set_xlabel("X")
+    if ylabel:
+        ax.set_ylabel("Y")
+    ax.set_xticks(np.arange(-1.0, 2.0, 1.0))
+    ax.set_yticks(np.arange(-1.0, 2.0, 1.0))
 
     # ax.contour(X, Y, ZGeometric, cmap="summer")
-    ax.scatter(*pursuerPosition, c="r")
+    # ax.scatter(*pursuerPosition, c="r")
     ax.set_aspect("equal", "box")
     ax.set_aspect("equal", "box")
     # dubinsEZ.plot_dubins_EZ(
@@ -3555,7 +3579,7 @@ def compare_PEZ(
     evaderHeading,
     evaderSpeed,
 ):
-    fig, axes = plt.subplots(2, 2, tight_layout=True, figsize=(10, 10))
+    fig, axes = plt.subplots(2, 2, figsize=(4, 4), layout="constrained")
     linEZ = plot_dubins_PEZ(
         pursuerPosition,
         pursuerPositionCov,
@@ -3572,6 +3596,8 @@ def compare_PEZ(
         evaderSpeed,
         axes[0][1],
         useLinear=True,
+        labelX=False,
+        labelY=False,
     )
     mcEZ = plot_dubins_PEZ(
         pursuerPosition,
@@ -3589,6 +3615,8 @@ def compare_PEZ(
         evaderSpeed,
         axes[0][0],
         useMC=True,
+        labelX=False,
+        labelY=True,
     )
     # plot_heading_vector(pursuerPosition, pursuerHeading, pursuerPositionCov, axes)
     quadEZ = plot_dubins_PEZ(
@@ -3607,6 +3635,8 @@ def compare_PEZ(
         evaderSpeed,
         axes[1][0],
         useQuadratic=True,
+        labelX=True,
+        labelY=True,
     )
     # numerical = plot_dubins_PEZ(
     #     pursuerPosition,
@@ -3625,25 +3655,27 @@ def compare_PEZ(
     #     axes[2],
     #     useNumerical=True,
     # )
-    # nueralEZ = plot_dubins_PEZ(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     axes[1][1],
-    #     # useNumerical=True,
-    #     useNueralNetwork=True,
-    #     # useLinearPlusNueralNetwork=True,
-    # )
+    nueralEZ = plot_dubins_PEZ(
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        minimumTurnRadius,
+        minimumTurnRadiusVar,
+        captureRadius,
+        pursuerRange,
+        pursuerRangeVar,
+        evaderHeading,
+        evaderSpeed,
+        axes[1][1],
+        # useNumerical=True,
+        useNueralNetwork=True,
+        # useLinearPlusNueralNetwork=True,
+        labelX=True,
+        labelY=False,
+    )
 
     #
     # print("unscented rmse", np.sqrt(np.mean((usEZ - mcEZ) ** 2)))
@@ -3652,10 +3684,9 @@ def compare_PEZ(
     # fig.colorbar(c)
     # tight layout
     # fig.tight_layout()
-    if False:
+    if True:
         save_dir = os.path.expanduser("~/Desktop/cspez_plot")
         fig_path = os.path.join(save_dir, "pez_example.pdf")
-        fig.tight_layout()
         fig.savefig(fig_path, format="pdf", bbox_inches="tight")
 
 
@@ -3678,7 +3709,7 @@ def plot_all_error(
     evaderSpeed,
 ):
     evaderHeading = jnp.array([(0 / 20) * np.pi])
-    fig, axes = plt.subplots(1, 3, constrained_layout=True, figsize=(10, 6))
+    fig, axes = plt.subplots(1, 3, constrained_layout=True, figsize=(6, 2.5))
     linEZ = plot_dubins_PEZ_diff(
         pursuerPosition,
         pursuerPositionCov,
@@ -3695,6 +3726,7 @@ def plot_all_error(
         evaderSpeed,
         axes[0],
         useLinear=True,
+        ylabel=True,
     )
     # usEZ = plot_dubins_PEZ_diff(
     #     pursuerPosition,
@@ -3731,6 +3763,7 @@ def plot_all_error(
         # useNumerical=True,
         useNueralNetwork=True,
         # useLinearPlusNueralNetwork=True,
+        plotColorBar=True,
     )
     quadEZ = plot_dubins_PEZ_diff(
         pursuerPosition,
@@ -3749,10 +3782,10 @@ def plot_all_error(
         axes[1],
         useQuadratic=True,
     )
-    if False:
+    if True:
         save_dir = os.path.expanduser("~/Desktop/cspez_plot")
         fig_path = os.path.join(save_dir, "pez_example_error.pdf")
-        fig.savefig(fig_path, format="pdf", bbox_inches="tight")
+        fig.savefig(fig_path, format="pdf", bbox_inches="tight", dpi=300)
 
 
 def main():
@@ -3866,21 +3899,21 @@ def main():
     #     pursuerRangeVar,
     #     captureRadius,
     # )
-    plot_all_error(
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        minimumTurnRadius,
-        minimumTurnRadiusVar,
-        captureRadius,
-        pursuerRange,
-        pursuerRangeVar,
-        evaderHeading,
-        evaderSpeed,
-    )
+    # plot_all_error(
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     minimumTurnRadius,
+    #     minimumTurnRadiusVar,
+    #     captureRadius,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     evaderHeading,
+    #     evaderSpeed,
+    # )
     compare_PEZ(
         pursuerPosition,
         pursuerPositionCov,
@@ -3896,70 +3929,7 @@ def main():
         evaderHeading,
         evaderSpeed,
     )
-    # compare_PEZ(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    # )
-    # compare_PEZ(
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     captureRadius,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     evaderHeading,
-    #     evaderSpeed,
-    # )
-
-    # test_piecewise_linear_plot(
-    #     evaderPosition,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     captureRadius,
-    # )
-    # numerical_dubins_pez(
-    #     evaderPosition,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     pursuerPosition,
-    #     pursuerPositionCov,
-    #     pursuerHeading,
-    #     pursuerHeadingVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     minimumTurnRadius,
-    #     minimumTurnRadiusVar,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     captureRadius,
-    # )
-
+    #
     plt.show()
 
 
