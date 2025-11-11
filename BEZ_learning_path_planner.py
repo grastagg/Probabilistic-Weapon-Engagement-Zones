@@ -87,6 +87,7 @@ def potential_BEZ_along_spline(
     theta_start,
     theta_end,
     pursuerRange,
+    pursuerCaptureRadius,
     pursuerSpeed,
 ):
     numControlPoints = int(len(controlPoints) / 2)
@@ -109,13 +110,49 @@ def potential_BEZ_along_spline(
         theta_start,
         theta_end,
         pursuerRange,
+        pursuerCaptureRadius,
         pursuerSpeed,
     )
     return ez
 
 
 @jax.jit
-def compute_spline_constraints_for_dubins_EZ_deterministic(
+def box_BEZ_along_spline(
+    controlPoints,
+    tf,
+    evaderSpeed,
+    min_box,
+    max_box,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pursuerSpeed,
+):
+    numControlPoints = int(len(controlPoints) / 2)
+    knotPoints = spline_opt_tools.create_unclamped_knot_points(
+        0, tf, numControlPoints, 3
+    )
+    evaderHeadings = spline_opt_tools.get_spline_heading(
+        controlPoints, tf, 3, numSamplesPerInterval
+    )
+    controlPoints = controlPoints.reshape((numControlPoints, 2))
+    pos = spline_opt_tools.evaluate_spline(
+        controlPoints, knotPoints, numSamplesPerInterval
+    )
+    ez = BEZ_learning.box_pursuer_engagment_zone(
+        pos,
+        evaderHeadings,
+        evaderSpeed,
+        min_box,
+        max_box,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+    )
+    return ez
+
+
+@jax.jit
+def compute_spline_constraints_for_potential_BEZ(
     controlPoints,
     knotPoints,
     evaderSpeed,
@@ -124,6 +161,7 @@ def compute_spline_constraints_for_dubins_EZ_deterministic(
     theta_start,
     theta_end,
     pursuerRange,
+    pursuerCaptureRadius,
     pursuerSpeed,
 ):
     pos = spline_opt_tools.evaluate_spline(
@@ -147,6 +185,44 @@ def compute_spline_constraints_for_dubins_EZ_deterministic(
         theta_start,
         theta_end,
         pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+    )
+
+    return velocity, turn_rate, curvature, ez, pos
+
+
+@jax.jit
+def compute_spline_constraints_for_box_BEZ(
+    controlPoints,
+    knotPoints,
+    evaderSpeed,
+    min_box,
+    max_box,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pursuerSpeed,
+):
+    pos = spline_opt_tools.evaluate_spline(
+        controlPoints, knotPoints, numSamplesPerInterval
+    )
+
+    turn_rate, velocity, evaderHeadings = (
+        spline_opt_tools.get_turn_rate_velocity_and_headings(
+            controlPoints, knotPoints, numSamplesPerInterval
+        )
+    )
+
+    curvature = turn_rate / velocity
+
+    ez = BEZ_learning.box_pursuer_engagment_zone(
+        pos,
+        evaderHeadings,
+        evaderSpeed,
+        min_box,
+        max_box,
+        pursuerRange,
+        pursuerCaptureRadius,
         pursuerSpeed,
     )
 
@@ -158,8 +234,10 @@ def create_spline(knotPoints, controlPoints, order):
     return spline
 
 
-dBEZDControlPoints = jax.jit(jacfwd(potential_BEZ_along_spline, argnums=0))
-dBEZDtf = jax.jit(jacfwd(potential_BEZ_along_spline, argnums=1))
+dPotentialBEZDControlPoints = jax.jit(jacfwd(potential_BEZ_along_spline, argnums=0))
+dPotentialBEZDtf = jax.jit(jacfwd(potential_BEZ_along_spline, argnums=1))
+dBoxBEZDControlPoints = jax.jit(jacfwd(box_BEZ_along_spline, argnums=0))
+DBoxBEZDtf = jax.jit(jacfwd(box_BEZ_along_spline, argnums=1))
 
 
 def rect_left_and_top(lower_left, upper_right, n_points_total):
@@ -214,7 +292,7 @@ def rect_bottom_and_right(lower_left, upper_right, n_points_total):
     return pts
 
 
-def optimize_spline_path(
+def optimize_spline_path_potential_BEZ(
     p0,
     pf,
     v0,
@@ -230,6 +308,7 @@ def optimize_spline_path(
     theta_start,
     theta_end,
     pursuerRange,
+    pursuerCaptureRadius,
     pursuerSpeed,
     right=True,
     previous_spline=None,
@@ -248,7 +327,7 @@ def optimize_spline_path(
         controlPoints = controlPoints.reshape((num_cont_points, 2))
 
         velocity, turn_rate, curvature, ez, pos = (
-            compute_spline_constraints_for_dubins_EZ_deterministic(
+            compute_spline_constraints_for_potential_BEZ(
                 controlPoints,
                 knotPoints,
                 evaderSpeed,
@@ -257,6 +336,7 @@ def optimize_spline_path(
                 theta_start,
                 theta_end,
                 pursuerRange,
+                pursuerCaptureRadius,
                 pursuerSpeed,
             )
         )
@@ -285,7 +365,7 @@ def optimize_spline_path(
             controlPoints
         )
 
-        dEZDControlPoints = dBEZDControlPoints(
+        dEZDControlPoints = dPotentialBEZDControlPoints(
             controlPoints,
             tf,
             evaderSpeed,
@@ -294,9 +374,10 @@ def optimize_spline_path(
             theta_start,
             theta_end,
             pursuerRange,
+            pursuerCaptureRadius,
             pursuerSpeed,
         )
-        dEZDtf = dBEZDtf(
+        dEZDtf = dPotentialBEZDtf(
             controlPoints,
             tf,
             evaderSpeed,
@@ -305,6 +386,7 @@ def optimize_spline_path(
             theta_start,
             theta_end,
             pursuerRange,
+            pursuerCaptureRadius,
             pursuerSpeed,
         )
         dVelocityDControlPointsVal = spline_opt_tools.dVelocityDControlPoints(
@@ -433,17 +515,17 @@ def optimize_spline_path(
 
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
-    opt.options["max_iter"] = 100
+    opt.options["max_iter"] = 1000
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
     # opt.options["derivative_test"] = "first-order"
-    opt.options["warm_start_init_point"] = "yes"
-    opt.options["mu_init"] = 1e-1
+    # opt.options["warm_start_init_point"] = "yes"
+    # opt.options["mu_init"] = 1e-1
     # opt.options["nlp_scaling_method"] = "gradient-based"
-    opt.options["tol"] = 1e-6
+    opt.options["tol"] = 1e-8
 
     sol = opt(optProb, sens=sens)
 
@@ -460,44 +542,7 @@ def optimize_spline_path(
     )
 
 
-def box_outside_constraint(controlPoints, tf, box_halfwidths):
-    """
-    Vectorized, non-differentiable constraint ensuring all 2D points
-    (x1, y1, x2, y2, ...) lie outside a box centered at the origin.
-
-    Parameters
-    ----------
-    x : ndarray, shape (2*N,)
-        Flattened array of points: [x1, y1, x2, y2, ...].
-    box_halfwidths : tuple
-        (a_x, a_y) half-widths of the box.
-
-    Returns
-    -------
-    g : ndarray, shape (N,)
-        Constraint values (g_i <= 0 means outside the box).
-    """
-    numControlPoints = int(len(controlPoints) / 2)
-    knotPoints = spline_opt_tools.create_unclamped_knot_points(
-        0, tf, numControlPoints, 3
-    )
-    controlPoints = controlPoints.reshape((numControlPoints, 2))
-    pos = spline_opt_tools.evaluate_spline(
-        controlPoints, knotPoints, numSamplesPerInterval
-    )
-    a_x, a_y = box_halfwidths
-    pts = pos.reshape(-1, 2)  # (N, 2)
-    abs_pts = jnp.abs(pts)
-    # For each point: max(|x|-a_x, |y|-a_y)
-    g = -jnp.maximum(abs_pts[:, 0] - a_x, abs_pts[:, 1] - a_y)
-    return g
-
-
-dBox_dControlPoints = jacfwd(box_outside_constraint, argnums=0)
-dBox_dtf = jacfwd(box_outside_constraint, argnums=1)
-
-
-def optimize_spline_path_fist(
+def optimize_spline_path_box_BEZ(
     p0,
     pf,
     v0,
@@ -507,8 +552,13 @@ def optimize_spline_path_fist(
     turn_rate_constraints,
     curvature_constraints,
     num_constraint_samples,
-    box_halfwidths,
-    agentSpeed,
+    evaderSpeed,
+    min_box,
+    max_box,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pursuerSpeed,
+    right=True,
     previous_spline=None,
 ):
     # Compute Jacobian of engagement zone function
@@ -524,24 +574,29 @@ def optimize_spline_path_fist(
         funcs["end"] = spline_opt_tools.get_end_constraint(controlPoints)
         controlPoints = controlPoints.reshape((num_cont_points, 2))
 
-        turn_rate, velocity, agentHeadings = (
-            spline_opt_tools.get_turn_rate_velocity_and_headings(
-                controlPoints, knotPoints, numSamplesPerInterval
+        velocity, turn_rate, curvature, ez, pos = (
+            compute_spline_constraints_for_box_BEZ(
+                controlPoints,
+                knotPoints,
+                evaderSpeed,
+                min_box,
+                max_box,
+                pursuerRange,
+                pursuerCaptureRadius,
+                pursuerSpeed,
             )
         )
 
-        curvature = turn_rate / velocity
-        box = box_outside_constraint(
-            xDict["control_points"], xDict["tf"], box_halfwidths
-        )
-
+        # funcs['start'] = self.get_start_constraint_jax(controlPoints)
+        # funcs['start'] = pos[0]
+        # funcs['end'] = pos[-1]
         funcs["obj"] = tf
         funcs["turn_rate"] = turn_rate
         funcs["velocity"] = velocity
         funcs["curvature"] = curvature
         # funcs['position'] = pos
+        funcs["ez"] = ez
         funcs["obj"] = tf
-        funcs["box"] = box
         return funcs, False
 
     def sens(xDict, funcs):
@@ -556,10 +611,26 @@ def optimize_spline_path_fist(
             controlPoints
         )
 
-        dBoxDControlPoints = dBox_dControlPoints(
-            xDict["control_points"], xDict["tf"], box_halfwidths
+        dEZDControlPoints = dBoxBEZDControlPoints(
+            controlPoints,
+            tf,
+            evaderSpeed,
+            min_box,
+            max_box,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
         )
-        dBoxDtf = dBox_dtf(xDict["control_points"], xDict["tf"], box_halfwidths)
+        dEZDtf = DBoxBEZDtf(
+            controlPoints,
+            tf,
+            evaderSpeed,
+            min_box,
+            max_box,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+        )
         dVelocityDControlPointsVal = spline_opt_tools.dVelocityDControlPoints(
             controlPoints, tf, 3, numSamplesPerInterval
         )
@@ -603,7 +674,7 @@ def optimize_spline_path_fist(
             "control_points": dCurvatureDControlPointsVal,
             "tf": dCurvatureDtfVal,
         }
-        funcsSens["box"] = {"control_points": dBoxDControlPoints, "tf": dBoxDtf}
+        funcsSens["ez"] = {"control_points": dEZDControlPoints, "tf": dEZDtf}
 
         return funcsSens, False
 
@@ -611,17 +682,22 @@ def optimize_spline_path_fist(
 
     optProb = Optimization("path optimization", objfunc)
 
+    # if previous_spline is not None:
     if previous_spline is not None:
         x0 = previous_spline.c.flatten()
         tf = previous_spline.t[-1 - previous_spline.k]
     else:
+        start = time.time()
         tf_initial = 1.0
         knotPoints = spline_opt_tools.create_unclamped_knot_points(
             0, tf_initial, num_cont_points, 3
         )
 
         # x0 = np.linspace(p0, pf, num_cont_points).flatten()
-        x0 = rect_bottom_and_right(p0, pf, num_cont_points).flatten()
+        if right:
+            x0 = rect_bottom_and_right(p0, pf, num_cont_points).flatten()
+        else:
+            x0 = rect_left_and_top(p0, pf, num_cont_points).flatten()
 
         x0 = spline_opt_tools.move_first_control_point_so_spline_passes_through_start(
             x0, knotPoints, p0, v0
@@ -636,7 +712,7 @@ def optimize_spline_path_fist(
             x0,
             knotPoints,
             num_cont_points,
-            agentSpeed,
+            evaderSpeed,
             velocity_constraints,
             numSamplesPerInterval,
         )
@@ -644,6 +720,7 @@ def optimize_spline_path_fist(
     tempVelocityContstraints = spline_opt_tools.get_spline_velocity(
         x0, 1, 3, numSamplesPerInterval
     )
+    start = time.time()
     num_constraint_samples = len(tempVelocityContstraints)
 
     optProb.addVarGroup(
@@ -672,7 +749,7 @@ def optimize_spline_path_fist(
         upper=curvature_constraints[1],
         scale=1.0 / curvature_constraints[1],
     )
-    optProb.addConGroup("box", num_constraint_samples, lower=None, upper=0.0)
+    optProb.addConGroup("ez", num_constraint_samples, lower=0.00, upper=None)
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
     optProb.addConGroup("end", 2, lower=pf, upper=pf)
 
@@ -680,19 +757,19 @@ def optimize_spline_path_fist(
 
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
-    opt.options["max_iter"] = 100
+    opt.options["max_iter"] = 1000
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
     # opt.options["derivative_test"] = "first-order"
+    # opt.options["warm_start_init_point"] = "yes"
+    # opt.options["mu_init"] = 1e-1
+    # opt.options["nlp_scaling_method"] = "gradient-based"
+    opt.options["tol"] = 1e-8
 
-    startOpt = time.time()
     sol = opt(optProb, sens=sens)
-    if sol.optInform["value"] != 0:
-        print("Optimization failed")
-    print("Optimization time run:", time.time() - startOpt)
 
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, sol.xStar["tf"][0], num_cont_points, 3
@@ -700,6 +777,7 @@ def optimize_spline_path_fist(
 
     controlPoints = sol.xStar["control_points"].reshape((num_cont_points, 2))
 
+    print("Optimization time:", time.time() - start)
     return (
         create_spline(knotPoints, controlPoints, spline_order),
         sol.xStar["tf"][0],
@@ -709,53 +787,62 @@ def optimize_spline_path_fist(
 def plan_path_from_interception_points(
     interceptionPositions,
     pursuerRange,
+    pursuerCaptureRadius,
+    pursuerSpeed,
     initialEvaderPosition,
     finalEvaderPosition,
     initialEvaderVelocity,
     evaderSpeed,
-    pursuerSpeed,
+    num_cont_points,
+    spline_order,
+    velocity_constraints,
+    turn_rate_constraints,
+    curvature_constraints,
+    num_constraint_samples,
 ):
     arcs = BEZ_learning.intersection_arcs(
         interceptionPositions, [pursuerRange] * np.ones(len(interceptionPositions))
     )
     centers, radii, theta_start, theta_end = BEZ_learning.arcs_to_arrays(arcs)
 
-    (splineRight, tfRight) = optimize_spline_path(
+    (splineRight, tfRight) = optimize_spline_path_potential_BEZ(
         initialEvaderPosition,
         finalEvaderPosition,
         initialEvaderVelocity,
-        num_cont_points=8,
-        spline_order=3,
-        velocity_constraints=(0.5, 2.0),
-        turn_rate_constraints=(-1.0, 1.0),
-        curvature_constraints=(-0.5, 0.5),
-        num_constraint_samples=50,
+        num_cont_points=num_cont_points,
+        spline_order=spline_order,
+        velocity_constraints=velocity_constraints,
+        turn_rate_constraints=turn_rate_constraints,
+        curvature_constraints=curvature_constraints,
+        num_constraint_samples=num_constraint_samples,
         evaderSpeed=evaderSpeed,
         centers=centers,
         radii=radii,
         theta_start=theta_start,
         theta_end=theta_end,
         pursuerRange=pursuerRange,
+        pursuerCaptureRadius=pursuerCaptureRadius,
         pursuerSpeed=pursuerSpeed,
         right=True,
         previous_spline=None,
     )
-    splineLeft, tfLeft = optimize_spline_path(
+    splineLeft, tfLeft = optimize_spline_path_potential_BEZ(
         initialEvaderPosition,
         finalEvaderPosition,
         initialEvaderVelocity,
-        num_cont_points=8,
-        spline_order=3,
-        velocity_constraints=(0.5, 2.0),
-        turn_rate_constraints=(-1.0, 1.0),
-        curvature_constraints=(-0.5, 0.5),
-        num_constraint_samples=50,
+        num_cont_points=num_cont_points,
+        spline_order=spline_order,
+        velocity_constraints=velocity_constraints,
+        turn_rate_constraints=turn_rate_constraints,
+        curvature_constraints=curvature_constraints,
+        num_constraint_samples=num_constraint_samples,
         evaderSpeed=evaderSpeed,
         centers=centers,
         radii=radii,
         theta_start=theta_start,
         theta_end=theta_end,
         pursuerRange=pursuerRange,
+        pursuerCaptureRadius=pursuerCaptureRadius,
         pursuerSpeed=pursuerSpeed,
         right=False,
         previous_spline=None,
@@ -772,16 +859,91 @@ def plan_path_from_interception_points(
     return spline, arcs
 
 
+def plan_path_box_BEZ(
+    min_box,
+    max_box,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pursuerSpeed,
+    initialEvaderPosition,
+    finalEvaderPosition,
+    initialEvaderVelocity,
+    evaderSpeed,
+    num_cont_points,
+    spline_order,
+    velocity_constraints,
+    turn_rate_constraints,
+    curvature_constraints,
+    num_constraint_samples,
+):
+    (splineRight, tfRight) = optimize_spline_path_box_BEZ(
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        num_cont_points=num_cont_points,
+        spline_order=spline_order,
+        velocity_constraints=velocity_constraints,
+        turn_rate_constraints=turn_rate_constraints,
+        curvature_constraints=curvature_constraints,
+        num_constraint_samples=num_constraint_samples,
+        evaderSpeed=evaderSpeed,
+        min_box=min_box,
+        max_box=max_box,
+        pursuerRange=pursuerRange,
+        pursuerCaptureRadius=pursuerCaptureRadius,
+        pursuerSpeed=pursuerSpeed,
+        right=True,
+        previous_spline=None,
+    )
+    splineLeft, tfLeft = optimize_spline_path_box_BEZ(
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        num_cont_points=num_cont_points,
+        spline_order=spline_order,
+        velocity_constraints=velocity_constraints,
+        turn_rate_constraints=turn_rate_constraints,
+        curvature_constraints=curvature_constraints,
+        num_constraint_samples=num_constraint_samples,
+        evaderSpeed=evaderSpeed,
+        min_box=min_box,
+        max_box=max_box,
+        pursuerRange=pursuerRange,
+        pursuerCaptureRadius=pursuerCaptureRadius,
+        pursuerSpeed=pursuerSpeed,
+        right=False,
+        previous_spline=None,
+    )
+    print("Right path time", tfRight)
+    print("Left path time", tfLeft)
+    if tfRight < tfLeft:
+        spline = splineRight
+        tf = tfRight
+    else:
+        spline = splineLeft
+        tf = tfLeft
+    print("path time", tf)
+    return spline
+
+
 def main():
-    initialEvaderPosition = np.array([-3.0, -3.0])
-    finalEvaderPosition = np.array([3.0, 3.0])
+    initialEvaderPosition = np.array([-5.0, -5.0])
+    finalEvaderPosition = np.array([5.0, 5.0])
     initialEvaderVelocity = np.array([1.0, 0.0])
     pursuerRange = 1.5
     pursuerPosition = np.array([0.0, 0.0])
     interceptionPositions = np.array([[1.0, 1.0]])
     pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.0
     evaderHeading = 0.0
     evaderSpeed = 1.5
+
+    num_cont_points = 20
+    spline_order = 3
+    velocity_constraints = (0.9, 1.1)
+    curvature_constraints = (-0.5, 0.5)
+    turn_rate_constraints = (-1.0, 1.0)
+    num_constraint_samples = 50
 
     interceptionPositions = np.array([[1.0, 1.0]])
     # interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0]])
@@ -789,17 +951,27 @@ def main():
     # interceptionPositions = np.array(
     #     [[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0]]
     # )
-    interceptionPositions = np.random.uniform(-1.1, 1.1, (10, 2))
+    interceptionPositions = np.random.uniform(-1.1, 1.1, (2, 2))
     spline, arcs = plan_path_from_interception_points(
         interceptionPositions,
         pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
         initialEvaderPosition,
         finalEvaderPosition,
         initialEvaderVelocity,
         evaderSpeed,
-        pursuerSpeed,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
     )
     fig, ax = plt.subplots(figsize=(10, 10))
+    ax.set_aspect("equal")
+    ax.set_xlim(-6, 6)
+    ax.set_ylim(-6, 6)
     plot_spline(spline, ax)
     # BEZ_learning.plot_potential_pursuer_engagement_zone(
     #     arcs,
@@ -812,13 +984,62 @@ def main():
     #     ax=ax,
     # )
     BEZ_learning.plot_potential_pursuer_reachable_region(
-        arcs, pursuerRange, xlim=(-4, 4), ylim=(-4, 4), ax=ax
+        arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
     )
-    BEZ_learning.plot_pursuer_reachable_region(pursuerPosition, pursuerRange, fig, ax)
+    BEZ_learning.plot_pursuer_reachable_region(
+        pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
+    )
     BEZ_learning.plot_interception_points(interceptionPositions, pursuerRange, ax)
     BEZ_learning.plot_circle_intersection_arcs(arcs, ax=ax)
-    plt.show()
+
+
+def main_box():
+    initialEvaderPosition = np.array([-5.0, -5.0])
+    finalEvaderPosition = np.array([5.0, 5.0])
+    initialEvaderVelocity = np.array([1.0, 0.0])
+    pursuerRange = 1.5
+    pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.0
+    evaderSpeed = 1.5
+    min_box = np.array([-3.0, -3.0])
+    max_box = np.array([3.0, 3.0])
+
+    num_cont_points = 20
+    spline_order = 3
+    velocity_constraints = (0.9, 1.1)
+    curvature_constraints = (-0.5, 0.5)
+    turn_rate_constraints = (-1.0, 1.0)
+    num_constraint_samples = 50
+
+    spline = plan_path_box_BEZ(
+        min_box,
+        max_box,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        evaderSpeed,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    plot_spline(spline, ax)
+    BEZ_learning.plot_box_pursuer_reachable_region(
+        min_box, max_box, pursuerRange, pursuerCaptureRadius, ax=ax
+    )
+    ax.set_aspect("equal")
+    ax.set_xlim(-6, 6)
+    ax.set_ylim(-6, 6)
 
 
 if __name__ == "__main__":
     main()
+    main_box()
+    plt.show()
