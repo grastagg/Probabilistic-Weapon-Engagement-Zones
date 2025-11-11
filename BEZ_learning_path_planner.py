@@ -515,7 +515,7 @@ def optimize_spline_path_potential_BEZ(
 
     opt = OPT("ipopt")
     opt.options["print_level"] = 0
-    opt.options["max_iter"] = 100
+    opt.options["max_iter"] = 1000
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"

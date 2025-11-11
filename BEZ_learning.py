@@ -630,7 +630,15 @@ def plot_box_pursuer_engagement_zone(
 
 
 def annotate_box_EZ_plot(
-    evader_start, evader_heading, evader_speed, pursuerSpeed, pursuerRange, ax, fig
+    evader_start,
+    evader_heading,
+    evader_speed,
+    pursuerSpeed,
+    pursuerRange,
+    ax,
+    fig,
+    p1=[0, 2.6],
+    p2=[0, 1],
 ):
     ax.plot(evader_start[0], evader_start[1], "k")
     speedRatio = evader_speed / pursuerSpeed
@@ -653,8 +661,8 @@ def annotate_box_EZ_plot(
     curlyBrace(
         fig,
         ax,
-        [0, 2.6],
-        [0, 1],
+        p1,
+        p2,
         k_r=0.1,
         bool_auto=True,
         str_text=r"$R+r$",
@@ -761,5 +769,62 @@ def bez_learning_rect_ez_plot():
     plt.show()
 
 
+def bez_learning_bez_plot():
+    pursuerRange = 1.5
+    pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.1
+    evaderHeading = np.pi / 4
+    evaderSpeed = 1.0
+    pursuerPosition = np.array([0.0, 0.0])
+
+    fig, ax = plt.subplots(figsize=(4, 4), layout="constrained")
+    fast_pursuer.plotEngagementZone(
+        evaderHeading,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        ax,
+    )
+    ax.scatter(
+        pursuerPosition[0],
+        pursuerPosition[1],
+        color="red",
+        marker="o",
+        label=r"$\boldsymbol{x}_P$",
+    )
+    ax.plot([], color="magenta", label=r"$\partial \mathcal{R}_{\mathrm{BEZ}}$")
+    ax.plot([], color="green", label=r"$\partial \mathcal{Z}_{\mathrm{BEZ}}$")
+    c = Circle(
+        pursuerPosition,
+        pursuerRange + pursuerCaptureRadius,
+        fill=False,
+        color="magenta",
+        linewidth=1.5,
+    )
+    annotate_box_EZ_plot(
+        [-1.67, -1.67],
+        evaderHeading,
+        evaderSpeed,
+        pursuerSpeed,
+        pursuerRange,
+        ax,
+        fig,
+        p1=[0, 1.6],
+        p2=[0, 0],
+    )
+
+    ax.add_artist(c)
+    ax.set_aspect("equal")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_xlim(-2.5, 2.5)
+    ax.set_ylim(-2.5, 2.5)
+    plt.legend(ncols=3, loc="upper center")
+    plt.show()
+
+
 if __name__ == "__main__":
-    bez_learning_rect_ez_plot()
+    # bez_learning_rect_ez_plot()
+    bez_learning_bez_plot()

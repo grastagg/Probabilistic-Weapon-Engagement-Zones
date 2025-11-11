@@ -163,7 +163,6 @@ def plotEngagementZone(
         pursuerSpeed,
         agentSpeed,
     )
-    print(engagementZonePlot)
 
     # engagementZonePlot = np.zeros(X.shape)
 
