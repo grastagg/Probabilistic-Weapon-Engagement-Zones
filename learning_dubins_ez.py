@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 # set maplotlib to faster backend
-matplotlib.use("Agg")
+# matplotlib.use("Agg")
 
 import learned_dubins_ez_path_planner
 
@@ -4632,7 +4632,7 @@ def plan_path_around_all_learned_pursuer_params(
     print("time to plan path around all learned pursuer params:", time.time() - start)
     print("planned path time:", pathTime)
     print("violated true EZ:", violatedTrueEZ)
-    if False:
+    if True:
         fig, ax = plt.subplots()
         learned_dubins_ez_path_planner.plot_spline(
             spline,

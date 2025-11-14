@@ -926,13 +926,12 @@ def plan_path_box_BEZ(
     return spline
 
 
-def main():
+def main(interceptionPositions):
     initialEvaderPosition = np.array([-5.0, -5.0])
     finalEvaderPosition = np.array([5.0, 5.0])
     initialEvaderVelocity = np.array([1.0, 0.0])
     pursuerRange = 1.5
     pursuerPosition = np.array([0.0, 0.0])
-    interceptionPositions = np.array([[1.0, 1.0]])
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.0
     evaderHeading = 0.0
@@ -945,13 +944,13 @@ def main():
     turn_rate_constraints = (-1.0, 1.0)
     num_constraint_samples = 50
 
-    interceptionPositions = np.array([[1.0, 1.0]])
+    # interceptionPositions = np.array([[1.0, 1.0]])
     # interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0]])
-    interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0]])
+    # interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0]])
     # interceptionPositions = np.array(
     #     [[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0]]
     # )
-    interceptionPositions = np.random.uniform(-1.1, 1.1, (2, 2))
+    # interceptionPositions = np.random.uniform(-1.1, 1.1, (numIntersectionPoints, 2))
     spline, arcs = plan_path_from_interception_points(
         interceptionPositions,
         pursuerRange,
@@ -1037,9 +1036,17 @@ def main_box():
     ax.set_aspect("equal")
     ax.set_xlim(-6, 6)
     ax.set_ylim(-6, 6)
+    plt.legend()
 
 
 if __name__ == "__main__":
-    main()
+    interceptionPoints = np.random.uniform(-1.1, 1.1, (3, 2))
+
+    # run main with 1 interception point, 2 interception points, 3 interception points, and box BEZ
+    main(interceptionPoints[:1])
+    main(interceptionPoints[:2])
+    main(interceptionPoints[:3])
+
     main_box()
+
     plt.show()

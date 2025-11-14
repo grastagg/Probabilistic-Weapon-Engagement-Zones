@@ -440,7 +440,7 @@ def optimize_spline_path(
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 0
+    opt.options["print_level"] = 5
     opt.options["max_iter"] = 100
     username = getpass.getuser()
     opt.options["hsllib"] = (

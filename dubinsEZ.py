@@ -1,6 +1,7 @@
 import os
 
 from jax.lax import random_gamma_grad
+from matplotlib.markers import MarkerStyle
 import numpy as np
 import time
 import matplotlib.pyplot as plt
@@ -15,6 +16,9 @@ import jax.numpy as jnp
 # import testDubins
 # get rid of type 3 fonts
 import matplotlib
+
+import evader_pursuer_plot
+
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -731,7 +735,7 @@ def plot_dubins_EZ(
 
 
 def plot_dubins_path(
-    startPosition, startHeading, goalPosition, radius, captureRadius, tangentPoint
+    startPosition, startHeading, goalPosition, radius, captureRadius, tangentPoint, ax
 ):
     leftCenter = np.array(
         [
@@ -745,12 +749,11 @@ def plot_dubins_path(
             startPosition[1] - radius * np.cos(startHeading),
         ]
     )
-    fig, ax = plt.subplots()
-    ax.scatter(*startPosition, c="g")
-    ax.scatter(*goalPosition, c="r")
-    ax.scatter(*leftCenter, c="g")
-    ax.scatter(*rightCenter, c="b")
-    theta = np.linspace(0, 2 * np.pi, 100)
+    # ax.scatter(*startPosition, c="g")
+    # ax.scatter(*goalPosition, c="r")
+    # ax.scatter(*leftCenter, c="g")
+    # ax.scatter(*rightCenter, c="b")
+    theta = np.linspace(0, -np.pi / 4, 100)
     xl = leftCenter[0] + radius * np.cos(theta)
     yl = leftCenter[1] + radius * np.sin(theta)
 
@@ -759,12 +762,17 @@ def plot_dubins_path(
 
     xcr = goalPosition[0] + captureRadius * np.cos(theta)
     ycr = goalPosition[1] + captureRadius * np.sin(theta)
-    ax.plot(xcr, ycr, "r")
+    ax.plot(xcr, ycr, "r", linewidth=4)
 
-    ax.plot(xl, yl, "b")
-    ax.plot(xr, yr, "b")
-    ax.scatter(*tangentPoint, c="y")
-    ax.plot([goalPosition[0], tangentPoint[0]], [goalPosition[1], tangentPoint[1]], "y")
+    ax.plot(xl, yl, "r", linewidth=3)
+    # ax.plot(xr, yr, "b")
+    # ax.scatter(*tangentPoint, c="y")
+    ax.plot(
+        [goalPosition[0], tangentPoint[0]],
+        [goalPosition[1], tangentPoint[1]],
+        "r",
+        linewidth=3,
+    )
     ax = plt.gca()
     ax.set_aspect("equal", "box")
 
@@ -775,7 +783,7 @@ def plot_dubins_reachable_set(
     pursuerRange,
     radius,
     ax,
-    colors=["brown"],
+    colors=["black"],
     alpha=1.0,
 ):
     numPoints = 1000
@@ -806,7 +814,7 @@ def plot_dubins_reachable_set(
     # contour_proxy = plt.plot(
     #     [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
     # )
-    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label="RS")
+    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label="RR")
     ax.set_aspect("equal", "box")
     return ax
 
@@ -1089,11 +1097,11 @@ def main_EZ():
     pursuerSpeed = 2
 
     pursuerRange = 2.5
-    minimumTurnRadius = 0.5
+    minimumTurnRadius = 0.47
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 1
-    evaderPosition = np.array([-2.8, 1.4])
+    evaderPosition = np.array([-1.14, 2.46])
     startTime = time.time()
 
     # length, tangentPoint = find_dubins_path_length_right_strait(
@@ -1133,25 +1141,47 @@ def main_EZ():
         evaderSpeed,
         ax,
     )
-    plot_theta_and_vectors_left_turn(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerSpeed,
-        minimumTurnRadius,
-        pursuerRange,
-        evaderPosition,
-        evaderHeading,
-        evaderSpeed,
-        ax,
+
+    speedRatio = evaderSpeed / pursuerSpeed
+    F = evaderPosition + speedRatio * pursuerRange * np.array(
+        [np.cos(evaderHeading), np.sin(evaderHeading)]
     )
+    ax.plot([evaderPosition[0], F[0]], [evaderPosition[1], F[1]], c="b", linewidth=3)
+    C = jnp.array(
+        [
+            pursuerPosition[0] - minimumTurnRadius * jnp.sin(pursuerHeading),
+            pursuerPosition[1] + minimumTurnRadius * jnp.cos(pursuerHeading),
+        ]
+    )
+    G = find_counter_clockwise_tangent_point(F, C, minimumTurnRadius)
+    plot_dubins_path(pursuerPosition, pursuerHeading, F, minimumTurnRadius, 0.0, G, ax)
+
+    # plot_theta_and_vectors_left_turn(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     pursuerSpeed,
+    #     minimumTurnRadius,
+    #     pursuerRange,
+    #     evaderPosition,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     ax,
+    # )
     plt.xlabel("X")
     plt.ylabel("Y")
-    ax.set_xlim([-3, 3])
-    ax.set_ylim([-3, 3])
+    ax.set_xlim([-3.1, 3.1])
+    ax.set_ylim([-3.1, 3.1])
+    evader_pursuer_plot.draw_airplane(
+        ax, evaderPosition, color="blue", size=0.35, angle=evaderHeading - np.pi / 2
+    )  # Blue airplane (evader) pointing toward x-axis
+    evader_pursuer_plot.draw_airplane(
+        ax, pursuerPosition, color="red", size=0.35, angle=pursuerHeading - np.pi / 2
+    )
     # set tick fonhtsize
     ax.tick_params(axis="both", which="major")
     # put legend outside the plot
     ax.legend(loc="upper left", bbox_to_anchor=(1, 1))
+    ax.scatter(*F, c="r", s=100, zorder=2000)
     plt.show()
 
 
