@@ -55,11 +55,11 @@ jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax.config.update("jax_platform_name", "gpu")")
 #
 
-positionAndHeadingOnly = False
-knownSpeed = False
+positionAndHeadingOnly = True
+knownSpeed = True
 interceptionOnBoundary = False
 randomPath = False
-noisyMeasurementsFlag = True
+noisyMeasurementsFlag = False
 saveResults = True
 plotAllFlag = False
 planHPPath = True
