@@ -4,6 +4,10 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 
+# from scipy.stats import ncx2
+import scipy
+
+
 from curlyBrace import curlyBrace
 from matplotlib.patches import Arc, Circle
 import fast_pursuer
@@ -148,6 +152,33 @@ def intersection_arcs(centers, radii, tol=1e-9):
                         "theta_end": t1 + dtheta,  # unwrapped
                     }
                 )
+    return arcs
+
+
+def compute_potential_pursuer_region_from_interception_position(
+    interceptionPositions, pursuerRange, pursuerCaptureRadius
+):
+    arcs = intersection_arcs(
+        interceptionPositions,
+        radii=[pursuerRange + pursuerCaptureRadius] * len(interceptionPositions),
+    )
+    return arcs
+
+
+def compute_potential_pursuer_region_from_interception_position_and_launch_time(
+    interceptionPositions, launchTimes, pursuerSpeed, pursuerRange, pursuerCaptureRadius
+):
+    """
+    launchTimes is the time difference between when the pursuer launched and when it intercepted
+    """
+
+    pursuerPathDistances = launchTimes * pursuerSpeed
+    if np.any(pursuerPathDistances > pursuerRange):
+        print("Warning: launch times too long")
+
+    radii = pursuerPathDistances + pursuerCaptureRadius
+    print("radii:", radii)
+    arcs = intersection_arcs(interceptionPositions, radii)
     return arcs
 
 
@@ -446,6 +477,110 @@ def arcs_to_arrays(arcs):
     return centers, radii, theta_start, theta_end
 
 
+from jax.scipy.special import gammainc, gammaln
+
+
+def ncx2_cdf_series(x, df, nc):
+    """
+    More numerically stable approximation
+    for noncentral chi-square CDF.
+    """
+    K_max = 1000
+    x = jnp.asarray(x)
+    lam2 = nc / 2.0
+
+    ks = jnp.arange(K_max + 1)
+
+    # log Poisson weight: log w_k = k log(lam2) - lam2 - log(k!)
+    log_w = ks * jnp.log(lam2 + 1e-300) - lam2 - gammaln(ks + 1.0)
+
+    # stabilize by subtracting max
+    log_w_shift = log_w - jnp.max(log_w)
+    w = jnp.exp(log_w_shift)
+
+    # central chi-square CDF
+    dof_k = df + 2.0 * ks
+    F_k = gammainc(dof_k / 2.0, x / 2.0)
+
+    return jnp.sum(w * F_k) / jnp.sum(w)
+
+
+@jax.jit
+def prob_within_radius_single(x, mu, sigma, R):
+    """
+    P(||X - x|| < R) for X ~ N(mu, sigma^2 I_d),
+    with x a single point (shape (d,)).
+    """
+    x = jnp.asarray(x)
+    mu = jnp.asarray(mu)
+    d = x.shape[-1]
+
+    lam = jnp.sum((mu - x) ** 2) / (sigma**2)  # noncentrality λ
+    z = (R**2) / (sigma**2)  # evaluation point for χ² CDF
+
+    return ncx2_cdf_series(z, df=d, nc=lam)
+
+
+prob_within_radius = jax.jit(
+    jax.vmap(prob_within_radius_single, in_axes=(0, None, None, None))
+)
+
+prob_within_radius_mult = jax.jit(
+    jax.vmap(prob_within_radius_single, in_axes=(None, 0, 0, None))
+)
+
+
+def prob_within_multiple_radii_single(x, mus, sigmas, R):
+    probs = prob_within_radius_mult(x, mus, sigmas, R)
+    return 1 - jnp.prod(1 - probs)
+    return jnp.sum(probs, axis=0) - jnp.prod(probs, axis=0)
+    return jnp.prod(probs, axis=0)
+
+
+prob_within_multiple_radii = jax.jit(
+    jax.vmap(prob_within_multiple_radii_single, in_axes=(0, None, None, None))
+)
+
+
+def distance_threshold_for_probability(R, sigma, d, p_star):
+    """
+    Given:
+        X ~ N(mu, sigma^2 I_d)
+        fixed radius R
+    find D* such that for any point x with ||x - mu|| = D*,
+        P(||X - x|| < R) = p_star.
+
+    For ||x - mu|| <= D*, the probability is >= p_star.
+
+    Returns:
+        D_star (float) or None if the requested p_star is unattainable.
+    """
+    # z is fixed by R and sigma
+    z = (R**2) / (sigma**2)
+
+    # Max possible probability (when x = mu, i.e. lambda = 0)
+    p_max = scipy.stats.chi2.cdf(z, df=d)
+    if p_max < p_star:
+        # no point can reach that probability
+        return None
+
+    # Solve ncx2.cdf(z, d, lambda) = p_star for lambda >= 0
+    def f(lam):
+        return scipy.stats.ncx2.cdf(z, d, lam) - p_star
+
+    # At lambda = 0, f(0) = p_max - p_star >= 0.
+    # As lambda -> infinity, ncx2.cdf -> 0, so f -> -p_star < 0.
+    lam_hi = 1.0
+    while f(lam_hi) > 0.0:
+        lam_hi *= 2.0
+        if lam_hi > 1e6:
+            break  # safety
+
+    lam_star = scipy.optimize.brentq(f, 0.0, lam_hi)
+    D_star = sigma * np.sqrt(lam_star)
+    return D_star
+
+
 def plot_potential_pursuer_engagement_zone(
     arcs,
     pursuerRange,
@@ -532,7 +667,7 @@ def plot_potential_pursuer_reachable_region(
     # plt.colorbar(c, ax=ax, label="Signed Distance")
 
 
-def plot_interception_points(interceptionPositions, pursuerRange, ax):
+def plot_interception_points(interceptionPositions, radii, ax):
     ax.scatter(
         interceptionPositions[:, 0],
         interceptionPositions[:, 1],
@@ -540,8 +675,9 @@ def plot_interception_points(interceptionPositions, pursuerRange, ax):
         label="Interception Locations",
         marker="x",
     )
-    for pos in interceptionPositions:
-        Circle = plt.Circle(pos, pursuerRange, color="red", fill=False, linestyle=":")
+    for i, pos in enumerate(interceptionPositions):
+        radius = radii[i]
+        Circle = plt.Circle(pos, radius, color="red", fill=False, linestyle=":")
         ax.add_artist(Circle)
 
 
@@ -723,10 +859,74 @@ def main():
         ax,
     )
     plot_interception_points(
-        interceptionPositions, pursuerRange + pursuerCaptureRadius, ax
+        interceptionPositions,
+        [pursuerRange + pursuerCaptureRadius] * np.ones(len(interceptionPositions)),
+        ax,
     )
     plot_circle_intersection_arcs(arcs, ax=ax)
     plt.legend()
+    plt.show()
+
+
+def main_with_launch_time():
+    pursuerRange = 1.5
+    pursuerPosition = np.array([0.0, 0.0])
+    interceptionPositions = np.array([[1.0, 1.0]])
+    pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.1
+    evaderHeading = 0.0
+    evaderSpeed = 1.5
+
+    interceptionPositions = np.array([[0.2, 0.2], [-0.8, -0.8]])
+    interceptionPositions = np.array([[0.2, 0.2], [-0.8, -0.8], [-0.4, 0.5]])
+    # interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0]])
+    # interceptionPositions = np.array(
+    #     [[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0]]
+    # )
+    # interceptionPositions = np.random.uniform(-1, 1, (2, 2))
+    dists = np.linalg.norm(pursuerPosition - interceptionPositions, axis=1)
+    print("dists:", dists)
+    launchTimes = dists / pursuerSpeed * np.random.uniform(1, 1.5, size=dists.shape)
+    print("launchTimes:", launchTimes)
+    arcs = compute_potential_pursuer_region_from_interception_position_and_launch_time(
+        interceptionPositions,
+        launchTimes,
+        pursuerSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+    )
+    print("arcs:", arcs)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_aspect("equal")
+    # plot_in_circle_intersection(interceptionPositions, pursuerRange, fig, ax)
+    plot_potential_pursuer_reachable_region(
+        arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
+    )
+    plot_potential_pursuer_engagement_zone(
+        arcs,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        evaderHeading,
+        evaderSpeed,
+        xlim=(-4, 4),
+        ylim=(-4, 4),
+        ax=ax,
+    )
+    plot_pursuer_reachable_region(
+        pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
+    )
+    plot_circle_intersection_arcs(arcs, ax=ax)
+    plot_interception_points(
+        interceptionPositions, launchTimes * pursuerSpeed + pursuerCaptureRadius, ax
+    )
+    ax.set_aspect("equal")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_xlim(-2.5, 2.5)
+    ax.set_ylim(-2.5, 2.5)
+    # plt.legend(ncols=3, loc="upper center")
     plt.show()
 
 
@@ -825,6 +1025,68 @@ def bez_learning_bez_plot():
     plt.show()
 
 
+def plot_pursuer_position_probability_heatmap(
+    interceptionPositions, sigmas, pursuerRange, pursuerCaptureRadius, ax
+):
+    numPoints = 200
+    points, X, Y = get_meshgrid_points(xlim=(-2, 2), ylim=(-2, 2), numPoints=numPoints)
+    print("points shape:", points.shape)
+    print("interceptionPositions shape:", interceptionPositions.shape)
+    print("sigmas shape:", sigmas.shape)
+    prob = prob_within_multiple_radii(
+        points, interceptionPositions, sigmas, pursuerRange + pursuerCaptureRadius
+    )
+    c = ax.pcolormesh(
+        X.reshape((numPoints, numPoints)),
+        Y.reshape((numPoints, numPoints)),
+        prob.reshape((numPoints, numPoints)),
+        shading="auto",
+    )
+    plt.colorbar(c, ax=ax, label="Pursuer Position Probability")
+
+
+def main_potential_bez_with_noisey_interception():
+    pursuerRange = 1.5
+    pursuerPosition = np.array([0.0, 0.0])
+    interceptionPositions = np.array([[1.0, 1.0]])
+    pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.1
+    evaderHeading = 0.0
+    evaderSpeed = 1.5
+
+    interceptionPositions = np.array([[0.2, 0.2], [-0.2, -0.2], [1.2, 1.2], [0.8, 0.8]])
+    intercpetionNoiseStd = np.array([0.1, 0.1, 0.1, 0.1])
+
+    dist = distance_threshold_for_probability(
+        pursuerRange + pursuerCaptureRadius, intercpetionNoiseStd[0], 2, 0.1
+    )
+    print("Distance threshold for 95% probability:", dist)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.set_aspect("equal")
+    plot_pursuer_position_probability_heatmap(
+        interceptionPositions,
+        intercpetionNoiseStd,
+        pursuerRange,
+        pursuerCaptureRadius,
+        ax,
+    )
+    # plot_interception_points(
+    #     interceptionPositions,
+    #     np.ones(len(interceptionPositions)) * (pursuerRange + pursuerCaptureRadius),
+    #     ax,
+    # )
+    plot_interception_points(
+        interceptionPositions,
+        np.ones(len(interceptionPositions)) * dist,
+        ax,
+    )
+    plt.show()
+
+
 if __name__ == "__main__":
     # bez_learning_rect_ez_plot()
-    bez_learning_bez_plot()
+    # bez_learning_bez_plot()
+    # main()
+    # main_with_launch_time()
+    main_potential_bez_with_noisey_interception()

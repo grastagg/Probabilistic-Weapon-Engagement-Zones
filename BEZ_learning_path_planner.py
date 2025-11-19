@@ -990,6 +990,7 @@ def main(interceptionPositions):
     )
     BEZ_learning.plot_interception_points(interceptionPositions, pursuerRange, ax)
     BEZ_learning.plot_circle_intersection_arcs(arcs, ax=ax)
+    plt.legend()
 
 
 def main_box():
@@ -1040,6 +1041,11 @@ def main_box():
 
 
 if __name__ == "__main__":
+    pursuerPosition = np.array([0.0, 0.0])
+    puruserSpeed = 2.0
+    pursuerRange = 1.5
+    evaderSpeed = 1.0
+
     interceptionPoints = np.random.uniform(-1.1, 1.1, (3, 2))
 
     # run main with 1 interception point, 2 interception points, 3 interception points, and box BEZ
