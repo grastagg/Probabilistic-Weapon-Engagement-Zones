@@ -380,7 +380,7 @@ def plot_pursuer_reachable_region(
     circle = plt.Circle(
         (pursuerPosition[0], pursuerPosition[1]),
         pursuerRange + pursuerCaptureRadius,
-        color="blue",
+        color="orange",
         fill=False,
         linestyle="--",
     )
@@ -388,11 +388,11 @@ def plot_pursuer_reachable_region(
     ax.scatter(
         pursuerPosition[0],
         pursuerPosition[1],
-        color="blue",
+        color="orange",
         marker="o",
         label="Pursuer Position",
     )
-    ax.plot([], color="blue", label="True Pursuer Reachable Region")
+    ax.plot([], color="orange", label="True Pursuer Reachable Region")
 
 
 def plot_circle_intersection_arcs(
@@ -532,8 +532,8 @@ prob_within_radius_mult = jax.jit(
 
 def prob_within_multiple_radii_single(x, mus, sigmas, R):
     probs = prob_within_radius_mult(x, mus, sigmas, R)
-    return 1 - jnp.prod(1 - probs)
-    return jnp.sum(probs, axis=0) - jnp.prod(probs, axis=0)
+    # return 1 - jnp.prod(1 - probs)
+    # return jnp.sum(probs, axis=0) - jnp.prod(probs, axis=0)
     return jnp.prod(probs, axis=0)
 
 
@@ -870,7 +870,7 @@ def main():
     plt.show()
 
 
-def plot_potential_ez(ax):
+def plot_potential_ez(ax, fig):
     pursuerPosition = np.array([0.0, 0.0])
     pursuerRange = 1.5
     pursuerSpeed = 2.0
@@ -890,17 +890,17 @@ def plot_potential_ez(ax):
     plot_potential_pursuer_reachable_region(
         arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
     )
-    plot_potential_pursuer_engagement_zone(
-        arcs,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-        evaderHeading,
-        evaderSpeed,
-        xlim=(-4, 4),
-        ylim=(-4, 4),
-        ax=ax,
-    )
+    # plot_potential_pursuer_engagement_zone(
+    #     arcs,
+    #     pursuerRange,
+    #     pursuerCaptureRadius,
+    #     pursuerSpeed,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     xlim=(-4, 4),
+    #     ylim=(-4, 4),
+    #     ax=ax,
+    # )
     # plot_pursuer_reachable_region(
     #     pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
     # )
@@ -915,6 +915,8 @@ def plot_potential_ez(ax):
     ax.set_ylabel("Y")
     ax.set_xlim(-3.5, 3.5)
     ax.set_ylim(-3.5, 3.5)
+    ax.set_xticks(np.arange(-3, 4, 1))
+    ax.set_yticks(np.arange(-3, 4, 1))
     # plt.legend(ncols=5, loc="upper center", columnspacing=0.8)
 
 
@@ -1090,8 +1092,10 @@ def main_potential_bez_with_noisey_interception():
     evaderHeading = 0.0
     evaderSpeed = 1.5
 
-    interceptionPositions = np.array([[0.2, 0.2], [-0.2, -0.2], [1.2, 1.2], [0.8, 0.8]])
-    intercpetionNoiseStd = np.array([0.1, 0.1, 0.1, 0.1])
+    interceptionPositions = np.array([[1.2, 1.2], [-0.8, -0.8]])
+    # interceptionPositions = np.array([[0.2, 0.2], [-0.2, -0.2], [1.2, 1.2], [0.8, 0.8]])
+    # intercpetionNoiseStd = np.array([0.1, 0.1, 0.1, 0.1])
+    intercpetionNoiseStd = np.array([0.1, 0.1])
 
     dist = distance_threshold_for_probability(
         pursuerRange + pursuerCaptureRadius, intercpetionNoiseStd[0], 2, 0.1
@@ -1163,7 +1167,7 @@ def combined_potential_plot():
     fig, ax = plt.subplots(1, 2, figsize=(6.0, 4.0), layout="constrained")
     plot_potential_ez_with_launch_time(ax[1])
     ax[1].set_title("With Launch Times")
-    plot_potential_ez(ax[0])
+    plot_potential_ez(ax[0], fig)
     ax[0].set_title("Without Launch Times")
     handles, labels = ax[1].get_legend_handles_labels()
     plt.figlegend(
@@ -1173,6 +1177,7 @@ def combined_potential_plot():
         ncol=len(labels),
     )
     ax[0].set_title("Without Launch Times")
+
     ax[1].set_title("With Launch Times")
 
     ax[0].text(
@@ -1184,8 +1189,7 @@ def combined_potential_plot():
 
 
 if __name__ == "__main__":
-    # bez_learning_rect_ez_plot()
-    combined_potential_plot()
-    # bez_learning_potential_bez_plot()
     # main_potential_bez_with_noisey_interception()
+
+    combined_potential_plot()
     plt.show()

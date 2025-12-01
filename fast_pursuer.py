@@ -147,9 +147,12 @@ def plotEngagementZone(
     pursuerSpeed,
     agentSpeed,
     ax,
+    alpha=1.0,
+    width=1,
 ):
-    x = np.linspace(-5, 5, 50)
-    y = np.linspace(-5, 5, 50)
+    numPoints = 500
+    y = np.linspace(-5, 5, numPoints)
+    x = np.linspace(-5, 5, numPoints)
     [X, Y] = np.meshgrid(x, y)
     agentPositions = jnp.vstack([X.flatten(), Y.flatten()]).T
     agentHeadings = jnp.ones(agentPositions.shape[0]) * agentHeading
@@ -176,10 +179,11 @@ def plotEngagementZone(
     ax.contour(
         X,
         Y,
-        engagementZonePlot.reshape((50, 50)),
+        engagementZonePlot.reshape((numPoints, numPoints)),
         levels=[0],
         colors=["green"],
-        linewidths=2,
+        linewidths=width,
+        alpha=alpha,
     )
     # ax.scatter(pursuerPosition[0], pursuerPosition[1], color="red")
     # c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
@@ -779,6 +783,68 @@ def plot_abs_diff(linPez, mcPez, ax, fig):
 # inEngagementZone(agentInitialPosition, agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
 
 
+def plot_potential_BEZS():
+    pursuerRange = 1.0
+    pursuerRangeVar = 0.1
+    pursuerCaptureRange = 0.1
+    pursuerCaptureRangeVar = 0.02
+    pursuerSpeed = 2.0
+    pursuerSpeedVar = 0.0
+    agentSpeed = 0.5
+
+    agentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
+    pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
+    pursuerInitialPosition = np.array([0.0, 0.0])
+
+    agentInitialHeading = 0.0
+    agentHeadingVar = 0.0
+
+    numPotentialBEZS = 500
+    fig, ax = plt.subplots(1, 1)
+    plotEngagementZone(
+        agentInitialHeading,
+        pursuerInitialPosition,
+        pursuerRange,
+        pursuerCaptureRange,
+        pursuerSpeed,
+        agentSpeed,
+        ax,
+        alpha=1.0,
+        width=2.5,
+    )
+    plotMahalanobisDistance(
+        pursuerInitialPosition, pursuerPositionCov, ax, fig, plotColorbar=False
+    )
+    for i in range(numPotentialBEZS):
+        potentialPursuerPosition = np.random.multivariate_normal(
+            pursuerInitialPosition, pursuerPositionCov
+        )
+        plotEngagementZone(
+            agentInitialHeading,
+            potentialPursuerPosition,
+            pursuerRange,
+            pursuerCaptureRange,
+            pursuerSpeed,
+            agentSpeed,
+            ax,
+            alpha=0.2,
+        )
+        ax.scatter(
+            potentialPursuerPosition[0], potentialPursuerPosition[1], color="red"
+        )
+
+    plt.xticks([])
+    plt.yticks([])
+    plt.xlabel("")
+    plt.ylabel("")
+    ax.scatter(*pursuerInitialPosition, color="darkred", s=80)
+
+    ax.set_aspect("equal")
+    ax.set_xlim([-2, 2])
+    ax.set_ylim([-2, 2])
+    plt.show()
+
+
 def main():
     pursuerRange = 1.0
     pursuerRangeVar = 0.1
@@ -932,4 +998,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    plot_potential_BEZS()
