@@ -18,6 +18,7 @@ matplotlib.rcParams["ps.fonttype"] = 42
 
 from fast_pursuer import (
     plotMahalanobisDistance,
+    plotProbablisticEngagementZone,
     probabalisticEngagementZoneVectorizedTemp,
     inEngagementZoneJaxVectorized,
 )
@@ -789,6 +790,137 @@ def animate_ez():
         plt.close(fig)
 
 
+def animate_pez():
+    agentPositionCov = np.array([[0.0, 0], [0, 0.0]])
+    agentHeadingVar = 0.0
+    pursuerPosition = np.array([0.0, 0.0])
+
+    startingLocation = np.array([-4.0, -4.0])
+    endingLocation = np.array([4.0, 4.0])
+    initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
+
+    numControlPoints = 14
+    splineOrder = 3
+    turn_rate_constraints = (-50.0, 50.0)
+    curvature_constraints = (-10.0, 10.0)
+    num_constraint_samples = 50
+    # pez_constraint_limit_list = [.1,.2,.3,.4]
+    # pez_constraint_limit_list = [.01,0.05,.1,.2,.3,.4,.5]
+    # pez_constraint_limit_list = [0.5]
+    pez_constraint_limit_list = [0.1]
+
+    # pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
+    pursuerPositionCov = np.array([[0.1, 0], [0, 0.1]])
+    pursuerRange = 1.0
+    pursuerRangeVar = 0.1
+    # pursuerRangeVar = 0.0
+    pursuerCaptureRange = 0.1
+    pursuerCaptureRangeVar = 0.02
+    # pursuerCaptureRangeVar = 0.00
+    pursuerSpeed = 2.0
+    # pursuerSpeedVar = 0.2
+    pursuerSpeedVar = 0.0
+    agentSpeed = 0.5
+    # velocity_constraints = (0,1.0)
+    velocity_constraints = (agentSpeed - 0.01, agentSpeed + 0.01)
+
+    useProbabalistic = True
+
+    pez_constraint_limit = pez_constraint_limit_list[0]
+    spline = optimize_spline_path(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        pez_constraint_limit,
+        agentPositionCov,
+        agentHeadingVar,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerRange,
+        pursuerRangeVar,
+        pursuerCaptureRange,
+        pursuerCaptureRangeVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        agentSpeed,
+        useProbabalistic,
+    )
+
+    # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit, useProbabalistic)
+    currentTime = 0
+    dt = 0.2
+    finalTime = spline.t[-1 - spline.k]
+    ind = 0
+    while currentTime < finalTime:
+        fig, ax = plt.subplots()
+        pdot = spline.derivative(1)(currentTime)
+        currentPosition = spline(currentTime)
+        currentHeading = np.arctan2(pdot[1], pdot[0])
+        plotProbablisticEngagementZone(
+            agentPositionCov,
+            currentHeading,
+            agentHeadingVar,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerRange,
+            pursuerRangeVar,
+            pursuerCaptureRange,
+            pursuerCaptureRangeVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            agentSpeed,
+            ax,
+            levels=[0.01, 0.1, 0.2, 0.3, 0.4, 0.5],
+        )
+        # plot triangle at evader position with heading of evader
+        plot_spline(
+            spline,
+            agentPositionCov,
+            agentHeadingVar,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerRange,
+            pursuerRangeVar,
+            pursuerCaptureRange,
+            pursuerCaptureRangeVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            agentSpeed,
+            pez_constraint_limit,
+            ax,
+        )
+        plt.arrow(
+            currentPosition[0],
+            currentPosition[1],
+            1e-6 * np.cos(currentHeading),  # essentially zero-length tail
+            1e-6 * np.sin(currentHeading),
+            head_width=0.25,
+            head_length=0.3,
+            width=0,  # no line
+            fc="blue",
+            ec="blue",
+            zorder=5,
+        )
+        plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax, fig)
+        ax.set_xlim(-4.5, 4.5)
+        ax.set_ylim(-4.5, 4.5)
+        plt.xticks([])
+        plt.yticks([])
+        plt.xlabel("")
+        plt.ylabel("")
+
+        fig.savefig(f"video/{ind}.png", dpi=300)
+        ind += 1
+        currentTime += dt
+        plt.close(fig)
+
+
 if __name__ == "__main__":
     # main()
-    animate_ez()
+    animate_pez()

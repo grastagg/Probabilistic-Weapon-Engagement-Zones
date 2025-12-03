@@ -581,15 +581,17 @@ def plotProbablisticEngagementZone(
     pursuerSpeedVar,
     agentSpeed,
     ax,
+    levels=None,
 ):
     ax.set_aspect("equal")
 
     # Define the grid
-    x = jnp.linspace(-2, 2, 50)
-    y = jnp.linspace(-2, 2, 50)
+    numPoints = 100
+    x = jnp.linspace(-5, 5, numPoints)
+    y = jnp.linspace(-5, 5, numPoints)
     X, Y = jnp.meshgrid(x, y)
     agentPositions = jnp.vstack([X.ravel(), Y.ravel()]).T
-    agentHeadings = jnp.ones(50 * 50) * agentHeading
+    agentHeadings = jnp.ones(numPoints * numPoints) * agentHeading
 
     # Compute Jacobian of engagement zone function
     # dPezDPursuerPosition = jacfwd(inEngagementZoneJax, argnums=2)
@@ -625,17 +627,30 @@ def plotProbablisticEngagementZone(
     engagementZonePlot_reshaped = engagementZonePlot_np.reshape(X.shape)
 
     # Plotting
-    c = ax.contour(
-        X, Y, engagementZonePlot_reshaped, levels=np.linspace(0.1, 1, 10), linewidths=2
-    )
-    ax.clabel(c, inline=True)
+    if levels is None:
+        levels = np.linspace(0.1, 1, 10)
+    c = ax.contour(X, Y, engagementZonePlot_reshaped, levels=levels, linewidths=2)
+    inLine = False
+    if inLine:
+        ax.clabel(c, inline=True)
+    else:
+        handles, labels = c.legend_elements()
+        labels = [f"$\\epsilon={lvl:.2f}$" for lvl in c.levels]
+
+        ax.legend(
+            handles,
+            labels,
+            title="PEZ Level",
+            loc="lower right",
+            framealpha=0.8,
+        )
 
     # Add circle representing pursuer's range
     # for i in range(3):
     #     c = plt.Circle(pursuerPosition, pursuerRange + i*np.sqrt(pursuerRangeVar) + pursuerCaptureRange, fill=False, color='r', linestyle='--')
     #     ax.add_artist(c)
     # c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
-    ax.add_artist(c)
+    # ax.add_artist(c)
 
     return engagementZonePlot_reshaped
 
