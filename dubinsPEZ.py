@@ -7,7 +7,7 @@ from jax.profiler import start_trace, stop_trace
 import os
 from jax.lax import le
 import numpy as np
-import chaospy as cp
+# import chaospy as cp
 
 import jax.numpy as jnp
 import jax

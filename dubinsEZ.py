@@ -18,6 +18,7 @@ import jax.numpy as jnp
 import matplotlib
 
 import evader_pursuer_plot
+import fast_pursuer
 
 
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -690,9 +691,10 @@ def plot_dubins_EZ(
     evaderHeading,
     evaderSpeed,
     ax,
+    alpha=1.0,
 ):
     numPoints = 1000
-    rangeX = 3.2
+    rangeX = 8.2
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -721,11 +723,13 @@ def plot_dubins_EZ(
     Y = Y.reshape(numPoints, numPoints)
     colors = ["green"]
     # colors = ["red"]
-    ax.contour(X, Y, ZTrue, levels=[0], colors=colors, linewidths=2)
+    ax.contour(X, Y, ZTrue, levels=[0], colors=colors, linewidths=2, alpha=alpha)
     # ax.contourf(
     #     X, Y, ZTrue, levels=np.linspace(np.min(ZTrue), np.max(ZTrue), 100), alpha=0.5
     # )
-    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label="CSBEZ")
+    contour_proxy = plt.plot(
+        [0], [0], color=colors[0], linewidth=2, label="CSBEZ", alpha=alpha
+    )
     # add label so it can be added to legend
 
     # # ax.contour(X, Y, ZGeometric, cmap="summer")
@@ -734,9 +738,41 @@ def plot_dubins_EZ(
     return ax
 
 
+def _arc_between_points(center, radius, p_start, p_end, ccw=True, num=200):
+    """
+    Compute points on an arc from p_start to p_end around `center`
+    with radius `radius`, going CCW or CW.
+    """
+    ang1 = np.arctan2(p_start[1] - center[1], p_start[0] - center[0])
+    ang2 = np.arctan2(p_end[1] - center[1], p_end[0] - center[0])
+
+    if ccw:
+        # ensure ang2 is ahead of ang1 in CCW direction
+        if ang2 <= ang1:
+            ang2 += 2 * np.pi
+    else:
+        # ensure ang2 is behind ang1 in CW direction
+        if ang2 >= ang1:
+            ang2 -= 2 * np.pi
+
+    theta = np.linspace(ang1, ang2, num)
+    x = center[0] + radius * np.cos(theta)
+    y = center[1] + radius * np.sin(theta)
+    return x, y
+
+
 def plot_dubins_path(
-    startPosition, startHeading, goalPosition, radius, captureRadius, tangentPoint, ax
+    startPosition,
+    startHeading,
+    goalPosition,
+    radius,
+    captureRadius,
+    tangentPoint,
+    ax,
+    path_type="LS",  # "LS" = left-then-straight, "RS" = right-then-straight
+    width=3,
 ):
+    # Compute circle centers from start pose
     leftCenter = np.array(
         [
             startPosition[0] - radius * np.sin(startHeading),
@@ -749,31 +785,36 @@ def plot_dubins_path(
             startPosition[1] - radius * np.cos(startHeading),
         ]
     )
-    # ax.scatter(*startPosition, c="g")
-    # ax.scatter(*goalPosition, c="r")
-    # ax.scatter(*leftCenter, c="g")
-    # ax.scatter(*rightCenter, c="b")
-    theta = np.linspace(0, -np.pi / 4, 100)
-    xl = leftCenter[0] + radius * np.cos(theta)
-    yl = leftCenter[1] + radius * np.sin(theta)
 
-    xr = rightCenter[0] + radius * np.cos(theta)
-    yr = rightCenter[1] + radius * np.sin(theta)
+    # --- Capture circle arc (unchanged from your basic idea) ---
+    theta_cap = np.linspace(0, -np.pi / 4, 100)
+    xcr = goalPosition[0] + captureRadius * np.cos(theta_cap)
+    ycr = goalPosition[1] + captureRadius * np.sin(theta_cap)
+    ax.plot(xcr, ycr, "r", linewidth=width)
 
-    xcr = goalPosition[0] + captureRadius * np.cos(theta)
-    ycr = goalPosition[1] + captureRadius * np.sin(theta)
-    ax.plot(xcr, ycr, "r", linewidth=4)
+    # --- Turning arc from startPosition to tangentPoint ---
+    if path_type in ("LS", "L"):
+        # Left turn: CCW on left circle
+        x_arc, y_arc = _arc_between_points(
+            leftCenter, radius, startPosition, tangentPoint, ccw=True
+        )
+        ax.plot(x_arc, y_arc, "r", linewidth=width)
 
-    ax.plot(xl, yl, "r", linewidth=3)
-    # ax.plot(xr, yr, "b")
-    # ax.scatter(*tangentPoint, c="y")
+    if path_type in ("RS", "R"):
+        # Right turn: CW on right circle
+        x_arc, y_arc = _arc_between_points(
+            rightCenter, radius, startPosition, tangentPoint, ccw=False
+        )
+        ax.plot(x_arc, y_arc, "r", linewidth=3)
+
+    # --- Straight segment from tangent point to goal (or goal center) ---
     ax.plot(
-        [goalPosition[0], tangentPoint[0]],
-        [goalPosition[1], tangentPoint[1]],
+        [tangentPoint[0], goalPosition[0]],
+        [tangentPoint[1], goalPosition[1]],
         "r",
         linewidth=3,
     )
-    ax = plt.gca()
+
     ax.set_aspect("equal", "box")
 
 
@@ -783,11 +824,11 @@ def plot_dubins_reachable_set(
     pursuerRange,
     radius,
     ax,
-    colors=["black"],
+    colors=["magenta"],
     alpha=1.0,
 ):
     numPoints = 1000
-    rangeX = 5.0
+    rangeX = 8.0
     x = np.linspace(-rangeX, rangeX, numPoints)
     y = np.linspace(-rangeX, rangeX, numPoints)
     [X, Y] = np.meshgrid(x, y)
@@ -1102,6 +1143,7 @@ def main_EZ():
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 1
     evaderPosition = np.array([-1.14, 2.46])
+    evaderPosition = np.array([-1.14, 2.66])
     startTime = time.time()
 
     # length, tangentPoint = find_dubins_path_length_right_strait(
@@ -1118,15 +1160,7 @@ def main_EZ():
     # )
     #
     fig, ax = plt.subplots(figsize=(6, 5), layout="constrained")
-    # plotEngagementZone(
-    #     evaderHeading,
-    #     pursuerPosition,
-    #     pursuerRange,
-    #     captureRadius,
-    #     pursuerSpeed,
-    #     evaderSpeed,
-    #     ax,
-    # )
+
     plot_dubins_reachable_set(
         pursuerPosition, pursuerHeading, pursuerRange, minimumTurnRadius, ax
     )
@@ -1185,8 +1219,269 @@ def main_EZ():
     plt.show()
 
 
+def bez_csbez_comparison():
+    pursuerPosition = np.array([0, 0])
+
+    pursuerHeading = np.pi / 4
+
+    pursuerSpeed = 2
+
+    pursuerRange = 2.5
+    minimumTurnRadius = 0.47
+    captureRadius = 0.0
+    evaderHeading = (0 / 20) * np.pi
+    evaderSpeed = 1
+    evaderPosition = np.array([-1.14, 2.46])
+    startTime = time.time()
+
+    # length, tangentPoint = find_dubins_path_length_right_strait(
+    #     pursuerPosition, pursuerHeading, evaderPosition, minimumTurnRadius
+    # )
+    # print("length", length)
+    # plot_dubins_path(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     evaderPosition,
+    #     minimumTurnRadius,
+    #     0.0,
+    #     tangentPoint,
+    # )
+    #
+    fig, ax = plt.subplots(figsize=(6, 5), layout="constrained")
+    fast_pursuer.plotEngagementZone(
+        evaderHeading,
+        pursuerPosition,
+        pursuerRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        ax,
+        width=2,
+        color="orange",
+    )
+    plot_dubins_EZ(
+        pursuerPosition,
+        pursuerHeading,
+        pursuerSpeed,
+        minimumTurnRadius,
+        captureRadius,
+        pursuerRange,
+        evaderHeading,
+        evaderSpeed,
+        ax,
+    )
+
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    ax.set_xlim([-4.1, 3.1])
+    ax.set_ylim([-4.1, 3.1])
+    ax.tick_params(axis="both", which="major")
+    ax.set_aspect("equal", "box")
+    # put legend outside the plot
+    ax.legend(loc="lower right")
+    plt.show()
+
+
+def pursuer_heading_vs_ez_boundary():
+    pursuerPosition = np.array([0, 0])
+
+    pursuerSpeed = 2
+
+    pursuerRange = 2.5
+    minimumTurnRadius = 0.47
+    captureRadius = 0.0
+    evaderHeading = (0 / 20) * np.pi
+    evaderSpeed = 1
+    evaderPosition = np.array([-1.54, 0.76])
+    startTime = time.time()
+
+    numHeadings = 200
+    headings = np.linspace(0, 2 * np.pi, numHeadings)
+    ez_boundary_points = []
+    headings_plot = []
+    for i, heading in enumerate(headings):
+        ez = in_dubins_engagement_zone_single(
+            pursuerPosition,
+            heading,
+            minimumTurnRadius,
+            captureRadius,
+            pursuerRange,
+            pursuerSpeed,
+            evaderPosition,
+            evaderHeading,
+            evaderSpeed,
+        )
+        print(ez)
+
+        ez_boundary_points.append(ez)
+        headings_plot.append(heading)
+
+        fig, ax = plt.subplots(figsize=(6, 5), layout="constrained")
+        ax.set_xlim([0, 2 * np.pi])
+        ax.set_ylim([-2.2, 1.5])
+        ax.scatter(
+            headings_plot,
+            ez_boundary_points,
+            c="b",
+            linewidth=2,
+        )
+        ax.set_xlabel("Pursuer Heading (rad)")
+        ax.set_ylabel("Engagement Zone Function")
+        plt.savefig(f"video/{i}.png")
+        fig2, ax2 = plt.subplots(figsize=(6, 5), layout="constrained")
+
+        # plot evader final position and turn radius and dubins path
+        ax2.set_xlim([-3.1, 3.1])
+        ax2.set_ylim([-3.1, 3.1])
+        plot_dubins_reachable_set(
+            pursuerPosition, heading, pursuerRange, minimumTurnRadius, ax2
+        )
+        # plot_dubins_EZ(
+        #     pursuerPosition,
+        #     heading,
+        #     pursuerSpeed,
+        #     minimumTurnRadius,
+        #     captureRadius,
+        #     pursuerRange,
+        #     evaderHeading,
+        #     evaderSpeed,
+        #     ax2,
+        # )
+
+        speedRatio = evaderSpeed / pursuerSpeed
+        F = evaderPosition + speedRatio * pursuerRange * np.array(
+            [np.cos(evaderHeading), np.sin(evaderHeading)]
+        )
+        ax2.plot(
+            [evaderPosition[0], F[0]], [evaderPosition[1], F[1]], c="b", linewidth=3
+        )
+        Cl = jnp.array(
+            [
+                pursuerPosition[0] - minimumTurnRadius * jnp.sin(heading),
+                pursuerPosition[1] + minimumTurnRadius * jnp.cos(heading),
+            ]
+        )
+        Cr = jnp.array(
+            [
+                pursuerPosition[0] + minimumTurnRadius * jnp.sin(heading),
+                pursuerPosition[1] - minimumTurnRadius * jnp.cos(heading),
+            ]
+        )
+        Gl = find_counter_clockwise_tangent_point(F, Cl, minimumTurnRadius)
+        Gr = find_clockwise_tangent_point(F, Cr, minimumTurnRadius)
+        rightLength, _ = find_dubins_path_length_right_strait(
+            pursuerPosition, heading, F, minimumTurnRadius
+        )
+        leftLength, _ = find_dubins_path_length_left_strait(
+            pursuerPosition, heading, F, minimumTurnRadius
+        )
+        if rightLength < leftLength:
+            G = Gr
+            C = Cr
+            type = "RS"
+        else:
+            G = Gl
+            C = Cl
+            type = "LS"
+        plot_dubins_path(
+            pursuerPosition, heading, F, minimumTurnRadius, 0.0, G, ax2, path_type=type
+        )
+
+        # plot_theta_and_vectors_left_turn(
+        #     pursuerPosition,
+        #     pursuerHeading,
+        #     pursuerSpeed,
+        #     minimumTurnRadius,
+        #     pursuerRange,
+        #     evaderPosition,
+        #     evaderHeading,
+        #     evaderSpeed,
+        #     ax,
+        # )
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        ax2.set_xlim([-3.1, 3.1])
+        ax2.set_ylim([-3.1, 3.1])
+        evader_pursuer_plot.draw_airplane(
+            ax2,
+            evaderPosition,
+            color="blue",
+            size=0.35,
+            angle=evaderHeading - np.pi / 2,
+        )  # Blue airplane (evader) pointing toward x-axis
+        evader_pursuer_plot.draw_airplane(
+            ax2,
+            pursuerPosition,
+            color="red",
+            size=0.35,
+            angle=heading - np.pi / 2,
+        )
+        plt.savefig(f"video2/{i}.png")
+
+        # close all figs
+        plt.close("all")
+
+
+def uncertain_dubins_ez_plot():
+    pursuerPositionRange = 4
+
+    pursuerHeadingRange = np.pi
+
+    pursuerRangeRange = [1.6, 2]
+    minimumTurnRadius = 0.47
+    pursuerMinimumTurnRadiusRange = [0.30, 0.5]
+    fig, ax = plt.subplots()
+    numPursuerSamples = 20
+    for i in range(numPursuerSamples):
+        pursuerPosition = np.array(
+            [
+                np.random.uniform(-pursuerPositionRange, pursuerPositionRange),
+                np.random.uniform(-pursuerPositionRange, pursuerPositionRange),
+            ]
+        )
+        pursuerHeading = np.random.uniform(-pursuerHeadingRange, pursuerHeadingRange)
+        pursuerRange = np.random.uniform(pursuerRangeRange[0], pursuerRangeRange[1])
+        minimumTurnRadius = np.random.uniform(
+            pursuerMinimumTurnRadiusRange[0], pursuerMinimumTurnRadiusRange[1]
+        )
+        plot_dubins_reachable_set(
+            pursuerPosition,
+            pursuerHeading,
+            pursuerRange,
+            minimumTurnRadius,
+            ax,
+            alpha=0.3,
+        )
+    # plot box of potential pursuer startPosition
+    ax.plot(
+        [
+            -pursuerPositionRange,
+            pursuerPositionRange,
+            pursuerPositionRange,
+            -pursuerPositionRange,
+            -pursuerPositionRange,
+        ],
+        [
+            -pursuerPositionRange,
+            -pursuerPositionRange,
+            pursuerPositionRange,
+            pursuerPositionRange,
+            -pursuerPositionRange,
+        ],
+        c="red",
+        linewidth=2,
+    )
+    ax.set_aspect("equal", "box")
+    ax.set_xlim([-6, 6])
+    ax.set_ylim([-6, 6])
+    plt.show()
+
+
 if __name__ == "__main__":
-    main_EZ()
+    # pursuer_heading_vs_ez_boundary()
+    # main_EZ()
+    uncertain_dubins_ez_plot()
+    # bez_csbez_comparison()
     # fig, ax = plt.subplots()
     # ax.scatter(0, 0, c="r")
 # plt.show()

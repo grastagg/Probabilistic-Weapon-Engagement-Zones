@@ -149,6 +149,7 @@ def plotEngagementZone(
     ax,
     alpha=1.0,
     width=1,
+    color="green",
 ):
     numPoints = 500
     y = np.linspace(-5, 5, numPoints)
@@ -181,10 +182,11 @@ def plotEngagementZone(
         Y,
         engagementZonePlot.reshape((numPoints, numPoints)),
         levels=[0],
-        colors=["green"],
+        colors=[color],
         linewidths=width,
         alpha=alpha,
     )
+    ax.plot([], color=color, label="BEZ", linewidth=width, alpha=alpha)
     # ax.scatter(pursuerPosition[0], pursuerPosition[1], color="red")
     # c = plt.Circle(pursuerPosition, pursuerRange, fill=False, color="black")
     # ax.add_artist(c)
