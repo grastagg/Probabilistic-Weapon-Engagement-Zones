@@ -177,7 +177,6 @@ def compute_potential_pursuer_region_from_interception_position_and_launch_time(
         print("Warning: launch times too long")
 
     radii = pursuerPathDistances + pursuerCaptureRadius
-    print("radii:", radii)
     arcs = intersection_arcs(interceptionPositions, radii)
     return arcs
 
@@ -419,8 +418,6 @@ def plot_circle_intersection_arcs(
     ax : matplotlib.axes.Axes
         The axes with the plot.
     """
-    print(arcs)
-    print("number of arcs:", len(arcs))
     if len(arcs) == 1:
         # plot full circle
         r = arcs[0]["radius"]
@@ -837,7 +834,6 @@ def main():
         interceptionPositions,
         [pursuerRange + pursuerCaptureRadius] * np.ones(len(interceptionPositions)),
     )
-    print("arcs:", arcs)
 
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_aspect("equal")
@@ -1079,9 +1075,6 @@ def plot_pursuer_position_probability_heatmap(
 ):
     numPoints = 200
     points, X, Y = get_meshgrid_points(xlim=(-2, 2), ylim=(-2, 2), numPoints=numPoints)
-    print("points shape:", points.shape)
-    print("interceptionPositions shape:", interceptionPositions.shape)
-    print("sigmas shape:", sigmas.shape)
     prob = prob_within_multiple_radii(
         points, interceptionPositions, sigmas, pursuerRange + pursuerCaptureRadius
     )
@@ -1111,7 +1104,6 @@ def main_potential_bez_with_noisey_interception():
     dist = distance_threshold_for_probability(
         pursuerRange + pursuerCaptureRadius, intercpetionNoiseStd[0], 2, 0.1
     )
-    print("Distance threshold for 95% probability:", dist)
 
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_aspect("equal")

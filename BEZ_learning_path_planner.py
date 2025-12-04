@@ -25,17 +25,7 @@ numSamplesPerInterval = 15
 
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
-def plot_spline(
-    spline,
-    # pursuerPosition,
-    # pursuerHeading,
-    # pursuerRange,
-    # pursuerCaptureRadius,
-    # pursuerSpeed,
-    # pursuerTurnRadius,
-    # agentSpeed,
-    ax,
-):
+def plot_spline(spline, ax, width=1):
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
@@ -65,7 +55,7 @@ def plot_spline(
     #     agentSpeed,
     # )
     #
-    ax.plot(x, y)
+    ax.plot(x, y, linewidth=width)
     # cbar = plt.colorbar(c, shrink=0.8)
     # cbar.ax.tick_params(labelsize=26)
 
@@ -972,16 +962,17 @@ def main(interceptionPositions):
     ax.set_xlim(-6, 6)
     ax.set_ylim(-6, 6)
     plot_spline(spline, ax)
-    # BEZ_learning.plot_potential_pursuer_engagement_zone(
-    #     arcs,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     xlim=(-6, 6),
-    #     ylim=(-6, 6),
-    #     ax=ax,
-    # )
+    BEZ_learning.plot_potential_pursuer_engagement_zone(
+        arcs,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        evaderHeading,
+        evaderSpeed,
+        xlim=(-6, 6),
+        ylim=(-6, 6),
+        ax=ax,
+    )
     BEZ_learning.plot_potential_pursuer_reachable_region(
         arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
     )
@@ -1044,6 +1035,194 @@ def main_box():
     # plt.legend()
 
 
+def animate_spline_path(interceptionPositions):
+    initialEvaderPosition = np.array([-5.0, -5.0])
+    finalEvaderPosition = np.array([5.0, 5.0])
+    initialEvaderVelocity = np.array([1.0, 0.0])
+    pursuerRange = 1.5
+    pursuerPosition = np.array([0.0, 0.0])
+    pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.0
+    evaderHeading = 0.0
+    evaderSpeed = 1.5
+
+    num_cont_points = 20
+    spline_order = 3
+    velocity_constraints = (0.9, 1.1)
+    curvature_constraints = (-0.5, 0.5)
+    turn_rate_constraints = (-1.0, 1.0)
+    num_constraint_samples = 50
+
+    # interceptionPositions = np.array([[1.0, 1.0]])
+    # interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0]])
+    # interceptionPositions = np.array([[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0]])
+    # interceptionPositions = np.array(
+    #     [[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0]]
+    # )
+    # interceptionPositions = np.random.uniform(-1.1, 1.1, (numIntersectionPoints, 2))
+    spline, arcs = plan_path_from_interception_points(
+        interceptionPositions,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        evaderSpeed,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+    )
+
+    currentTime = 0
+    dt = 0.1
+    finalTime = spline.t[-1 - spline.k]
+    ind = 0
+    while currentTime < finalTime:
+        fig, ax = plt.subplots(layout="constrained", figsize=(6, 6))
+        pdot = spline.derivative(1)(currentTime)
+        currentPosition = spline(currentTime)
+        currentHeading = np.arctan2(pdot[1], pdot[0])
+
+        plot_spline(spline, ax, width=2)
+        plt.arrow(
+            currentPosition[0],
+            currentPosition[1],
+            1e-6 * np.cos(currentHeading),  # essentially zero-length tail
+            1e-6 * np.sin(currentHeading),
+            head_width=0.25,
+            head_length=0.3,
+            width=0,  # no line
+            fc="blue",
+            ec="blue",
+            zorder=5,
+        )
+        BEZ_learning.plot_potential_pursuer_engagement_zone(
+            arcs,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            currentHeading,
+            evaderSpeed,
+            xlim=(-6, 6),
+            ylim=(-6, 6),
+            ax=ax,
+        )
+        BEZ_learning.plot_potential_pursuer_reachable_region(
+            arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
+        )
+        # BEZ_learning.plot_pursuer_reachable_region(
+        #     pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
+        # )
+        BEZ_learning.plot_interception_points(
+            interceptionPositions,
+            np.ones(len(interceptionPositions)) * (pursuerRange + pursuerCaptureRadius),
+            ax,
+        )
+        BEZ_learning.plot_circle_intersection_arcs(arcs, ax=ax)
+        ax.set_xlim(-5.5, 5.5)
+        ax.set_ylim(-5.5, 5.5)
+        plt.xticks([])
+        plt.yticks([])
+        plt.xlabel("")
+        plt.ylabel("")
+
+        fig.savefig(f"video/{ind}.png", dpi=300)
+        ind += 1
+        currentTime += dt
+        plt.close(fig)
+
+
+def animate_spline_path_box():
+    initialEvaderPosition = np.array([-5.0, -5.0])
+    finalEvaderPosition = np.array([5.0, 5.0])
+    initialEvaderVelocity = np.array([1.0, 0.0])
+    pursuerRange = 1.5
+    pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.0
+    evaderSpeed = 1.5
+    min_box = np.array([-3.0, -3.0])
+    max_box = np.array([3.0, 3.0])
+
+    num_cont_points = 20
+    spline_order = 3
+    velocity_constraints = (0.9, 1.1)
+    curvature_constraints = (-0.5, 0.5)
+    turn_rate_constraints = (-1.0, 1.0)
+    num_constraint_samples = 50
+
+    spline = plan_path_box_BEZ(
+        min_box,
+        max_box,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        evaderSpeed,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+    )
+
+    currentTime = 0
+    dt = 0.1
+    finalTime = spline.t[-1 - spline.k]
+    ind = 0
+    while currentTime < finalTime:
+        fig, ax = plt.subplots(layout="constrained", figsize=(6, 6))
+        pdot = spline.derivative(1)(currentTime)
+        currentPosition = spline(currentTime)
+        currentHeading = np.arctan2(pdot[1], pdot[0])
+
+        plot_spline(spline, ax, width=2)
+        plt.arrow(
+            currentPosition[0],
+            currentPosition[1],
+            1e-6 * np.cos(currentHeading),  # essentially zero-length tail
+            1e-6 * np.sin(currentHeading),
+            head_width=0.25,
+            head_length=0.3,
+            width=0,  # no line
+            fc="blue",
+            ec="blue",
+            zorder=5,
+        )
+        BEZ_learning.plot_box_pursuer_reachable_region(
+            min_box, max_box, pursuerRange, pursuerCaptureRadius, ax=ax
+        )
+        BEZ_learning.plot_box_pursuer_engagement_zone(
+            min_box,
+            max_box,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            currentHeading,
+            evaderSpeed,
+            xlim=(-6, 6),
+            ylim=(-6, 6),
+            ax=ax,
+        )
+        ax.set_xlim(-5.5, 5.5)
+        ax.set_ylim(-5.5, 5.5)
+        plt.xticks([])
+        plt.yticks([])
+        plt.xlabel("")
+        plt.ylabel("")
+
+        fig.savefig(f"video/{ind}.png", dpi=300)
+        ind += 1
+        currentTime += dt
+        plt.close(fig)
+
+
 if __name__ == "__main__":
     pursuerPosition = np.array([0.0, 0.0])
     puruserSpeed = 2.0
@@ -1052,12 +1231,14 @@ if __name__ == "__main__":
 
     # interceptionPoints = np.random.uniform(-1.1, 1.1, (3, 2))
     interceptionPoints = np.array([[0.4, 0.5], [-0.8, -0.8], [-0.7, 0.9]])
-
-    # run main with 1 interception point, 2 interception points, 3 interception points, and box BEZ
-    main(interceptionPoints[:1])
-    main(interceptionPoints[:2])
-    main(interceptionPoints[:3])
-
-    main_box()
-
-    plt.show()
+    #
+    # # run main with 1 interception point, 2 interception points, 3 interception points, and box BEZ
+    # main(interceptionPoints[:1])
+    # main(interceptionPoints[:2])
+    # main(interceptionPoints[:3])
+    #
+    # main_box()
+    #
+    # plt.show()
+    # animate_spline_path(interceptionPoints[:1])
+    animate_spline_path_box()
