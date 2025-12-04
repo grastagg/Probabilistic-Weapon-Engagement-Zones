@@ -15,6 +15,7 @@ jax.config.update("jax_enable_x64", True)
 
 # jax.config.update("jax_platform_name", "cpu")
 # jax.default_device(jax.devices("cpu")[0])
+# jax.config.update("jax_platform_name", "cpu")
 
 
 from math import erf, sqrt
@@ -23,6 +24,17 @@ import matplotlib
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
+plt.rcParams["mathtext.fontset"] = "cm"  # Computer Modern
+plt.rcParams["mathtext.rm"] = "serif"
+# get rid of type 3 fonts
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+# set font size for title, axis labels, and legend, and tick labels
+matplotlib.rcParams["axes.titlesize"] = 14
+matplotlib.rcParams["axes.labelsize"] = 12
+matplotlib.rcParams["legend.fontsize"] = 10
+matplotlib.rcParams["ytick.labelsize"] = 10
+matplotlib.rcParams["xtick.labelsize"] = 10
 
 
 # pursuerRange = .8

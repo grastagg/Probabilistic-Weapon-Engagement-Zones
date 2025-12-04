@@ -37,6 +37,7 @@ from bspline.matrix_evaluation import (
 )
 
 import dubinsPEZ
+import dubinsEZ
 import nueral_network_EZ
 
 import dubins_EZ_path_planning
@@ -849,7 +850,7 @@ def main():
     pursuerPositionCov = np.array([[0.05, -0.04], [-0.04, 0.4]])
     # pursuerPositionCov = np.array([[0.025, 0.04], [0.04, 0.1]])
     # pursuerHeading = 0 * np.pi / 2
-    pursuerHeading = (10.0 / 20.0) * np.pi
+    pursuerHeading = (5.0 / 20.0) * np.pi
     # pursuerHeadingVar = 0.3
     pursuerHeadingVar = 0.2
 
@@ -858,7 +859,7 @@ def main():
     initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
     initialVelocity = endingLocation - startingLocation
 
-    numControlPoints = 8
+    numControlPoints = 14
     splineOrder = 3
     turn_rate_constraints = (-1.0, 1.0)
     curvature_constraints = (-0.2, 0.2)
@@ -1031,5 +1032,169 @@ def main():
     plt.show()
 
 
+def animate_spline_path():
+    pursuerPosition = np.array([0.0, 0.0])
+    pursuerPositionCov = np.array([[0.05, -0.04], [-0.04, 0.4]])
+    # pursuerPositionCov = np.array([[0.025, 0.04], [0.04, 0.1]])
+    # pursuerHeading = 0 * np.pi / 2
+    pursuerHeading = (5.0 / 20.0) * np.pi
+    # pursuerHeadingVar = 0.3
+    pursuerHeadingVar = 0.2
+
+    startingLocation = np.array([-4.0, -4.0])
+    endingLocation = np.array([4.0, 4.0])
+    initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
+    initialVelocity = endingLocation - startingLocation
+
+    numControlPoints = 14
+    splineOrder = 3
+    turn_rate_constraints = (-1.0, 1.0)
+    curvature_constraints = (-0.2, 0.2)
+    num_constraint_samples = 50
+
+    pursuerRange = 1.0
+    # pursuerRangeVar = 0.1
+    pursuerRangeVar = 0.1
+    pursuerCaptureRadius = 0.0
+    pursuerSpeed = 2.0
+    # pursuerSpeedVar = 0.1
+    pursuerSpeedVar = 0.3
+    pursuerTurnRadius = 0.2
+    pursuerTurnRadiusVar = 0.005
+    agentSpeed = 1
+    pez_limit = 0.25
+
+    initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
+
+    velocity_constraints = (agentSpeed - 0.001, agentSpeed + 0.001)
+    detSpline = dubins_EZ_path_planning.optimize_spline_path(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        0.0,
+        pursuerPosition,
+        pursuerHeading,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        pursuerTurnRadius,
+        agentSpeed,
+    )
+    spline = optimize_spline_path(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        pez_limit,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerRange,
+        pursuerRangeVar,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        pursuerTurnRadius,
+        pursuerTurnRadiusVar,
+        agentSpeed,
+        detSpline.c.flatten(),
+        detSpline.t[-detSpline.k - 1],
+        linearPez=False,
+        quadraticPez=False,
+        neuralNetworkPez=True,
+    )
+
+    currentTime = 0
+    dt = 0.1
+    finalTime = spline.t[-1 - spline.k]
+    ind = 0
+    while currentTime < finalTime:
+        fig, ax = plt.subplots()
+        pdot = spline.derivative(1)(currentTime)
+        currentPosition = spline(currentTime)
+        currentHeading = np.arctan2(pdot[1], pdot[0])
+
+        plot_spline(
+            spline,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadingVar,
+            pursuerRange,
+            pursuerRangeVar,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            pursuerTurnRadius,
+            pursuerTurnRadiusVar,
+            agentSpeed,
+            ax,
+            plotPEZ=False,
+            pez_limit=pez_limit,
+        )
+        dubinsPEZ.plot_dubins_PEZ(
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerHeading,
+            pursuerHeadingVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            pursuerTurnRadius,
+            pursuerTurnRadiusVar,
+            0.0,
+            pursuerRange,
+            pursuerRangeVar,
+            currentHeading,
+            agentSpeed,
+            ax,
+            useNueralNetwork=True,
+            # useLinear=True,
+            labelX=False,
+            labelY=False,
+            levels=[0.01, 0.05, 0.25, 0.5],
+            # levels=[0.5],
+        )
+        plt.arrow(
+            currentPosition[0],
+            currentPosition[1],
+            1e-6 * np.cos(currentHeading),  # essentially zero-length tail
+            1e-6 * np.sin(currentHeading),
+            head_width=0.25,
+            head_length=0.3,
+            width=0,  # no line
+            fc="blue",
+            ec="blue",
+            zorder=5,
+        )
+        fast_pursuer.plotMahalanobisDistance(
+            pursuerPosition, pursuerPositionCov, ax, fig
+        )
+        ax.set_xlim(-4.5, 4.5)
+        ax.set_ylim(-4.5, 4.5)
+        plt.xticks([])
+        plt.yticks([])
+        plt.xlabel("")
+        plt.ylabel("")
+        plt.show()
+
+        fig.savefig(f"video/{ind}.png", dpi=300)
+        ind += 1
+        currentTime += dt
+        plt.close(fig)
+
+
 if __name__ == "__main__":
-    main()
+    animate_spline_path()
+    # main()

@@ -7,7 +7,7 @@ from jax.profiler import start_trace, stop_trace
 import os
 from jax.lax import le
 import numpy as np
-# import chaospy as cp
+import chaospy as cp
 
 import jax.numpy as jnp
 import jax
@@ -2650,8 +2650,9 @@ def plot_dubins_PEZ(
     useLinearPlusNueralNetwork=False,
     labelX=True,
     labelY=True,
+    levels=None,
 ):
-    rangeX = 1.5
+    rangeX = 5.5
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -2660,7 +2661,6 @@ def plot_dubins_PEZ(
     evaderHeadings = np.ones_like(X) * evaderHeading
     if useLinear:
         start = time.time()
-        start_trace("/tmp/jax_trace")
         ZTrue, _, _ = linear_dubins_pez(
             jnp.array([X, Y]).T,
             evaderHeadings,
@@ -2822,13 +2822,28 @@ def plot_dubins_PEZ(
 
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
+    if levels is None:
+        levels = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
     c = ax.contour(
         X,
         Y,
         ZTrue,
-        levels=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        levels=levels,
     )
-    plt.clabel(c, inline=True)
+    inLine = False
+    if inLine:
+        ax.clabel(c, inline=True)
+    else:
+        handles, labels = c.legend_elements()
+        labels = [f"$\\epsilon={lvl:.2f}$" for lvl in c.levels]
+
+        ax.legend(
+            handles,
+            labels,
+            title="PEZ Level",
+            loc="lower right",
+            framealpha=0.8,
+        )
     # c = ax.pcolormesh(X, Y, ZTrue)
     if labelX:
         ax.set_xlabel("X")
@@ -3794,7 +3809,7 @@ def main():
     # pursuerPositionCov = np.array([[0.5, 0.0], [0.0, 0.25]])
     # pursuerPositionCov = np.array([[0.000000000001, 0.0], [0.0, 0.00000000001]])
 
-    pursuerHeading = (5.0 / 20.0) * np.pi
+    pursuerHeading = (10.0 / 20.0) * np.pi
     evaderHeading = jnp.array([(0.0 / 20.0) * np.pi])
 
     # create rotation matrix that rotates pursuerheading to zero

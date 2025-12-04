@@ -15,6 +15,20 @@ import fast_pursuer
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
+plt.rcParams["mathtext.fontset"] = "cm"  # Computer Modern
+plt.rcParams["mathtext.rm"] = "serif"
+# get rid of type 3 fonts
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+# set font size for title, axis labels, and legend, and tick labels
+matplotlib.rcParams["axes.titlesize"] = 14
+matplotlib.rcParams["axes.labelsize"] = 12
+matplotlib.rcParams["legend.fontsize"] = 10
+matplotlib.rcParams["ytick.labelsize"] = 10
+matplotlib.rcParams["xtick.labelsize"] = 10
+
+# set backend to agg
+matplotlib.use("agg")
 
 from fast_pursuer import (
     plotMahalanobisDistance,
@@ -26,6 +40,8 @@ from fast_pursuer import (
 import spline_opt_tools
 
 numSamplesPerInterval = 15
+
+# disable gpu jax
 
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
@@ -49,13 +65,13 @@ def plot_spline(
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
     # if pez_constraint_limit == 0.5:
-    #     ax.set_title(f"Deterministic", fontsize=20)
+    #     ax.set_title(f"Deterministic")
     # else:
-    #     ax.set_title(f"PEZ Limit: {pez_constraint_limit}", fontsize=30)
-    ax.set_xlabel("X", fontsize=26)
-    ax.set_ylabel("Y", fontsize=26)
-    ax.tick_params(axis="x", labelsize=26)
-    ax.tick_params(axis="y", labelsize=26)
+    #     ax.set_title(f"PEZ Limit: {pez_constraint_limit}")
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.tick_params(axis="x")
+    ax.tick_params(axis="y")
 
     pos = spline(t)
     x = pos[:, 0]
@@ -64,32 +80,32 @@ def plot_spline(
     xDot = splineDot[:, 0]
     yDot = splineDot[:, 1]
     agentHeadings = np.arctan2(yDot, xDot)
-    pez = probabalisticEngagementZoneVectorizedTemp(
-        pos,
-        agentPositionCov,
-        agentHeadings,
-        agentHeadingVar,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerRange,
-        pursuerRangeVar,
-        pursuerCaptureRange,
-        pursuerCaptureRangeVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        agentSpeed,
-    )
-    pezDeterministic = inEngagementZoneJaxVectorized(
-        pos,
-        agentHeadings,
-        pursuerPosition,
-        pursuerRange,
-        pursuerCaptureRange,
-        pursuerSpeed,
-        agentSpeed,
-    )
     plotPEZAlongSpline = False
     if plotPEZAlongSpline:
+        pez = probabalisticEngagementZoneVectorizedTemp(
+            pos,
+            agentPositionCov,
+            agentHeadings,
+            agentHeadingVar,
+            pursuerPosition,
+            pursuerPositionCov,
+            pursuerRange,
+            pursuerRangeVar,
+            pursuerCaptureRange,
+            pursuerCaptureRangeVar,
+            pursuerSpeed,
+            pursuerSpeedVar,
+            agentSpeed,
+        )
+        pezDeterministic = inEngagementZoneJaxVectorized(
+            pos,
+            agentHeadings,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRange,
+            pursuerSpeed,
+            agentSpeed,
+        )
         if pez_constraint_limit == 0.5:
             pez = pezDeterministic
             # flip cmap
@@ -98,20 +114,19 @@ def plot_spline(
         else:
             cmap = "viridis"
             cbarLabel = "Engagement Zone Probability"
-            plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax, fig)
+            # plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax, fig)
 
         c = ax.scatter(x, y, c=pez, cmap=cmap, s=4)
-        cbar = plt.colorbar(c, shrink=0.8)
-        cbar.ax.tick_params(labelsize=26)
+        cbar = plt.colorbar(c, ax=ax, shrink=0.8)
 
         if pez_constraint_limit == 0.5:
-            cbar.set_label("", fontsize=16)
-        cbar.set_label(cbarLabel, fontsize=26)
+            cbar.set_label("")
+        cbar.set_label(cbarLabel)
     else:
         if pez_constraint_limit == 0.5:
-            ax.plot(x, y, label=f"Deterministic", linewidth=3)
+            ax.plot(x, y, label=f"BEZ", linewidth=3)
         else:
-            ax.plot(x, y, label=f"PEZ limit: {pez_constraint_limit}", linewidth=3)
+            ax.plot(x, y, label=r"$\epsilon=$" + f"{pez_constraint_limit}", linewidth=3)
 
     # else:
     #     cbar.set_label("dist - rho")
@@ -224,6 +239,58 @@ def create_spline(knotPoints, controlPoints, order):
 
 dPezDControlPoints = jacfwd(get_pez_along_spline, argnums=0)
 dPezDtf = jacfwd(get_pez_along_spline, argnums=1)
+
+
+def rect_left_and_top(lower_left, upper_right, n_points_total):
+    x1, y1 = lower_left
+    x2, y2 = upper_right
+
+    # Compute edge lengths
+    left_len = y2 - y1
+    top_len = x2 - x1
+    total_len = left_len + top_len
+
+    # Split points proportionally to edge lengths
+    n_left = max(2, int(round(n_points_total * (left_len / total_len))))
+    n_top = max(
+        2, n_points_total - n_left + 1
+    )  # +1 to avoid losing one point at the corner
+
+    # Left edge: (x = x1, y1 → y2)
+    left = np.column_stack((np.full(n_left, x1), np.linspace(y1, y2, n_left)))
+
+    # Top edge: (x1 → x2, y = y2)
+    top = np.column_stack((np.linspace(x1, x2, n_top), np.full(n_top, y2)))
+
+    # Concatenate, skipping the repeated corner (x1, y2)
+    pts = np.vstack((left, top[1:]))
+    return pts
+
+
+def rect_bottom_and_right(lower_left, upper_right, n_points_total):
+    x1, y1 = lower_left
+    x2, y2 = upper_right
+
+    # Compute edge lengths
+    bottom_len = x2 - x1
+    right_len = y2 - y1
+    total_len = bottom_len + right_len
+
+    # Split points proportionally to edge lengths
+    n_bottom = max(2, int(round(n_points_total * (bottom_len / total_len))))
+    n_right = max(
+        2, n_points_total - n_bottom + 1
+    )  # +1 to avoid losing one point at the corner
+
+    # Bottom edge: (x1 → x2, y = y1)
+    bottom = np.column_stack((np.linspace(x1, x2, n_bottom), np.full(n_bottom, y1)))
+
+    # Right edge: (x = x2, y1 → y2)
+    right = np.column_stack((np.full(n_right, x2), np.linspace(y1, y2, n_right)))
+
+    # Concatenate, skipping the repeated corner (x2, y1)
+    pts = np.vstack((bottom, right[1:]))
+    return pts
 
 
 def optimize_spline_path(
@@ -386,16 +453,8 @@ def optimize_spline_path(
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf_initial, num_cont_points, 3
     )
-
-    x0 = np.linspace(p0, pf, num_cont_points).flatten()
-    x0 = spline_opt_tools.move_first_control_point_so_spline_passes_through_start(
-        x0, knotPoints, p0, v0
-    )
-    x0 = x0.flatten()
-    x0 = spline_opt_tools.move_last_control_point_so_spline_passes_through_end(
-        x0, knotPoints, pf, v0
-    )
-    x0 = x0.flatten()
+    x0 = rect_bottom_and_right(p0, pf, num_cont_points).flatten()
+    x0 = rect_left_and_top(p0, pf, num_cont_points).flatten()
 
     print("velocity constraints", velocity_constraints)
     tf = spline_opt_tools.assure_velocity_constraint(
@@ -548,7 +607,7 @@ def main():
     endingLocation = np.array([4.0, 4.0])
     initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
 
-    numControlPoints = 7
+    numControlPoints = 16
     splineOrder = 3
     turn_rate_constraints = (-50.0, 50.0)
     curvature_constraints = (-10.0, 10.0)
@@ -556,10 +615,10 @@ def main():
     # pez_constraint_limit_list = [.1,.2,.3,.4]
     # pez_constraint_limit_list = [.01,0.05,.1,.2,.3,.4,.5]
     pez_constraint_limit_list = [0.01, 0.05, 0.25, 0.5]
-    # pez_constraint_limit_list = [.01]
+    pez_constraint_limit_list = [0.01]
 
-    pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
-    # pursuerPositionCov = np.array([[0.0,0],[0,0.0]])
+    pursuerPositionCov = np.array([[0.05, -0.06], [-0.06, 0.25]])
+    # pursuerPositionCov = np.array([[0.1, 0], [0, 0.1]])
     pursuerRange = 1.0
     pursuerRangeVar = 0.1
     # pursuerRangeVar = 0.0
@@ -577,9 +636,9 @@ def main():
 
     useProbabalistic = True
 
-    fig, ax = plt.subplots()
-    pez_constraint_limit = pez_constraint_limit_list[0]
+    fig, ax = plt.subplots(figsize=(6, 6))
     for pez_constraint_limit in pez_constraint_limit_list:
+        print("PEZ Constraint Limit: ", pez_constraint_limit)
         spline = optimize_spline_path(
             startingLocation,
             endingLocation,
@@ -604,6 +663,21 @@ def main():
             agentSpeed,
             useProbabalistic,
         )
+        # bez_fail_percentage = mc_spline_evaluation(
+        #     spline,
+        #     num_mc_runs,
+        #     1000,
+        #     pursuerPosition,
+        #     pursuerPositionCov,
+        #     pursuerRange,
+        #     pursuerRangeVar,
+        #     pursuerCaptureRange,
+        #     pursuerCaptureRangeVar,
+        #     pursuerSpeed,
+        #     pursuerSpeedVar,
+        #     agentSpeed,
+        # )
+        # print("bez_fail_percentage", bez_fail_percentage)
 
         # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit, useProbabalistic)
         plot_spline(
@@ -623,33 +697,125 @@ def main():
             ax,
         )
     plotMahalanobisDistance(
-        pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True
+        pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=False
     )
-    ax.legend(fontsize=20)
-    ax.set_title("Linear PEZ", fontsize=30)
+    ax.legend()
+    ax.set_xlim([-4.5, 4.5])
+    ax.set_ylim([-4.5, 4.5])
+    ax.set_xticks(np.arange(-4, 5, 1))
+    ax.set_yticks(np.arange(-4, 5, 1))
+    ax.set_title("Linear PEZ")
 
-    # fig,axes = plt.subplots(2,3,layout='constrained')
+    # fig, axes = plt.subplots(2, 3, layout="constrained")
     #
     # for pez_constraint_limit in pez_constraint_limit_list:
     #     axis = axes.flatten()[pez_constraint_limit_list.index(pez_constraint_limit)]
     #     print("PEZ Constraint Limit: ", pez_constraint_limit)
-    #     spline = optimize_spline_path(startingLocation, endingLocation, initialVelocity, numControlPoints,splineOrder, velocity_constraints, turn_rate_constraints, curvature_constraints, num_constraint_samples, pez_constraint_limit,agentPositionCov,agentHeadingVar, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, useProbabalistic)
+    #     spline = optimize_spline_path(
+    #         startingLocation,
+    #         endingLocation,
+    #         initialVelocity,
+    #         numControlPoints,
+    #         splineOrder,
+    #         velocity_constraints,
+    #         turn_rate_constraints,
+    #         curvature_constraints,
+    #         num_constraint_samples,
+    #         pez_constraint_limit,
+    #         agentPositionCov,
+    #         agentHeadingVar,
+    #         pursuerPosition,
+    #         pursuerPositionCov,
+    #         pursuerRange,
+    #         pursuerRangeVar,
+    #         pursuerCaptureRange,
+    #         pursuerCaptureRangeVar,
+    #         pursuerSpeed,
+    #         pursuerSpeedVar,
+    #         agentSpeed,
+    #         useProbabalistic,
+    #     )
     #     # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit, useProbabalistic)
-    #     plot_spline(spline, agentPositionCov,agentHeadingVar,pursuerPosition,pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar,pursuerSpeed,pursuerSpeedVar,agentSpeed,pez_constraint_limit,axis)
+    #     plot_spline(
+    #         spline,
+    #         agentPositionCov,
+    #         agentHeadingVar,
+    #         pursuerPosition,
+    #         pursuerPositionCov,
+    #         pursuerRange,
+    #         pursuerRangeVar,
+    #         pursuerCaptureRange,
+    #         pursuerCaptureRangeVar,
+    #         pursuerSpeed,
+    #         pursuerSpeedVar,
+    #         agentSpeed,
+    #         pez_constraint_limit,
+    #         axis,
+    #     )
     #     # bez_fail_percentage = mc_spline_evaluation(spline, num_mc_runs, 200, pursuerPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange, pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed)
     #     # print("BEZ Fail Percentage: ", bez_fail_percentage)
     #
-    # labels = ['a)', 'b)', 'c)', 'd)', 'e)', 'f)']
+    # labels = ["a)", "b)", "c)", "d)", "e)", "f)"]
     # for i, ax in enumerate(axes.flat):
     #     # Positioning the label in the top-left corner of each subplot
-    #     ax.text(0.05, 0.9, labels[i], transform=ax.transAxes,
-    #             fontsize=16, fontweight='bold', va='top',color='red')
+    #     ax.text(
+    #         0.05,
+    #         0.9,
+    #         labels[i],
+    #         transform=ax.transAxes,
+    #         fontsize=16,
+    #         fontweight="bold",
+    #         va="top",
+    #         color="red",
+    #     )
     # useProbabalistic = False
-    # spline = optimize_spline_path(startingLocation, endingLocation, initialVelocity, numControlPoints,splineOrder, velocity_constraints, turn_rate_constraints, curvature_constraints, num_constraint_samples, pez_constraint_limit, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed, useProbabalistic)
-    # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit,useProbabalistic)
-    # plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_constraint_limit, useProbabalistic)
+    # spline = optimize_spline_path(
+    #     startingLocation,
+    #     endingLocation,
+    #     initialVelocity,
+    #     numControlPoints,
+    #     splineOrder,
+    #     velocity_constraints,
+    #     turn_rate_constraints,
+    #     curvature_constraints,
+    #     num_constraint_samples,
+    #     pez_constraint_limit,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerRange,
+    #     pursuerCaptureRange,
+    #     pursuerSpeed,
+    #     agentSpeed,
+    #     useProbabalistic,
+    # )
+    # plot_constraints(
+    #     spline,
+    #     velocity_constraints,
+    #     turn_rate_constraints,
+    #     curvature_constraints,
+    #     pez_constraint_limit,
+    #     useProbabalistic,
+    # )
+    # plot_spline(
+    #     spline,
+    #     pursuerPosition,
+    #     pursuerRange,
+    #     pursuerCaptureRange,
+    #     pez_constraint_limit,
+    #     useProbabalistic,
+    # )
 
-    # bez_fail_percentage = mc_spline_evaluation(spline, num_mc_runs, num_constraint_samples, pursuerPosition, pursuerPositionCov, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed)
+    # bez_fail_percentage = mc_spline_evaluation(
+    #     spline,
+    #     num_mc_runs,
+    #     num_constraint_samples,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerRange,
+    #     pursuerCaptureRange,
+    #     pursuerSpeed,
+    #     agentSpeed,
+    # )
     # print("BEZ Fail Percentage: ", bez_fail_percentage)
 
     plt.show()
@@ -807,10 +973,11 @@ def animate_pez():
     # pez_constraint_limit_list = [.1,.2,.3,.4]
     # pez_constraint_limit_list = [.01,0.05,.1,.2,.3,.4,.5]
     # pez_constraint_limit_list = [0.5]
-    pez_constraint_limit_list = [0.1]
+    pez_constraint_limit_list = [0.01]
 
     # pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
     pursuerPositionCov = np.array([[0.1, 0], [0, 0.1]])
+    pursuerPositionCov = np.array([[0.05, -0.06], [-0.06, 0.25]])
     pursuerRange = 1.0
     pursuerRangeVar = 0.1
     # pursuerRangeVar = 0.0
@@ -858,6 +1025,7 @@ def animate_pez():
     finalTime = spline.t[-1 - spline.k]
     ind = 0
     while currentTime < finalTime:
+        print("Current Time: ", currentTime)
         fig, ax = plt.subplots()
         pdot = spline.derivative(1)(currentTime)
         currentPosition = spline(currentTime)
