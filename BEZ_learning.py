@@ -1299,7 +1299,7 @@ def plot_potential_pursuer_launch_with_range_uncertainty():
     interceptionPositions = np.array([[0.4, 0.5], [-0.8, -0.8], [-0.7, 0.9]])
     interceptionPositions = np.array([[0.4, 0.5]])
 
-    numPoints = 200
+    numPoints = 100
     xlim = (-4, 4)
     ylim = (-4, 4)
     points, X, Y = get_meshgrid_points(xlim, ylim, numPoints)
@@ -1336,13 +1336,15 @@ def plot_potential_pursuer_launch_with_range_uncertainty():
     )
     print("Integral of PDF over grid:", integral)
 
-    integrationPoints, launch_pdf, dArea, X, Y = build_launch_region_pdf(
-        interceptionPositions, pursuerRangeMean, pursuerRangeStd, xlim, ylim, numPoints
+    integrationPoints, launch_pdf, dArea, Xint, Yint = build_launch_region_pdf(
+        interceptionPositions, pursuerRangeMean, pursuerRangeStd, xlim, ylim, 100
     )
     print("launch pdf integral check:", jnp.sum(launch_pdf) * dArea)
     probReachable = prob_reachable_given_pdf_vmap(
         points, integrationPoints, launch_pdf, pursuerRangeMean, pursuerRangeStd, dArea
     )
+    print("Prob reachable min:", jnp.min(probReachable))
+    print("Prob reachable max:", jnp.max(probReachable))
 
     fig, ax = plt.subplots(figsize=(6, 6))
     c = ax.pcolormesh(
