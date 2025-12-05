@@ -675,6 +675,13 @@ def prob_reachable_given_pdf(
     return jnp.sum(probs * launch_region_pdf) * dArea
 
 
+prob_reachable_given_pdf_grad = jax.jacfwd(prob_reachable_given_pdf, argnums=0)
+
+prob_reachable_given_pdf_grad_vmap = jax.jit(
+    jax.vmap(prob_reachable_given_pdf_grad, in_axes=(0, None, None, None, None, None))
+)
+
+
 prob_reachable_given_pdf_vmap = jax.jit(
     jax.vmap(
         prob_reachable_given_pdf,
@@ -1291,23 +1298,22 @@ def combined_potential_plot():
 
 def plot_potential_pursuer_launch_with_range_uncertainty():
     pursuerRangeMean = 1.5
-    pursuerRangeStd = 0.2
+    pursuerRangeStd = 0.1
     pursuerSpeed = 2.0
-    pursuerCaptureRadius = 0.1
+    pursuerCaptureRadius = 0.0
     evaderHeading = np.pi / 4
     evaderSpeed = 1.0
-    interceptionPositions = np.array([[0.4, 0.5], [-0.8, -0.8], [-0.7, 0.9]])
+    # interceptionPositions = np.array([[0.4, 0.5]])
     interceptionPositions = np.array([[0.4, 0.5]])
+    interceptionPositions = np.array([[0.4, 0.5], [-1.2, -1.2]])
+    interceptionPositions = np.array([[0.4, 0.5], [-1.2, -1.2], [-0.7, 0.9]])
 
-    numPoints = 100
+    numPoints = 120
     xlim = (-4, 4)
     ylim = (-4, 4)
     points, X, Y = get_meshgrid_points(xlim, ylim, numPoints)
     dArea = (
         (xlim[1] - xlim[0]) / (numPoints - 1) * (ylim[1] - ylim[0]) / (numPoints - 1)
-    )
-    prob = prob_launch_feasible_from_intercepts_vmap(
-        points, interceptionPositions, pursuerRangeMean, pursuerRangeStd
     )
     normalization_constant = (
         launch_region_pdf_from_intercepts_find_normalization_constant(
@@ -1337,28 +1343,97 @@ def plot_potential_pursuer_launch_with_range_uncertainty():
     print("Integral of PDF over grid:", integral)
 
     integrationPoints, launch_pdf, dArea, Xint, Yint = build_launch_region_pdf(
-        interceptionPositions, pursuerRangeMean, pursuerRangeStd, xlim, ylim, 100
+        interceptionPositions, pursuerRangeMean, pursuerRangeStd, xlim, ylim, 120
     )
     print("launch pdf integral check:", jnp.sum(launch_pdf) * dArea)
     probReachable = prob_reachable_given_pdf_vmap(
-        points, integrationPoints, launch_pdf, pursuerRangeMean, pursuerRangeStd, dArea
+        points,
+        integrationPoints,
+        launch_pdf,
+        pursuerRangeMean,
+        pursuerRangeStd,
+        dArea,
     )
     print("Prob reachable min:", jnp.min(probReachable))
     print("Prob reachable max:", jnp.max(probReachable))
+    testPoints = jnp.array([[0.25, 0.7], [1.0, -1.0], [-1.0, 1.0]])
+    testProb = prob_reachable_given_pdf_vmap(
+        testPoints,
+        integrationPoints,
+        launch_pdf,
+        pursuerRangeMean,
+        pursuerRangeStd,
+        dArea,
+    )
+    testProbGrads = prob_reachable_given_pdf_grad_vmap(
+        testPoints,
+        integrationPoints,
+        launch_pdf,
+        pursuerRangeMean,
+        pursuerRangeStd,
+        dArea,
+    )
+    print("Test point prob reachable:", testProb)
+    print("Test point prob reachable grad:", testProbGrads)
 
     fig, ax = plt.subplots(figsize=(6, 6))
-    c = ax.pcolormesh(
+    c = ax.contour(
         X.reshape((numPoints, numPoints)),
         Y.reshape((numPoints, numPoints)),
+        # prob.reshape((numPoints, numPoints)),
         probReachable.reshape((numPoints, numPoints)),
+        levels=[0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
     )
+    ax.clabel(c, inline=True)
+    # c = ax.pcolormesh(
+    #     X.reshape((numPoints, numPoints)),
+    #     Y.reshape((numPoints, numPoints)),
+    #     probReachable.reshape((numPoints, numPoints)),
+    # )
+    # plt.colorbar(c, ax=ax)
     ax.set_aspect("equal")
-    plt.colorbar(c, ax=ax)
+    # plot_interception_points(
+    #     interceptionPositions,
+    #     np.ones(len(interceptionPositions)) * pursuerRangeMean,
+    #     ax,
+    # )
+    arcs = compute_potential_pursuer_region_from_interception_position(
+        interceptionPositions,
+        pursuerRangeMean,
+        pursuerCaptureRadius,
+    )
+
+    plot_potential_pursuer_reachable_region(
+        arcs, pursuerRangeMean, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
+    )
+    for testPoint, testProbGrad in zip(testPoints, testProbGrads):
+        ax.arrow(
+            testPoint[0],
+            testPoint[1],
+            testProbGrad[0],
+            testProbGrad[1],
+            head_width=0.1,
+            color="black",
+        )
+    ax.set_title("Probability Pursuer Can Reach Evader")
+
+    fig2, ax2 = plt.subplots(figsize=(6, 6))
+    c = ax2.pcolormesh(
+        X.reshape((numPoints, numPoints)),
+        Y.reshape((numPoints, numPoints)),
+        launch_pdf.reshape((numPoints, numPoints)),
+    )
+    plt.colorbar(c, ax=ax2)
+    ax2.set_aspect("equal")
     plot_interception_points(
         interceptionPositions,
         np.ones(len(interceptionPositions)) * pursuerRangeMean,
-        ax,
+        ax2,
     )
+    # plot gradient direction vectors
+    ax2.set_title("Pursuer Launch Region PDF")
+    ax2.set_aspect("equal")
+
     plt.show()
 
 
