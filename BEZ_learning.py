@@ -1356,7 +1356,7 @@ def plot_potential_pursuer_launch_with_range_uncertainty():
     )
     print("Prob reachable min:", jnp.min(probReachable))
     print("Prob reachable max:", jnp.max(probReachable))
-    testPoints = jnp.array([[0.25, 0.7], [1.0, -1.0], [-1.0, 1.0]])
+    testPoints = np.random.uniform(-2, 2, (5, 2))
     testProb = prob_reachable_given_pdf_vmap(
         testPoints,
         integrationPoints,
