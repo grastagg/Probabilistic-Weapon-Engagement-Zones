@@ -7,7 +7,6 @@ import time
 import matplotlib.pyplot as plt
 from matplotlib import patches
 
-# from fast_pursuer import plotEngagementZone, inEngagementZone, inEngagementZoneJax
 import jax
 import jax.numpy as jnp
 
@@ -17,8 +16,10 @@ import jax.numpy as jnp
 # get rid of type 3 fonts
 import matplotlib
 
-import evader_pursuer_plot
-import fast_pursuer
+import CSPEZ.csbez as csbez
+import PEZ.bez as bez
+import PLOT_COMMON.draw_airplanes as draw_airplanes
+import PEZ.pez_plotting as pez_plotting
 
 
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -29,6 +30,29 @@ matplotlib.rcParams["axes.labelsize"] = 12
 matplotlib.rcParams["legend.fontsize"] = 10
 matplotlib.rcParams["ytick.labelsize"] = 10
 matplotlib.rcParams["xtick.labelsize"] = 10
+
+
+def _arc_between_points(center, radius, p_start, p_end, ccw=True, num=200):
+    """
+    Compute points on an arc from p_start to p_end around `center`
+    with radius `radius`, going CCW or CW.
+    """
+    ang1 = np.arctan2(p_start[1] - center[1], p_start[0] - center[0])
+    ang2 = np.arctan2(p_end[1] - center[1], p_end[0] - center[0])
+
+    if ccw:
+        # ensure ang2 is ahead of ang1 in CCW direction
+        if ang2 <= ang1:
+            ang2 += 2 * np.pi
+    else:
+        # ensure ang2 is behind ang1 in CW direction
+        if ang2 >= ang1:
+            ang2 -= 2 * np.pi
+
+    theta = np.linspace(ang1, ang2, num)
+    x = center[0] + radius * np.cos(theta)
+    y = center[1] + radius * np.sin(theta)
+    return x, y
 
 
 def plot_turn_radius_circles(startPosition, startHeading, turnRadius, ax):
@@ -76,7 +100,7 @@ def plot_dubins_EZ(
     evaderHeadings = np.ones_like(X) * evaderHeading
     print(evaderHeadings.shape)
 
-    ZTrue = in_dubins_engagement_zone_agumented(
+    ZTrue = csbez.in_dubins_engagement_zone_agumented(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -189,7 +213,7 @@ def plot_dubins_reachable_set(
     #     pursuerPosition, pursuerHeading, np.array([X, Y]).T, radius
     # )
     # Z = Z.reshape(numPoints, numPoints) - pursuerRange
-    Z = in_dubins_reachable_set_augmented(
+    Z = csbez.in_dubins_reachable_set_augmented(
         pursuerPosition, pursuerHeading, radius, pursuerRange, np.array([X, Y]).T
     )
     # Z = np.isclose(Z, pursuerRange, atol=1e-1)
@@ -390,7 +414,7 @@ def plot_theta_and_vectors_left_turn(
             pursuerPosition[1] + minimumTurnRadius * jnp.cos(pursuerHeading),
         ]
     )
-    G = find_counter_clockwise_tangent_point(F, C, minimumTurnRadius)
+    G = csbez.find_counter_clockwise_tangent_point(F, C, minimumTurnRadius)
 
     circleTheta = np.linspace(0, 2 * np.pi, 100)
     leftCircleX = C[0] + minimumTurnRadius * np.cos(circleTheta)
@@ -463,7 +487,7 @@ def plot_theta_and_vectors_left_turn(
 
     v3 = G - C
     v4 = P - C
-    theta = counterclockwise_angle(v4, v3)
+    theta = csbez.counterclockwise_angle(v4, v3)
     print(theta)
     startAngle = np.arctan2(v4[1], v4[0])
     endAngle = np.arctan2(v3[1], v3[0])
@@ -536,7 +560,7 @@ def main_EZ():
             pursuerPosition[1] + minimumTurnRadius * jnp.cos(pursuerHeading),
         ]
     )
-    G = find_counter_clockwise_tangent_point(F, C, minimumTurnRadius)
+    G = csbez.find_counter_clockwise_tangent_point(F, C, minimumTurnRadius)
     plot_dubins_path(pursuerPosition, pursuerHeading, F, minimumTurnRadius, 0.0, G, ax)
 
     # plot_theta_and_vectors_left_turn(
@@ -554,10 +578,10 @@ def main_EZ():
     plt.ylabel("Y")
     ax.set_xlim([-3.1, 3.1])
     ax.set_ylim([-3.1, 3.1])
-    evader_pursuer_plot.draw_airplane(
+    draw_airplanes.draw_airplane(
         ax, evaderPosition, color="blue", size=0.35, angle=evaderHeading - np.pi / 2
     )  # Blue airplane (evader) pointing toward x-axis
-    evader_pursuer_plot.draw_airplane(
+    draw_airplanes.draw_airplane(
         ax, pursuerPosition, color="red", size=0.35, angle=pursuerHeading - np.pi / 2
     )
     # set tick fonhtsize
@@ -597,7 +621,7 @@ def bez_csbez_comparison():
     # )
     #
     fig, ax = plt.subplots(figsize=(6, 5), layout="constrained")
-    fast_pursuer.plotEngagementZone(
+    pez_plotting.plotEngagementZone(
         evaderHeading,
         pursuerPosition,
         pursuerRange,
@@ -649,7 +673,7 @@ def pursuer_heading_vs_ez_boundary():
     ez_boundary_points = []
     headings_plot = []
     for i, heading in enumerate(headings):
-        ez = in_dubins_engagement_zone_single(
+        ez = bez.in_dubins_engagement_zone_single(
             pursuerPosition,
             heading,
             minimumTurnRadius,
@@ -716,12 +740,12 @@ def pursuer_heading_vs_ez_boundary():
                 pursuerPosition[1] - minimumTurnRadius * jnp.cos(heading),
             ]
         )
-        Gl = find_counter_clockwise_tangent_point(F, Cl, minimumTurnRadius)
-        Gr = find_clockwise_tangent_point(F, Cr, minimumTurnRadius)
-        rightLength, _ = find_dubins_path_length_right_strait(
+        Gl = csbez.find_counter_clockwise_tangent_point(F, Cl, minimumTurnRadius)
+        Gr = csbez.find_clockwise_tangent_point(F, Cr, minimumTurnRadius)
+        rightLength, _ = csbez.find_dubins_path_length_right_strait(
             pursuerPosition, heading, F, minimumTurnRadius
         )
-        leftLength, _ = find_dubins_path_length_left_strait(
+        leftLength, _ = csbez.find_dubins_path_length_left_strait(
             pursuerPosition, heading, F, minimumTurnRadius
         )
         if rightLength < leftLength:
@@ -751,14 +775,14 @@ def pursuer_heading_vs_ez_boundary():
         plt.ylabel("Y")
         ax2.set_xlim([-3.1, 3.1])
         ax2.set_ylim([-3.1, 3.1])
-        evader_pursuer_plot.draw_airplane(
+        draw_airplanes.draw_airplane(
             ax2,
             evaderPosition,
             color="blue",
             size=0.35,
             angle=evaderHeading - np.pi / 2,
         )  # Blue airplane (evader) pointing toward x-axis
-        evader_pursuer_plot.draw_airplane(
+        draw_airplanes.draw_airplane(
             ax2,
             pursuerPosition,
             color="red",
@@ -829,8 +853,8 @@ def uncertain_dubins_ez_plot():
 if __name__ == "__main__":
     # pursuer_heading_vs_ez_boundary()
     # main_EZ()
-    uncertain_dubins_ez_plot()
-    # bez_csbez_comparison()
+    # uncertain_dubins_ez_plot()
+    bez_csbez_comparison()
     # fig, ax = plt.subplots()
     # ax.scatter(0, 0, c="r")
 # plt.show()

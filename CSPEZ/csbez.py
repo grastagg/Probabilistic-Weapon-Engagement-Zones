@@ -637,26 +637,3 @@ def in_dubins_engagement_zone_left_single(
     ez = straitRightLength - (captureRadius + pursuerRange)
     # return dubinsPathLengths
     return ez
-
-
-def _arc_between_points(center, radius, p_start, p_end, ccw=True, num=200):
-    """
-    Compute points on an arc from p_start to p_end around `center`
-    with radius `radius`, going CCW or CW.
-    """
-    ang1 = np.arctan2(p_start[1] - center[1], p_start[0] - center[0])
-    ang2 = np.arctan2(p_end[1] - center[1], p_end[0] - center[0])
-
-    if ccw:
-        # ensure ang2 is ahead of ang1 in CCW direction
-        if ang2 <= ang1:
-            ang2 += 2 * np.pi
-    else:
-        # ensure ang2 is behind ang1 in CW direction
-        if ang2 >= ang1:
-            ang2 -= 2 * np.pi
-
-    theta = np.linspace(ang1, ang2, num)
-    x = center[0] + radius * np.cos(theta)
-    y = center[1] + radius * np.sin(theta)
-    return x, y

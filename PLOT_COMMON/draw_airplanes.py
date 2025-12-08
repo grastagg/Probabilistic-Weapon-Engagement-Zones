@@ -6,7 +6,7 @@ import matplotlib
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
-import fast_pursuer
+import PEZ.pez_plotting as pez_plotting
 
 
 # Function to draw a more realistic and larger airplane shape
@@ -256,7 +256,7 @@ def main():
     ax.set_ylim(-pursuerRange - 1.0, pursuerRange + 1.0)
 
     agentInitialHeading = 0.0
-    fast_pursuer.plotEngagementZone(
+    pez_plotting.plotEngagementZone(
         agentInitialHeading,
         pursuerInitialPosition,
         pursuerRange,
@@ -451,7 +451,7 @@ def main():
     ax.set_ylim(-pursuerRange - 1.0, pursuerRange + 1.0)
 
     agentInitialHeading = 0.0
-    fast_pursuer.plotEngagementZone(
+    pez_plotting.plotEngagementZone(
         agentInitialHeading,
         pursuerInitialPosition,
         pursuerRange,
