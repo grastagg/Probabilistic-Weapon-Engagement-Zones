@@ -1,5 +1,4 @@
 import numpy as np
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import matplotlib.pyplot as plt
 import jax.numpy as jnp

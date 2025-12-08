@@ -15,8 +15,6 @@ import matplotlib.pyplot as plt
 import matplotlib
 import jax
 
-import fast_pursuer
-
 
 matplotlib.use("Agg")
 
@@ -31,18 +29,14 @@ matplotlib.rcParams["ytick.labelsize"] = 10
 matplotlib.rcParams["xtick.labelsize"] = 10
 
 
-from bspline.matrix_evaluation import (
-    matrix_bspline_evaluation_for_dataset,
-    matrix_bspline_derivative_evaluation_for_dataset,
-)
+import CSPEZ.cspez as cspez
+import CSPEZ.cspez_plotting as cspez_plotting
+import CSPEZ.nueral_network_cspez as nueral_network_cspez
 
-import dubinsPEZ
-import dubinsEZ
-import nueral_network_EZ
+import CSPEZ.csbez_path_planner as csbez_path_planner
 
-import dubins_EZ_path_planning
-
-import spline_opt_tools
+import bspline.spline_opt_tools as spline_opt_tools
+import PLOT_COMMON.draw_mahalanobis as draw_mahalanobis
 
 numSamplesPerInterval = 25
 
@@ -84,8 +78,8 @@ def plot_spline(
 
     pos = spline(t)
     if plotPEZ:
-        pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ(
-            # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
+        pez, _, _, _, _, _, _ = cspez.mc_dubins_PEZ(
+            # pez, _, _, _, _, _, _ = cspez.mc_dubins_PEZ_differentiable(
             pos,
             agentHeadings,
             agentSpeed,
@@ -102,7 +96,7 @@ def plot_spline(
             pursuerCaptureRadius,
         )
         print("max monte carlo pez", np.max(pez))
-        # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
+        # pez, _, _, _, _, _, _ = cspez.mc_dubins_PEZ_differentiable(
         #     pos,
         #     agentHeadings,
         #     agentSpeed,
@@ -120,7 +114,7 @@ def plot_spline(
         # )
         # print("max monte smoothed carlo pez", np.max(pez))
         maxMCpez = np.max(pez)
-        # linpez, _, _ = dubinsPEZ.linear_dubins_pez(
+        # linpez, _, _ = cspez.linear_dubins_pez(
         #     pos,
         #     agentHeadings,
         #     agentSpeed,
@@ -185,10 +179,10 @@ def dubins_PEZ_along_spline_nn(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    # pez, _, _ = dubinsPEZ.linear_dubins_pez(
-    # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
-    # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
-    pez, _, _ = nueral_network_EZ.nueral_network_pez(
+    # pez, _, _ = cspez.linear_dubins_pez(
+    # pez, _, _ = cspez.quadratic_dubins_pez(
+    # pez, _, _, _, _, _, _ = cspez.mc_dubins_PEZ_differentiable(
+    pez, _, _ = nueral_network_cspez.nueral_network_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -234,10 +228,10 @@ def dubins_PEZ_along_spline_linear(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    pez, _, _ = dubinsPEZ.linear_dubins_pez(
-        # pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
-        # pez, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_differentiable(
-        # pez, _, _ = nueral_network_EZ.nueral_network_pez(
+    pez, _, _ = cspez.linear_dubins_pez(
+        # pez, _, _ = cspez.quadratic_dubins_pez(
+        # pez, _, _, _, _, _, _ = cspez.mc_dubins_PEZ_differentiable(
+        # pez, _, _ = nueral_network_cspez.nueral_network_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -283,7 +277,7 @@ def dubins_PEZ_along_spline_quadratic(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
+    pez, _, _ = cspez.quadratic_dubins_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -329,7 +323,7 @@ def compute_spline_constraints_for_dubins_PEZ_nn(
     )
 
     curvature = turn_rate / velocity
-    pez, _, _ = nueral_network_EZ.nueral_network_pez(
+    pez, _, _ = nueral_network_cspez.nueral_network_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -375,7 +369,7 @@ def compute_spline_constraints_for_dubins_PEZ_linear(
     )
 
     curvature = turn_rate / velocity
-    pez, _, _ = dubinsPEZ.linear_dubins_pez(
+    pez, _, _ = cspez.linear_dubins_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -421,7 +415,7 @@ def compute_spline_constraints_for_dubins_PEZ_quadratic(
     )
 
     curvature = turn_rate / velocity
-    pez, _, _ = dubinsPEZ.quadratic_dubins_pez(
+    pez, _, _ = cspez.quadratic_dubins_pez(
         pos,
         agentHeadings,
         agentSpeed,
@@ -825,18 +819,18 @@ def compare_pez_limits(
         )
     if linearPez:
         ax.set_title("LCSPEZ")
-        fast_pursuer.plotMahalanobisDistance(
+        draw_mahalanobis.plotMahalanobisDistance(
             pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=False
         )
     elif quadraticPez:
         ax.set_title("QCSPEZ")
-        fast_pursuer.plotMahalanobisDistance(
+        draw_mahalanobis.plotMahalanobisDistance(
             pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=False
         )
     elif neuralNetworkPez:
         ax.set_title("NNCSPEZ")
         # ax.legend()
-        fast_pursuer.plotMahalanobisDistance(
+        draw_mahalanobis.plotMahalanobisDistance(
             pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=True
         )
     ax.set_xlim([-4.5, 4.5])
@@ -879,7 +873,7 @@ def main():
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
 
     velocity_constraints = (agentSpeed - 0.001, agentSpeed + 0.001)
-    detSpline = dubins_EZ_path_planning.optimize_spline_path(
+    detSpline = csbez_path_planner.optimize_spline_path(
         startingLocation,
         endingLocation,
         initialVelocity,
@@ -899,7 +893,7 @@ def main():
         agentSpeed,
     )
     start = time.time()
-    detSpline = dubins_EZ_path_planning.optimize_spline_path(
+    detSpline = csbez_path_planner.optimize_spline_path(
         startingLocation,
         endingLocation,
         initialVelocity,
@@ -1067,7 +1061,7 @@ def animate_spline_path():
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
 
     velocity_constraints = (agentSpeed - 0.001, agentSpeed + 0.001)
-    detSpline = dubins_EZ_path_planning.optimize_spline_path(
+    detSpline = csbez_path_planner.optimize_spline_path(
         startingLocation,
         endingLocation,
         initialVelocity,
@@ -1144,7 +1138,7 @@ def animate_spline_path():
             plotPEZ=False,
             pez_limit=pez_limit,
         )
-        dubinsPEZ.plot_dubins_PEZ(
+        cspez_plotting.plot_dubins_PEZ(
             pursuerPosition,
             pursuerPositionCov,
             pursuerHeading,
@@ -1178,7 +1172,7 @@ def animate_spline_path():
             ec="blue",
             zorder=5,
         )
-        fast_pursuer.plotMahalanobisDistance(
+        draw_mahalanobis.plotMahalanobisDistance(
             pursuerPosition, pursuerPositionCov, ax, fig
         )
         ax.set_xlim(-4.5, 4.5)
@@ -1196,5 +1190,5 @@ def animate_spline_path():
 
 
 if __name__ == "__main__":
-    animate_spline_path()
-    # main()
+    # animate_spline_path()
+    main()

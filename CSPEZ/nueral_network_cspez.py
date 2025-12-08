@@ -61,11 +61,11 @@ from scipy.stats import qmc
 
 print(jax.default_backend())  # "gpu", "cpu", or "tpu"
 
-import dubinsEZ
+import CSPEZ.csbez as csbez
+import CSPEZ.cspez as cspez
 
-import dubinsPEZ
 
-import mlp
+import CSPEZ.mlp as mlp
 
 
 # turn off type 3 fonts
@@ -82,7 +82,7 @@ mpl.rcParams["ps.fonttype"] = 42  # For EPS output
 
 in_dubins_engagement_zone_ev = jax.jit(
     jax.vmap(
-        dubinsEZ.in_dubins_engagement_zone_single,
+        csbez.in_dubins_engagement_zone_single,
         in_axes=(
             None,  # pursuerPosition
             None,  # pursuerHeading
@@ -99,7 +99,7 @@ in_dubins_engagement_zone_ev = jax.jit(
 
 in_dubins_engagement_zone = jax.jit(
     jax.vmap(
-        dubinsEZ.in_dubins_engagement_zone_single,
+        csbez.in_dubins_engagement_zone_single,
         in_axes=(
             0,  # pursuerPosition
             0,  # pursuerHeading
@@ -116,7 +116,7 @@ in_dubins_engagement_zone = jax.jit(
 
 # mc_dubins_pez_vmap = jax.jit(
 #     jax.vmap(
-#         dubinsPEZ.mc_dubins_PEZ_Single,
+#         cspez.mc_dubins_PEZ_Single,
 #         in_axes=(
 #             0,  # evaderPosition
 #             0,  # evaderHeading
@@ -152,8 +152,8 @@ def mc_combined_input_single(X):
     evaderSpeed = X[13]
     pursuerHeading = 0.0
 
-    p, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_Single(
-        # p, e, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ_Single_differentiable(
+    p, _, _, _, _, _, _ = cspez.mc_dubins_PEZ_Single(
+        # p, e, _, _, _, _, _ = cspez.mc_dubins_PEZ_Single_differentiable(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -169,7 +169,7 @@ def mc_combined_input_single(X):
         pursuerRangeVar,
         0.0,
     )
-    z = dubinsEZ.in_dubins_engagement_zone_single(
+    z = csbez.in_dubins_engagement_zone_single(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -180,7 +180,7 @@ def mc_combined_input_single(X):
         evaderHeading,
         evaderSpeed,
     )
-    # zlinear, _, _ = dubinsPEZ.linear_dubins_PEZ_single(
+    # zlinear, _, _ = cspez.linear_dubins_PEZ_single(
     #     evaderPosition,
     #     evaderHeading,
     #     evaderSpeed,
@@ -993,7 +993,7 @@ def plot_results(evaderHeading, evaderSpeed, model, restored_params, pursuerPara
     fig2, ax2 = plt.subplots()
     ax2.set_aspect("equal")
     ax2.set_title("Monte Carlo PEZ")
-    ZTrue, _, _, _, _, _, _ = dubinsPEZ.mc_dubins_PEZ(
+    ZTrue, _, _, _, _, _, _ = cspez.mc_dubins_PEZ(
         jnp.array([X.flatten(), Y.flatten()]).T,
         evaderHeadings,
         evaderSpeed,
@@ -1145,7 +1145,7 @@ def linear_pez_from_x_single(X):
     evaderHeading = X[12]
     evaderSpeed = X[13]
     pursuerHeading = 0.0
-    z, _, _ = dubinsPEZ.linear_dubins_PEZ_single(
+    z, _, _ = cspez.linear_dubins_PEZ_single(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -1190,7 +1190,7 @@ def quadratic_pez_from_x_single(X):
     evaderHeading = X[12]
     evaderSpeed = X[13]
     pursuerHeading = 0.0
-    z, _, _ = dubinsPEZ.quadratic_dubins_PEZ_single(
+    z, _, _ = cspez.quadratic_dubins_PEZ_single(
         evaderPosition,
         evaderHeading,
         evaderSpeed,
@@ -1235,7 +1235,7 @@ def nueral_network_pez_from_x_single(X):
     evaderHeading = X[12]
     evaderSpeed = X[13]
     pursuerHeading = 0.0
-    z, _, _ = dubinsPEZ.dubins_pez_numerical_integration_sparse(
+    z, _, _ = cspez.dubins_pez_numerical_integration_sparse(
         jnp.array([evaderPosition]),
         jnp.array([evaderHeading]),
         evaderSpeed,
@@ -1250,8 +1250,8 @@ def nueral_network_pez_from_x_single(X):
         pursuerRange,
         pursuerRangeVar,
         0.0,
-        dubinsPEZ.nodes,
-        dubinsPEZ.weights,
+        cspez.nodes,
+        cspez.weights,
     )
     return z.squeeze()
 

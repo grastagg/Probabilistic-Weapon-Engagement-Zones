@@ -12,22 +12,19 @@ import matplotlib.pyplot as plt
 import matplotlib
 import jax
 
-import fast_pursuer
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
-from bspline.matrix_evaluation import (
-    matrix_bspline_evaluation_for_dataset,
-    matrix_bspline_derivative_evaluation_for_dataset,
-)
 
-from dubinsEZ import in_dubins_engagement_zone
-import dubinsEZ
+import CSPEZ.csbez as csbez
+import CSPEZ.csbez_plotting as csbez_plotting
 
-import pez_path_planner
+# import pez_path_planner
+import PEZ.pez_path_planner as pez_path_planner
+import PEZ.pez_plotting as pez_plotting
 
-import spline_opt_tools
+import bspline.spline_opt_tools as spline_opt_tools
 
 
 numSamplesPerInterval = 15
@@ -62,7 +59,7 @@ def plot_spline(
     agentHeadings = np.arctan2(yDot, xDot)
 
     pos = spline(t)
-    ez = in_dubins_engagement_zone(
+    ez = csbez.in_dubins_engagement_zone(
         pursuerPosition,
         pursuerHeading,
         pursuerTurnRadius,
@@ -108,7 +105,7 @@ def dubins_EZ_along_spline(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    ez = in_dubins_engagement_zone(
+    ez = csbez.in_dubins_engagement_zone(
         pursuerPosition,
         pursuerHeading,
         pursuerTurnRadius,
@@ -145,7 +142,7 @@ def compute_spline_constraints_for_dubins_EZ_deterministic(
 
     curvature = turn_rate / velocity
 
-    ez = in_dubins_engagement_zone(
+    ez = csbez.in_dubins_engagement_zone(
         pursuerPosition,
         pursuerHeading,
         turnRadius,
@@ -471,7 +468,7 @@ def main():
         agentSpeed,
         ax,
     )
-    fast_pursuer.plotEngagementZone(
+    pez_plotting.plotEngagementZone(
         0.0,
         pursuerPosition,
         pursuerRange,
@@ -480,7 +477,7 @@ def main():
         agentSpeed,
         ax,
     )
-    dubinsEZ.plot_dubins_EZ(
+    csbez_plotting.plot_dubins_EZ(
         pursuerPosition,
         pursuerHeading,
         pursuerSpeed,
