@@ -17,7 +17,7 @@ matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
 import GEOMETRIC_BEZ.potential_bez_from_interceptions as potential_bez_from_interceptions
-import GEOMETRIC_BEZ.rectangle_potential_bez as rectangle_potential_bez
+import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
 
 
 import bspline.spline_opt_tools as spline_opt_tools
@@ -130,7 +130,7 @@ def box_BEZ_along_spline(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    ez = rectangle_potential_bez.box_pursuer_engagment_zone(
+    ez = rectangle_bez.box_pursuer_engagment_zone(
         pos,
         evaderHeadings,
         evaderSpeed,
@@ -207,7 +207,7 @@ def compute_spline_constraints_for_box_BEZ(
 
     curvature = turn_rate / velocity
 
-    ez = rectangle_potential_bez.box_pursuer_engagment_zone(
+    ez = rectangle_bez.box_pursuer_engagment_zone(
         pos,
         evaderHeadings,
         evaderSpeed,
@@ -1030,7 +1030,7 @@ def main_box():
 
     fig, ax = plt.subplots(figsize=(10, 10))
     plot_spline(spline, ax)
-    rectangle_potential_bez.plot_box_pursuer_reachable_region(
+    rectangle_bez.plot_box_pursuer_reachable_region(
         min_box, max_box, pursuerRange, pursuerCaptureRadius, ax=ax
     )
     ax.set_aspect("equal")
@@ -1199,10 +1199,10 @@ def animate_spline_path_box():
             ec="blue",
             zorder=5,
         )
-        rectangle_potential_bez.plot_box_pursuer_reachable_region(
+        rectangle_bez.plot_box_pursuer_reachable_region(
             min_box, max_box, pursuerRange, pursuerCaptureRadius, ax=ax
         )
-        rectangle_potential_bez.plot_box_pursuer_engagement_zone(
+        rectangle_bez.plot_box_pursuer_engagement_zone(
             min_box,
             max_box,
             pursuerRange,
