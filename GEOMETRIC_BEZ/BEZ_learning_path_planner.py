@@ -16,9 +16,11 @@ import jax
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
-import BEZ_learning
+import GEOMETRIC_BEZ.potential_bez_from_interceptions as potential_bez_from_interceptions
+import GEOMETRIC_BEZ.rectangle_potential_bez as rectangle_potential_bez
 
-import spline_opt_tools
+
+import bspline.spline_opt_tools as spline_opt_tools
 
 
 numSamplesPerInterval = 15
@@ -91,7 +93,7 @@ def potential_BEZ_along_spline(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    ez = BEZ_learning.potential_pursuer_engagment_zone(
+    ez = potential_bez_from_interceptions.potential_pursuer_engagment_zone(
         pos,
         evaderHeadings,
         evaderSpeed,
@@ -128,7 +130,7 @@ def box_BEZ_along_spline(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    ez = BEZ_learning.box_pursuer_engagment_zone(
+    ez = rectangle_potential_bez.box_pursuer_engagment_zone(
         pos,
         evaderHeadings,
         evaderSpeed,
@@ -166,7 +168,7 @@ def compute_spline_constraints_for_potential_BEZ(
 
     curvature = turn_rate / velocity
 
-    ez = BEZ_learning.potential_pursuer_engagment_zone(
+    ez = potential_bez_from_interceptions.potential_pursuer_engagment_zone(
         pos,
         evaderHeadings,
         evaderSpeed,
@@ -205,7 +207,7 @@ def compute_spline_constraints_for_box_BEZ(
 
     curvature = turn_rate / velocity
 
-    ez = BEZ_learning.box_pursuer_engagment_zone(
+    ez = rectangle_potential_bez.box_pursuer_engagment_zone(
         pos,
         evaderHeadings,
         evaderSpeed,
@@ -790,10 +792,12 @@ def plan_path_from_interception_points(
     curvature_constraints,
     num_constraint_samples,
 ):
-    arcs = BEZ_learning.intersection_arcs(
+    arcs = potential_bez_from_interceptions.intersection_arcs(
         interceptionPositions, [pursuerRange] * np.ones(len(interceptionPositions))
     )
-    centers, radii, theta_start, theta_end = BEZ_learning.arcs_to_arrays(arcs)
+    centers, radii, theta_start, theta_end = (
+        potential_bez_from_interceptions.arcs_to_arrays(arcs)
+    )
 
     (splineRight, tfRight) = optimize_spline_path_potential_BEZ(
         initialEvaderPosition,
@@ -962,7 +966,7 @@ def main(interceptionPositions):
     ax.set_xlim(-6, 6)
     ax.set_ylim(-6, 6)
     plot_spline(spline, ax)
-    BEZ_learning.plot_potential_pursuer_engagement_zone(
+    potential_bez_from_interceptions.plot_potential_pursuer_engagement_zone(
         arcs,
         pursuerRange,
         pursuerCaptureRadius,
@@ -973,18 +977,18 @@ def main(interceptionPositions):
         ylim=(-6, 6),
         ax=ax,
     )
-    BEZ_learning.plot_potential_pursuer_reachable_region(
+    potential_bez_from_interceptions.plot_potential_pursuer_reachable_region(
         arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
     )
-    # BEZ_learning.plot_pursuer_reachable_region(
+    # potential_bez_from_interceptions.plot_pursuer_reachable_region(
     #     pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
     # )
-    BEZ_learning.plot_interception_points(
+    potential_bez_from_interceptions.plot_interception_points(
         interceptionPositions,
         np.ones(len(interceptionPositions)) * (pursuerRange + pursuerCaptureRadius),
         ax,
     )
-    BEZ_learning.plot_circle_intersection_arcs(arcs, ax=ax)
+    potential_bez_from_interceptions.plot_circle_intersection_arcs(arcs, ax=ax)
     # plt.legend()
 
 
@@ -1026,7 +1030,7 @@ def main_box():
 
     fig, ax = plt.subplots(figsize=(10, 10))
     plot_spline(spline, ax)
-    BEZ_learning.plot_box_pursuer_reachable_region(
+    rectangle_potential_bez.plot_box_pursuer_reachable_region(
         min_box, max_box, pursuerRange, pursuerCaptureRadius, ax=ax
     )
     ax.set_aspect("equal")
@@ -1100,7 +1104,7 @@ def animate_spline_path(interceptionPositions):
             ec="blue",
             zorder=5,
         )
-        BEZ_learning.plot_potential_pursuer_engagement_zone(
+        potential_bez_from_interceptions.plot_potential_pursuer_engagement_zone(
             arcs,
             pursuerRange,
             pursuerCaptureRadius,
@@ -1111,18 +1115,18 @@ def animate_spline_path(interceptionPositions):
             ylim=(-6, 6),
             ax=ax,
         )
-        BEZ_learning.plot_potential_pursuer_reachable_region(
+        potential_bez_from_interceptions.plot_potential_pursuer_reachable_region(
             arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
         )
-        # BEZ_learning.plot_pursuer_reachable_region(
+        # potential_bez_from_interceptions.plot_pursuer_reachable_region(
         #     pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
         # )
-        BEZ_learning.plot_interception_points(
+        potential_bez_from_interceptions.plot_interception_points(
             interceptionPositions,
             np.ones(len(interceptionPositions)) * (pursuerRange + pursuerCaptureRadius),
             ax,
         )
-        BEZ_learning.plot_circle_intersection_arcs(arcs, ax=ax)
+        potential_bez_from_interceptions.plot_circle_intersection_arcs(arcs, ax=ax)
         ax.set_xlim(-5.5, 5.5)
         ax.set_ylim(-5.5, 5.5)
         plt.xticks([])
@@ -1195,10 +1199,10 @@ def animate_spline_path_box():
             ec="blue",
             zorder=5,
         )
-        BEZ_learning.plot_box_pursuer_reachable_region(
+        rectangle_potential_bez.plot_box_pursuer_reachable_region(
             min_box, max_box, pursuerRange, pursuerCaptureRadius, ax=ax
         )
-        BEZ_learning.plot_box_pursuer_engagement_zone(
+        rectangle_potential_bez.plot_box_pursuer_engagement_zone(
             min_box,
             max_box,
             pursuerRange,
@@ -1233,12 +1237,13 @@ if __name__ == "__main__":
     interceptionPoints = np.array([[0.4, 0.5], [-0.8, -0.8], [-0.7, 0.9]])
     #
     # # run main with 1 interception point, 2 interception points, 3 interception points, and box BEZ
-    # main(interceptionPoints[:1])
-    # main(interceptionPoints[:2])
-    # main(interceptionPoints[:3])
+    main(interceptionPoints[:1])
+    main(interceptionPoints[:2])
+    main(interceptionPoints[:3])
     #
-    # main_box()
+    main_box()
     #
     # plt.show()
     # animate_spline_path(interceptionPoints[:1])
-    animate_spline_path_box()
+    # animate_spline_path_box()
+    plt.show()

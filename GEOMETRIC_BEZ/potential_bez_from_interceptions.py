@@ -8,9 +8,7 @@ import numpy as np
 import scipy
 
 
-from curlyBrace import curlyBrace
 from matplotlib.patches import Arc, Circle
-import fast_pursuer
 
 plt.rcParams["mathtext.fontset"] = "cm"  # Computer Modern
 plt.rcParams["mathtext.rm"] = "serif"
@@ -23,6 +21,8 @@ matplotlib.rcParams["axes.labelsize"] = 12
 matplotlib.rcParams["legend.fontsize"] = 10
 matplotlib.rcParams["ytick.labelsize"] = 10
 matplotlib.rcParams["xtick.labelsize"] = 10
+
+import PEZ.pez_plotting as pez_plotting
 
 
 def in_circle(center, raduis, points):
@@ -288,62 +288,6 @@ def potential_pursuer_engagment_zone(
         radii,
         theta_start,
         theta_end,
-        pursuerRange,
-        pursuerCaptureRadius,
-    )
-    return ez
-
-
-def signed_distance_to_box(point, box_min, box_max):
-    """
-    Signed distance to an axis-aligned box defined by min/max corners.
-    Positive outside, negative inside.
-
-    Args:
-        point: (2,) array [x, y]
-        box_min: (2,) array [xmin, ymin]
-        box_max: (2,) array [xmax, ymax]
-    """
-    # Distance to box boundaries
-    d_out = jnp.maximum(jnp.maximum(box_min - point, point - box_max), 0.0)
-    outside = jnp.linalg.norm(d_out)
-    inside = jnp.minimum(
-        jnp.maximum(jnp.max(box_min - point), jnp.max(point - box_max)), 0.0
-    )
-    return outside + inside
-
-
-signed_distance_to_box_vmap = jax.jit(
-    jax.vmap(signed_distance_to_box, in_axes=(0, None, None))
-)
-
-
-def box_reachable_region(points, box_min, box_max, pursuerRange, pursuerCaptureRadius):
-    dists = signed_distance_to_box_vmap(points, box_min, box_max)
-    return dists - (pursuerRange + pursuerCaptureRadius)
-
-
-def box_pursuer_engagment_zone(
-    evaderPositions,
-    evaderHeadings,
-    evaderSpeed,
-    box_min,
-    box_max,
-    pursuerRange,
-    pursuerCaptureRadius,
-    pursuerSpeed,
-):
-    speedRatio = evaderSpeed / pursuerSpeed
-    futureEvaderPositions = (
-        evaderPositions
-        + speedRatio
-        * pursuerRange
-        * jnp.vstack([jnp.cos(evaderHeadings), jnp.sin(evaderHeadings)]).T
-    )
-    ez = box_reachable_region(
-        futureEvaderPositions,
-        box_min,
-        box_max,
         pursuerRange,
         pursuerCaptureRadius,
     )
@@ -794,133 +738,6 @@ def plot_interception_points(interceptionPositions, radii, ax):
     ax.plot([], [], color="red", linestyle=":", label=r"$\partial D^{(i)}$")
 
 
-def plot_box_pursuer_reachable_region(
-    min_box,
-    max_box,
-    pursuerRange,
-    pursuerCaptureRadius,
-    ax,
-    color="magenta",
-):
-    box = plt.Rectangle(
-        min_box,
-        max_box[0] - min_box[0],
-        max_box[1] - min_box[1],
-        color="red",
-        fill=False,
-        linewidth=1.5,
-    )
-    ax.plot(
-        [],
-        color="red",
-        label=r"$\partial \mathcal{P}_{\text{rect}}$",
-    )
-    ax.add_artist(box)
-    numPoints = 200
-    xlim = (
-        min_box[0] - (pursuerRange + pursuerCaptureRadius) - 0.3,
-        max_box[0] + (pursuerRange + pursuerCaptureRadius) + 0.3,
-    )
-    ylim = (
-        min_box[1] - (pursuerRange + pursuerCaptureRadius) - 0.3,
-        max_box[1] + (pursuerRange + pursuerCaptureRadius) + 0.3,
-    )
-    points, X, Y = get_meshgrid_points(xlim, ylim, numPoints)
-
-    RR = box_reachable_region(
-        points, min_box, max_box, pursuerRange, pursuerCaptureRadius
-    )
-    ax.contour(
-        X.reshape((numPoints, numPoints)),
-        Y.reshape((numPoints, numPoints)),
-        RR.reshape((numPoints, numPoints)),
-        levels=[0],
-        colors=color,
-    )
-    ax.plot([], color=color, label=r"$\partial \mathcal{R}_{\text{rect}}$")
-    return ax
-
-
-def plot_box_pursuer_engagement_zone(
-    min_box,
-    max_box,
-    pursuerRange,
-    pursuerCaptureRadius,
-    pursuerSpeed,
-    evaderHeading,
-    evaderSpeed,
-    xlim,
-    ylim,
-    ax,
-):
-    numPoints = 200
-    points, X, Y = get_meshgrid_points(xlim, ylim, numPoints)
-    evaderHeadings = evaderHeading * jnp.ones((points.shape[0],))
-
-    EZ = box_pursuer_engagment_zone(
-        points,
-        evaderHeadings,
-        evaderSpeed,
-        min_box,
-        max_box,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-    )
-    ax.contour(
-        X.reshape((numPoints, numPoints)),
-        Y.reshape((numPoints, numPoints)),
-        EZ.reshape((numPoints, numPoints)),
-        levels=[0],
-        colors="green",
-    )
-    ax.plot([], label=r"$\partial \mathcal{Z}_{\text{rect}}$", color="green")
-    return ax
-
-
-def annotate_box_EZ_plot(
-    evader_start,
-    evader_heading,
-    evader_speed,
-    pursuerSpeed,
-    pursuerRange,
-    ax,
-    fig,
-    p1=[0, 2.6],
-    p2=[0, 1],
-):
-    ax.plot(evader_start[0], evader_start[1], "k")
-    speedRatio = evader_speed / pursuerSpeed
-    dist = speedRatio * pursuerRange
-    ax.arrow(
-        evader_start[0],
-        evader_start[1],
-        dist * jnp.cos(evader_heading),
-        dist * jnp.sin(evader_heading),
-        color="black",
-        head_width=0.1,
-        length_includes_head=True,
-    )
-    ax.text(
-        (evader_start[0] + evader_start[0] + dist * np.cos(evader_heading)) / 2,
-        (evader_start[1] + evader_start[1] + dist * np.sin(evader_heading)) / 2 - 0.25,
-        r"$\mu R \hat{\mathbf{v}}_E$",
-        color="black",
-    )
-    curlyBrace(
-        fig,
-        ax,
-        p1,
-        p2,
-        k_r=0.1,
-        bool_auto=True,
-        str_text=r"$R+r$",
-        int_line_num=2,
-        fontdict={},
-        color="black",
-    )
-
-
 def main():
     pursuerPosition = np.array([0.0, 0.0])
     pursuerRange = 1.5
@@ -960,7 +777,7 @@ def main():
     plot_pursuer_reachable_region(
         pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
     )
-    fast_pursuer.plotEngagementZone(
+    pez_plotting.plotEngagementZone(
         evaderHeading,
         pursuerPosition,
         pursuerRange,
@@ -1030,7 +847,7 @@ def plot_potential_ez(ax, fig):
     # plt.legend(ncols=5, loc="upper center", columnspacing=0.8)
 
 
-def plot_potential_ez_with_launch_time(ax):
+def plot_potential_ez_with_launch_time(ax, fig):
     pursuerPosition = np.array([0.0, 0.0])
     pursuerRange = 1.5
     pursuerSpeed = 2.0
@@ -1081,44 +898,6 @@ def plot_potential_ez_with_launch_time(ax):
     ax.set_ylim(-3.5, 3.5)
 
 
-def bez_learning_rect_ez_plot():
-    pursuerRange = 1.5
-    pursuerSpeed = 2.0
-    pursuerCaptureRadius = 0.1
-    evaderHeading = np.pi / 4
-    evaderSpeed = 1.0
-    min_box = np.array([-1.0, -1.0])
-    max_box = np.array([2.0, 1.0])
-
-    fig, ax = plt.subplots(figsize=(4, 4), layout="constrained")
-    ax.set_aspect("equal")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    plot_box_pursuer_reachable_region(
-        min_box,
-        max_box,
-        pursuerRange,
-        pursuerCaptureRadius,
-        ax=ax,
-    )
-    plot_box_pursuer_engagement_zone(
-        min_box,
-        max_box,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-        evaderHeading,
-        evaderSpeed,
-        xlim=(-4, 4),
-        ylim=(-4, 4),
-        ax=ax,
-    )
-    annotate_box_EZ_plot(
-        [-2.67, -2.67], evaderHeading, evaderSpeed, pursuerSpeed, pursuerRange, ax, fig
-    )
-    plt.legend(ncols=3, loc="upper center")
-
-
 def bez_learning_bez_plot():
     pursuerRange = 1.5
     pursuerSpeed = 2.0
@@ -1128,7 +907,7 @@ def bez_learning_bez_plot():
     pursuerPosition = np.array([0.0, 0.0])
 
     fig, ax = plt.subplots(figsize=(4, 4), layout="constrained")
-    fast_pursuer.plotEngagementZone(
+    pez_plotting.plotEngagementZone(
         evaderHeading,
         pursuerPosition,
         pursuerRange,
@@ -1273,7 +1052,7 @@ def bez_learning_potential_bez_plot():
 
 def combined_potential_plot():
     fig, ax = plt.subplots(1, 2, figsize=(6.0, 4.0), layout="constrained")
-    plot_potential_ez_with_launch_time(ax[1])
+    plot_potential_ez_with_launch_time(ax[1], fig)
     ax[1].set_title("With Launch Times")
     plot_potential_ez(ax[0], fig)
     ax[0].set_title("Without Launch Times")
