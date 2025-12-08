@@ -18,8 +18,6 @@ import matplotlib
 # set maplotlib to faster backend
 # matplotlib.use("Agg")
 
-import learned_dubins_ez_path_planner
-
 
 # get rid of type 3 fonts
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -48,8 +46,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
 from scipy.optimize import minimize
 
-import dubinsEZ
-# import mp_worker
+import CSPEZ.csbez as csbez
+import CSPEZ.csbez_plotting as csbez_plotting
+import CSBEZ_LEARNING.learned_dubins_ez_path_planner as learned_dubins_ez_path_planner
 
 jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax.config.update("jax_platform_name", "gpu")")
@@ -161,7 +160,7 @@ def plot_low_priority_paths_with_ez(
 
         heading = headings[i]
         # ez = (
-        #     dubinsEZ_from_pursuerX(
+        #     csbez_from_pursuerX(
         #         pursuerX,
         #         pathHistory,
         #         heading * np.ones(len(pathHistory)),
@@ -256,11 +255,11 @@ def send_low_priority_agent_interioir(
     pathHistory, headings = simulate_trajectory_fn(
         startPosition, heading, speed, tmax, numSimulationPoints
     )
-    RS = dubinsEZ.in_dubins_reachable_set(
+    RS = csbez.in_dubins_reachable_set(
         pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, pathHistory
     )
     inRS = RS < 0.0  # shape (T,)
-    EZ = dubinsEZ.in_dubins_engagement_zone_agumented(
+    EZ = csbez.in_dubins_engagement_zone_agumented(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -284,7 +283,7 @@ def send_low_priority_agent_interioir(
         #     startPosition, heading, speed, interceptionTime, numPoints
         # )
         # direction = np.array([np.cos(heading), np.sin(heading)])  # shape (2,)
-        # pursuerDistTraveled = dubinsEZ.find_shortest_dubins_path(
+        # pursuerDistTraveled = csbez.find_shortest_dubins_path(
         #     pursuerPosition, pursuerHeading, interceptionPoint, minimumTurnRadius
         # )
         # # t_p = pursuerDistTraveled / pursuerSpeed
@@ -301,7 +300,7 @@ def send_low_priority_agent_interioir(
             startPosition, heading, speed, interceptionTime, numPoints
         )
         direction = np.array([np.cos(heading), np.sin(heading)])  # shape (2,)
-        pursuerDistTraveled = dubinsEZ.find_shortest_dubins_path(
+        pursuerDistTraveled = csbez.find_shortest_dubins_path(
             pursuerPosition, pursuerHeading, interceptionPoint, minimumTurnRadius
         )
         t_p = pursuerDistTraveled / pursuerSpeed
@@ -353,12 +352,12 @@ def send_low_priority_agent_expected_intercept(
     pathHistory, headings = simulate_trajectory_fn(
         startPosition, heading, speed, tmax, numSimulationPoints
     )
-    RS = dubinsEZ.in_dubins_reachable_set(
+    RS = csbez.in_dubins_reachable_set(
         pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, pathHistory
     )
     inRS = RS < 0.0  # shape (T,)
     inRSFlag = jnp.any(inRS)
-    EZ = dubinsEZ.in_dubins_engagement_zone_agumented(
+    EZ = csbez.in_dubins_engagement_zone_agumented(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -475,12 +474,12 @@ def send_low_priority_agent_boundary(
     pathHistory, headings = simulate_trajectory_fn(
         startPosition, heading, speed, tmax, numSimulationPoints
     )
-    RS = dubinsEZ.in_dubins_reachable_set(
+    RS = csbez.in_dubins_reachable_set(
         pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, pathHistory
     )
     inRS = RS < 0.0  # shape (T,)
     firstTrueIndex = first_true_index_safe(inRS)
-    EZ = dubinsEZ.in_dubins_engagement_zone_agumented(
+    EZ = csbez.in_dubins_engagement_zone_agumented(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -508,7 +507,7 @@ def send_low_priority_agent_boundary(
             startPosition, heading, speed, interceptionTime, numPoints
         )
 
-        pursuerDistTraveled = dubinsEZ.find_shortest_dubins_path(
+        pursuerDistTraveled = csbez.find_shortest_dubins_path(
             pursuerPosition, pursuerHeading, interceptionPoint, minimumTurnRadius
         )
         t_p = pursuerDistTraveled / pursuerSpeed
@@ -629,7 +628,7 @@ else:
     pursuerX_to_params = pursuerX_to_params_all
 
 
-def dubinsEZ_from_pursuerX(
+def csbez_from_pursuerX(
     pursuerX,
     pathHistory,
     headings,
@@ -639,7 +638,7 @@ def dubinsEZ_from_pursuerX(
     pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange = (
         pursuerX_to_params(pursuerX, trueParams)
     )
-    ez = dubinsEZ.in_dubins_engagement_zone_agumented(
+    ez = csbez.in_dubins_engagement_zone_agumented(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
@@ -659,7 +658,7 @@ def dubins_reachable_set_from_pursuerX(
     pursuerPosition, pursuerHeading, pursuerSpeed, minimumTurnRadius, pursuerRange = (
         pursuerX_to_params(pursuerX, trueParams)
     )
-    rs = dubinsEZ.in_dubins_reachable_set_augmented(
+    rs = csbez.in_dubins_reachable_set_augmented(
         pursuerPosition, pursuerHeading, minimumTurnRadius, pursuerRange, goalPosition
     )
     return rs
@@ -753,12 +752,12 @@ def learning_loss_on_boundary_function_single_EZ(
     verbose=False,
 ):
     # headings = heading * jnp.ones(pathHistory.shape[0])
-    # ezFirst = dubinsEZ_from_pursuerX(
+    # ezFirst = csbez_from_pursuerX(
     #     pursuerX, jnp.array([ezPoint]), jnp.array([headings[-1]]), speed, trueParams
     # ).squeeze()
     # #
     #
-    # ezAll = dubinsEZ_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
+    # ezAll = csbez_from_pursuerX(pursuerX, pathHistory, headings, speed, trueParams)
     #
     # outEZ = pathTime < ezTime - 0.0 * 0.001
     #
@@ -771,7 +770,7 @@ def learning_loss_on_boundary_function_single_EZ(
     # )
     # interceptedLossTrajectory = jnp.max(interceptedLossTrajectory)
 
-    predPursuerDistanceTraveled = dubinsEZ.find_shortest_dubins_path(
+    predPursuerDistanceTraveled = csbez.find_shortest_dubins_path(
         pursuerX[0:2], pursuerX[2], interceptedPoint, pursuerX[4]
     )
     pred_ezTime = pathTime[-1] - (predPursuerDistanceTraveled) / pursuerX[3]
@@ -893,14 +892,14 @@ def pred_launch_time(interceptedPoint, pursuerX, trueParams, pathTime):
 
     def path_len_for_offset(dxy):
         ip = interceptedPoint + dxy
-        return dubinsEZ.find_shortest_dubins_path(
+        return csbez.find_shortest_dubins_path(
             pursuerPosition, pursuerHeading, ip, minimumTurnRadius
         )
 
     # Vectorize over offsets and average
     path_lens = jax.vmap(path_len_for_offset)(offsets)
     predPursuerDistanceTraveled = jnp.min(path_lens)
-    # predPursuerDistanceTraveled = dubinsEZ.find_shortest_dubins_path(
+    # predPursuerDistanceTraveled = csbez.find_shortest_dubins_path(
     #     pursuerPosition, pursuerHeading, interceptedPoint, minimumTurnRadius
     # )
     pred_ezTime = pathTime[-1] - (predPursuerDistanceTraveled) / pursuerSpeed
@@ -1657,7 +1656,7 @@ def percent_of_true_rs_covered(
 # (If d is large and T small, consider jacrev instead.)
 grad_theta_RS_path = jax.jacfwd(dubins_reachable_set_from_pursuerX, argnums=0)
 
-grad_theta_EZ_path = jax.jacfwd(dubinsEZ_from_pursuerX, argnums=0)
+grad_theta_EZ_path = jax.jacfwd(csbez_from_pursuerX, argnums=0)
 
 
 def grad_theta_RS_point(theta, pt, true_params):
@@ -1728,7 +1727,7 @@ def info_for_trajectory_int_ez(
 ):
     # HIT branch: use interception point
     def interception_fn():
-        r_end = dubinsEZ_from_pursuerX(
+        r_end = csbez_from_pursuerX(
             theta, intercepted_point[None, :], jnp.array([heading]), speed, true_params
         )[0]
         z_hit = r_end - flatten_margin
@@ -1743,7 +1742,7 @@ def info_for_trajectory_int_ez(
     def miss_fn():
         # RS and grads along path
         headings = heading * jnp.ones(path_history.shape[0])
-        r_t = dubinsEZ_from_pursuerX(
+        r_t = csbez_from_pursuerX(
             theta, path_history, headings, speed, true_params
         )  # (T,)
 
@@ -4114,7 +4113,7 @@ def plot_all(
             minimumTurnRadiusLearned1,
             pursuerRangeLearned1,
         ) = pursuerX_to_params(pursuerX, trueParams)
-        dubinsEZ.plot_dubins_reachable_set(
+        csbez_plotting.plot_dubins_reachable_set(
             pursuerPositionLearned1,
             pursuerHeadingLearned1,
             pursuerRangeLearned1,
@@ -4138,7 +4137,7 @@ def plot_all(
     #     minimumTurnRadiusLearned1,
     #     pursuerRangeLearned1,
     # ) = pursuerX_to_params(meanPursuerX, trueParams)
-    # dubinsEZ.plot_dubins_reachable_set(
+    # csbez_plotting.plot_dubins_reachable_set(
     #     pursuerPositionLearned1,
     #     pursuerHeadingLearned1,
     #     pursuerRangeLearned1,
@@ -4189,7 +4188,7 @@ def plot_all(
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_title("True and Learned Pursuer Reachable Sets")
-    dubinsEZ.plot_dubins_reachable_set(
+    csbez_plotting.plot_dubins_reachable_set(
         pursuerPosition,
         pursuerHeading,
         pursuerRange,
@@ -4200,7 +4199,7 @@ def plot_all(
 
     # ax.scatter(ezPoints[:, 0], ezPoints[:, 1], color="green", s=50, label="EZ Points")
     # for i in range(len(headings)):
-    #     dubinsEZ.plot_dubins_EZ(
+    #     csbez_plotting.plot_dubins_EZ(
     #         trueParams[0:2],
     #         trueParams[2],
     #         trueParams[3],

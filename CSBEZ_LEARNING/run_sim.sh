@@ -10,5 +10,5 @@ SEEDS=(3)
 
 # for SEED in {46..50}; do
 for SEED in "${SEEDS[@]}"; do
-  python3 learning_dubins_ez.py $SEED 1
+  python3 -m CSBEZ_LEARNING.learning_dubins_ez $SEED 1
 done

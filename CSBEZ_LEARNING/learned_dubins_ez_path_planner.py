@@ -12,18 +12,17 @@ import matplotlib.pyplot as plt
 import matplotlib
 import jax
 
-import fast_pursuer
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
-import learning_dubins_ez
+import CSBEZ_LEARNING.learning_dubins_ez as learning_dubins_ez
 
-from dubinsEZ import in_dubins_engagement_zone
-import dubinsEZ
+import CSPEZ.csbez as csbez
+import CSPEZ.csbez_plotting as csbez_plotting
 
 
-import spline_opt_tools
+import bspline.spline_opt_tools as spline_opt_tools
 
 
 numSamplesPerInterval = 15
@@ -58,7 +57,7 @@ def plot_spline(
     agentHeadings = np.arctan2(yDot, xDot)
 
     pos = spline(t)
-    # ez = in_dubins_engagement_zone(
+    # ez = csbez.in_dubins_engagement_zone(
     #     pursuerPosition,
     #     pursuerHeading,
     #     pursuerTurnRadius,
@@ -95,7 +94,7 @@ def dubinsEZ_from_pursuerX(
         learning_dubins_ez.pursuerX_to_params(pursuerX, trueParams)
     )
     # jax.debug.print("pursuerPosition: {}", pursuerPosition)
-    ez = dubinsEZ.in_dubins_engagement_zone_agumented(
+    ez = csbez.in_dubins_engagement_zone_agumented(
         pursuerPosition,
         pursuerHeading,
         minimumTurnRadius,
