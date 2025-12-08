@@ -11,7 +11,6 @@ import getpass
 import matplotlib.pyplot as plt
 import matplotlib
 
-import fast_pursuer
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -27,17 +26,14 @@ matplotlib.rcParams["legend.fontsize"] = 10
 matplotlib.rcParams["ytick.labelsize"] = 10
 matplotlib.rcParams["xtick.labelsize"] = 10
 
-# set backend to agg
-matplotlib.use("agg")
+# set backend to agg (only if running on remote server and saving images instead of viewing them)
+# matplotlib.use("agg")
 
-from fast_pursuer import (
-    plotMahalanobisDistance,
-    plotProbablisticEngagementZone,
-    probabalisticEngagementZoneVectorizedTemp,
-    inEngagementZoneJaxVectorized,
-)
 
-import spline_opt_tools
+import bspline.spline_opt_tools as spline_opt_tools
+import PEZ.pez as pez
+import PEZ.pez_plotting as pez_plotting
+import PLOT_COMMON.draw_mahalanobis as draw_mahalanobis
 
 numSamplesPerInterval = 15
 
@@ -82,7 +78,7 @@ def plot_spline(
     agentHeadings = np.arctan2(yDot, xDot)
     plotPEZAlongSpline = False
     if plotPEZAlongSpline:
-        pez = probabalisticEngagementZoneVectorizedTemp(
+        pez = pez.probabalisticEngagementZoneVectorizedTemp(
             pos,
             agentPositionCov,
             agentHeadings,
@@ -97,7 +93,7 @@ def plot_spline(
             pursuerSpeedVar,
             agentSpeed,
         )
-        pezDeterministic = inEngagementZoneJaxVectorized(
+        pezDeterministic = bez.inEngagementZoneJaxVectorized(
             pos,
             agentHeadings,
             pursuerPosition,
@@ -114,7 +110,7 @@ def plot_spline(
         else:
             cmap = "viridis"
             cbarLabel = "Engagement Zone Probability"
-            # plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax, fig)
+            # draw_mahalanobis.plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax, fig)
 
         c = ax.scatter(x, y, c=pez, cmap=cmap, s=4)
         cbar = plt.colorbar(c, ax=ax, shrink=0.8)
@@ -167,7 +163,7 @@ def get_pez_along_spline(
         controlPoints, tf, 3, numSamplesPerInterval
     )
     controlPoints = controlPoints.reshape((numControlPoints, 2))
-    return probabalisticEngagementZoneVectorizedTemp(
+    return pez.probabalisticEngagementZoneVectorizedTemp(
         spline_opt_tools.evaluate_spline(
             controlPoints, knotPoints, numSamplesPerInterval
         ),
@@ -213,7 +209,7 @@ def compute_spline_constraints(
 
     curvature = turn_rate / velocity
 
-    pez_constraint = probabalisticEngagementZoneVectorizedTemp(
+    pez_constraint = pez.probabalisticEngagementZoneVectorizedTemp(
         pos,
         agentPositionCov,
         agentHeadings,
@@ -582,7 +578,7 @@ def mc_spline_evaluation(
         while pursuerSpeedTemp < agentSpeed:
             pursuerSpeedTemp = np.random.normal(pursuerSpeed, np.sqrt(pursuerSpeedVar))
 
-        ez = inEngagementZoneJaxVectorized(
+        ez = bez.inEngagementZoneJaxVectorized(
             pos,
             agentHeadins,
             pursuerPositionTemp,
@@ -696,7 +692,7 @@ def main():
             pez_constraint_limit,
             ax,
         )
-    plotMahalanobisDistance(
+    draw_mahalanobis.plotMahalanobisDistance(
         pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=False
     )
     ax.legend()
@@ -893,7 +889,7 @@ def animate_ez():
         pdot = spline.derivative(1)(currentTime)
         currentPosition = spline(currentTime)
         currentHeading = np.arctan2(pdot[1], pdot[0])
-        fast_pursuer.plotEngagementZone(
+        pez_plotting.plotEngagementZone(
             currentHeading,
             pursuerPosition,
             pursuerRange,
@@ -1030,7 +1026,7 @@ def animate_pez():
         pdot = spline.derivative(1)(currentTime)
         currentPosition = spline(currentTime)
         currentHeading = np.arctan2(pdot[1], pdot[0])
-        plotProbablisticEngagementZone(
+        pez_plotting.plotProbablisticEngagementZone(
             agentPositionCov,
             currentHeading,
             agentHeadingVar,
@@ -1075,7 +1071,9 @@ def animate_pez():
             ec="blue",
             zorder=5,
         )
-        plotMahalanobisDistance(pursuerPosition, pursuerPositionCov, ax, fig)
+        pez_plotting.plotMahalanobisDistance(
+            pursuerPosition, pursuerPositionCov, ax, fig
+        )
         ax.set_xlim(-4.5, 4.5)
         ax.set_ylim(-4.5, 4.5)
         plt.xticks([])
@@ -1090,5 +1088,5 @@ def animate_pez():
 
 
 if __name__ == "__main__":
-    # main()
-    animate_pez()
+    main()
+    # animate_pez()
