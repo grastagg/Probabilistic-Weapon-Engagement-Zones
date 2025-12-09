@@ -17,7 +17,7 @@ matplotlib.rcParams["legend.fontsize"] = 10
 matplotlib.rcParams["ytick.labelsize"] = 10
 matplotlib.rcParams["xtick.labelsize"] = 10
 
-import GEOMETRIC_BEZ.potential_bez_from_interceptions as potential_bez_from_interceptions
+import GEOMETRIC_BEZ.bez_from_interceptions as bez_from_interceptions
 import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
 
 
@@ -126,9 +126,7 @@ def rectangle_pez_plot():
     numPoints = 120
     xlim = (-4, 4)
     ylim = (-4, 4)
-    points, X, Y = potential_bez_from_interceptions.get_meshgrid_points(
-        xlim, ylim, numPoints
-    )
+    points, X, Y = bez_from_interceptions.get_meshgrid_points(xlim, ylim, numPoints)
     dArea = (
         (xlim[1] - xlim[0]) / (numPoints - 1) * (ylim[1] - ylim[0]) / (numPoints - 1)
     )

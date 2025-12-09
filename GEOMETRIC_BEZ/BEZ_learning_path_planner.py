@@ -16,7 +16,7 @@ import jax
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
-import GEOMETRIC_BEZ.potential_bez_from_interceptions as potential_bez_from_interceptions
+import GEOMETRIC_BEZ.bez_from_interceptions as bez_from_interceptions
 import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
 
 
@@ -93,7 +93,7 @@ def potential_BEZ_along_spline(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    ez = potential_bez_from_interceptions.potential_pursuer_engagment_zone(
+    ez = bez_from_interceptions.potential_pursuer_engagment_zone(
         pos,
         evaderHeadings,
         evaderSpeed,
@@ -168,7 +168,7 @@ def compute_spline_constraints_for_potential_BEZ(
 
     curvature = turn_rate / velocity
 
-    ez = potential_bez_from_interceptions.potential_pursuer_engagment_zone(
+    ez = bez_from_interceptions.potential_pursuer_engagment_zone(
         pos,
         evaderHeadings,
         evaderSpeed,
@@ -792,12 +792,10 @@ def plan_path_from_interception_points(
     curvature_constraints,
     num_constraint_samples,
 ):
-    arcs = potential_bez_from_interceptions.intersection_arcs(
+    arcs = bez_from_interceptions.intersection_arcs(
         interceptionPositions, [pursuerRange] * np.ones(len(interceptionPositions))
     )
-    centers, radii, theta_start, theta_end = (
-        potential_bez_from_interceptions.arcs_to_arrays(arcs)
-    )
+    centers, radii, theta_start, theta_end = bez_from_interceptions.arcs_to_arrays(arcs)
 
     (splineRight, tfRight) = optimize_spline_path_potential_BEZ(
         initialEvaderPosition,
@@ -966,7 +964,7 @@ def main(interceptionPositions):
     ax.set_xlim(-6, 6)
     ax.set_ylim(-6, 6)
     plot_spline(spline, ax)
-    potential_bez_from_interceptions.plot_potential_pursuer_engagement_zone(
+    bez_from_interceptions.plot_potential_pursuer_engagement_zone(
         arcs,
         pursuerRange,
         pursuerCaptureRadius,
@@ -977,18 +975,18 @@ def main(interceptionPositions):
         ylim=(-6, 6),
         ax=ax,
     )
-    potential_bez_from_interceptions.plot_potential_pursuer_reachable_region(
+    bez_from_interceptions.plot_potential_pursuer_reachable_region(
         arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
     )
-    # potential_bez_from_interceptions.plot_pursuer_reachable_region(
+    # bez_from_interceptions.plot_pursuer_reachable_region(
     #     pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
     # )
-    potential_bez_from_interceptions.plot_interception_points(
+    bez_from_interceptions.plot_interception_points(
         interceptionPositions,
         np.ones(len(interceptionPositions)) * (pursuerRange + pursuerCaptureRadius),
         ax,
     )
-    potential_bez_from_interceptions.plot_circle_intersection_arcs(arcs, ax=ax)
+    bez_from_interceptions.plot_circle_intersection_arcs(arcs, ax=ax)
     # plt.legend()
 
 
@@ -1104,7 +1102,7 @@ def animate_spline_path(interceptionPositions):
             ec="blue",
             zorder=5,
         )
-        potential_bez_from_interceptions.plot_potential_pursuer_engagement_zone(
+        bez_from_interceptions.plot_potential_pursuer_engagement_zone(
             arcs,
             pursuerRange,
             pursuerCaptureRadius,
@@ -1115,18 +1113,18 @@ def animate_spline_path(interceptionPositions):
             ylim=(-6, 6),
             ax=ax,
         )
-        potential_bez_from_interceptions.plot_potential_pursuer_reachable_region(
+        bez_from_interceptions.plot_potential_pursuer_reachable_region(
             arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
         )
-        # potential_bez_from_interceptions.plot_pursuer_reachable_region(
+        # bez_from_interceptions.plot_pursuer_reachable_region(
         #     pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
         # )
-        potential_bez_from_interceptions.plot_interception_points(
+        bez_from_interceptions.plot_interception_points(
             interceptionPositions,
             np.ones(len(interceptionPositions)) * (pursuerRange + pursuerCaptureRadius),
             ax,
         )
-        potential_bez_from_interceptions.plot_circle_intersection_arcs(arcs, ax=ax)
+        bez_from_interceptions.plot_circle_intersection_arcs(arcs, ax=ax)
         ax.set_xlim(-5.5, 5.5)
         ax.set_ylim(-5.5, 5.5)
         plt.xticks([])
