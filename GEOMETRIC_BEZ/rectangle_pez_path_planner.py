@@ -129,24 +129,24 @@ def box_PEZ_along_spline(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    ez = rectangle_pez.prob_reachable_uniform_box(
-        pos,
-        pursuerRange,
-        pursuerCaptureRadius,
-        min_box,
-        max_box,
-    )
-
-    # ez = rectangle_pez.prob_engagment_zone_uniform_box(
+    # ez = rectangle_pez.prob_reachable_uniform_box(
     #     pos,
-    #     evaderHeadings,
-    #     evaderSpeed,
     #     pursuerRange,
     #     pursuerCaptureRadius,
-    #     pursuerSpeed,
     #     min_box,
     #     max_box,
     # )
+
+    ez = rectangle_pez.prob_engagment_zone_uniform_box(
+        pos,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        min_box,
+        max_box,
+    )
     return ez
 
 
@@ -173,23 +173,23 @@ def compute_spline_constraints_for_box_PEZ(
 
     curvature = turn_rate / velocity
 
-    ez = rectangle_pez.prob_reachable_uniform_box(
-        pos,
-        pursuerRange,
-        pursuerCaptureRadius,
-        min_box,
-        max_box,
-    )
-    # ez = rectangle_pez.prob_engagment_zone_uniform_box(
+    # ez = rectangle_pez.prob_reachable_uniform_box(
     #     pos,
-    #     evaderHeadings,
-    #     evaderSpeed,
     #     pursuerRange,
     #     pursuerCaptureRadius,
-    #     pursuerSpeed,
     #     min_box,
     #     max_box,
     # )
+    ez = rectangle_pez.prob_engagment_zone_uniform_box(
+        pos,
+        evaderHeadings,
+        evaderSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        min_box,
+        max_box,
+    )
 
     return velocity, turn_rate, curvature, ez, pos, evaderHeadings
 
@@ -290,6 +290,11 @@ def optimize_spline_path_box_PEZ(
             pursuerCaptureRadius,
             pursuerSpeed,
         )
+        # replace nans with zeros
+        dEZDtf = np.array(dEZDtf, copy=True)
+        dEZDtf[np.isnan(dEZDtf)] = 0.0
+        dEZDControlPoints = np.array(dEZDControlPoints, copy=True)
+        dEZDControlPoints[np.isnan(dEZDControlPoints)] = 0.0
         dVelocityDControlPointsVal = spline_opt_tools.dVelocityDControlPoints(
             controlPoints, tf, 3, numSamplesPerInterval
         )
@@ -376,7 +381,7 @@ def optimize_spline_path_box_PEZ(
             numSamplesPerInterval,
         )
     # test grad
-    testGrad = True
+    testGrad = False
     if testGrad:
         dEZDControlPoints = dBoxPEZDControlPoints(
             x0,
@@ -570,6 +575,31 @@ def main_box():
     turn_rate_constraints = (-1.0, 1.0)
     num_constraint_samples = 50
     pez_limit = 0.1
+
+    gradPoint = np.array([1.0, -5.0])
+    gradHeading = 0.0
+    grads = rectangle_pez.dPEZdPos(
+        gradPoint,
+        gradHeading,
+        evaderSpeed,
+        pursuerSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        min_box,
+        max_box,
+    )
+    headings_grad = rectangle_pez.dPEZdHeading(
+        gradPoint,
+        gradHeading,
+        evaderSpeed,
+        pursuerSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        min_box,
+        max_box,
+    )
+    print("position grad", grads)
+    print("heading grad", headings_grad)
 
     spline = plan_path_box_PEZ(
         min_box,

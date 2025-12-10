@@ -169,6 +169,7 @@ def prob_engagment_zone_uniform_box(
 
 
 dPEZdPos = jax.jacfwd(prob_engagment_zone_uniform_box)
+dPEZdHeading = jax.jacfwd(prob_engagment_zone_uniform_box, argnums=1)
 
 
 def plot_rectangle_prr(
@@ -244,7 +245,18 @@ def rectangle_pez_plot():
         min_box,
         max_box,
     )
+    headings_grad = dPEZdHeading(
+        gradPoints,
+        headings[:10],
+        evaderSpeed,
+        pursuerSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        min_box,
+        max_box,
+    )
     print("Gradient samples:", grads)
+    print("headings", headings_grad)
 
     fig, axes = plt.subplots(1, 2, figsize=(6.5, 4), layout="constrained")
     ax = axes[0]
