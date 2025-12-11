@@ -59,10 +59,11 @@ def dmc_along_spline(
     controlPoints,
     tf,
     evaderSpeed,
-    pursuerPositions,
-    pursuerRanges,
-    pursuerCaptureRadiuses,
-    pursuerSpeeds,
+    pursuerPosition,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pursuerSpeed,
+    dmcVal,
 ):
     numControlPoints = int(len(controlPoints) / 2)
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
@@ -75,14 +76,15 @@ def dmc_along_spline(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    dmc = DMC.dmc_multiple_pursuer(
+    dmc = DMC.in_dmc_vmap(
         pos,
         evaderHeadings,
         evaderSpeed,
-        pursuerPositions,
-        pursuerSpeeds,
-        pursuerRanges,
-        pursuerCaptureRadiuses,
+        pursuerPosition,
+        pursuerSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        dmcVal,
     )
 
     return dmc
@@ -93,10 +95,11 @@ def compute_spline_constraints_for_DMC(
     controlPoints,
     knotPoints,
     evaderSpeed,
-    pursuerPositions,
-    pursuerRanges,
-    pursuerCaptureRadiuses,
-    pursuerSpeeds,
+    pursuerPosition,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pursuerSpeed,
+    dmcVal,
 ):
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
@@ -110,14 +113,15 @@ def compute_spline_constraints_for_DMC(
 
     curvature = turn_rate / velocity
 
-    dmc = DMC.dmc_multiple_pursuer(
+    dmc = DMC.in_dmc_vmap(
         pos,
         evaderHeadings,
         evaderSpeed,
-        pursuerPositions,
-        pursuerSpeeds,
-        pursuerRanges,
-        pursuerCaptureRadiuses,
+        pursuerPosition,
+        pursuerSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        dmcVal,
     )
 
     return velocity, turn_rate, curvature, dmc, pos, evaderHeadings
@@ -143,10 +147,10 @@ def optimize_spline_path_DMC(
     curvature_constraints,
     num_constraint_samples,
     evaderSpeed,
-    pursuerPositions,
-    pursuerRanges,
-    pursuerCaptureRadiuses,
-    pursuerSpeeds,
+    pursuerPosition,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pursuerSpeed,
     right=True,
     previous_spline=None,
     dmc_limit=0.1,
@@ -169,10 +173,11 @@ def optimize_spline_path_DMC(
                 controlPoints,
                 knotPoints,
                 evaderSpeed,
-                pursuerPositions,
-                pursuerRanges,
-                pursuerCaptureRadiuses,
-                pursuerSpeeds,
+                pursuerPosition,
+                pursuerRange,
+                pursuerCaptureRadius,
+                pursuerSpeed,
+                dmc_limit,
             )
         )
 
@@ -206,19 +211,21 @@ def optimize_spline_path_DMC(
             controlPoints,
             tf,
             evaderSpeed,
-            pursuerPositions,
-            pursuerRanges,
-            pursuerCaptureRadiuses,
-            pursuerSpeeds,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            dmc_limit,
         )
         dEZDtf = dDMCDtf(
             controlPoints,
             tf,
             evaderSpeed,
-            pursuerPositions,
-            pursuerRanges,
-            pursuerCaptureRadiuses,
-            pursuerSpeeds,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            dmc_limit,
         )
         # # replace nans with zeros
         # dEZDtf = np.array(dEZDtf, copy=True)
@@ -341,15 +348,15 @@ def optimize_spline_path_DMC(
         upper=curvature_constraints[1],
         scale=1.0 / curvature_constraints[1],
     )
-    optProb.addConGroup("dmc", num_constraint_samples, lower=None, upper=dmc_limit)
+    optProb.addConGroup("dmc", num_constraint_samples, lower=0.0, upper=None)
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
     optProb.addConGroup("end", 2, lower=pf, upper=pf)
 
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 5
-    opt.options["max_iter"] = 100
+    opt.options["print_level"] = 0
+    opt.options["max_iter"] = 1000
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
@@ -381,10 +388,10 @@ def main_dmc():
     initialEvaderPosition = np.array([-2.5, 1.0])
     finalEvaderPosition = np.array([2.5, -1.0])
     initialEvaderVelocity = np.array([1.0, 0.0])
-    pursuerPositions = np.array([[0.0, 0.0], [1.0, 1.0]])
-    pursuerRanges = np.array([1.0, 1.0])
-    pursuerSpeeds = np.array([2.0, 2.0])
-    pursuerCaptureRadiuses = np.array([0.2, 0.2])
+    pursuerPosition = np.array([0.0, 0.0])
+    pursuerRange = 1.0
+    pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.2
     evaderSpeed = 1.5
     num_cont_points = 20
     spline_order = 3
@@ -392,8 +399,10 @@ def main_dmc():
     curvature_constraints = (-0.5, 0.5)
     turn_rate_constraints = (-1.0, 1.0)
     num_constraint_samples = 50
-    dmc_limit = np.deg2rad(10)
+    dmc_limit = np.deg2rad(20)
 
+    gradPoint = np.array([1.0, -5.0])
+    gradHeading = 0.0
     spline, tf = optimize_spline_path_DMC(
         initialEvaderPosition,
         finalEvaderPosition,
@@ -405,10 +414,10 @@ def main_dmc():
         curvature_constraints=curvature_constraints,
         num_constraint_samples=num_constraint_samples,
         evaderSpeed=evaderSpeed,
-        pursuerPositions=pursuerPositions,
-        pursuerRanges=pursuerRanges,
-        pursuerCaptureRadiuses=pursuerCaptureRadiuses,
-        pursuerSpeeds=pursuerSpeeds,
+        pursuerPosition=pursuerPosition,
+        pursuerRange=pursuerRange,
+        pursuerCaptureRadius=pursuerCaptureRadius,
+        pursuerSpeed=pursuerSpeed,
         right=False,
         previous_spline=None,
         dmc_limit=dmc_limit,
@@ -417,21 +426,18 @@ def main_dmc():
     fig, ax = plt.subplots(figsize=(10, 10))
     plot_spline(spline, ax)
     ax.set_aspect("equal")
-    for i, pursuerPosition in enumerate(pursuerPositions):
-        pursuerRange = pursuerRanges[i]
-        pursuerCaptureRadius = pursuerCaptureRadiuses[i]
-        circle = plt.Circle(
-            pursuerPosition, pursuerRange, color="r", fill=False, linestyle=":"
-        )
-        ax.add_artist(circle)
-        circle = plt.Circle(
-            pursuerPosition,
-            pursuerRange + pursuerCaptureRadius,
-            color="r",
-            fill=False,
-            linestyle="--",
-        )
-        ax.add_artist(circle)
+    circle = plt.Circle(
+        pursuerPosition, pursuerRange, color="r", fill=False, linestyle=":"
+    )
+    ax.add_artist(circle)
+    circle = plt.Circle(
+        pursuerPosition,
+        pursuerRange + pursuerCaptureRadius,
+        color="r",
+        fill=False,
+        linestyle="--",
+    )
+    ax.add_artist(circle)
     plt.legend()
 
 
