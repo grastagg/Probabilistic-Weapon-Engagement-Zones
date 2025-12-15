@@ -439,7 +439,7 @@ def plot_dmc_rect_solve(
     ylim=(-4, 4),
     ax=None,
     color="purple",
-    numPoints=500,
+    numPoints=100,
 ):
     points, X, Y = rectangle_bez.get_meshgrid_points(xlim, ylim, numPoints)
     evaderHeadings = evaderHeading * jnp.ones((points.shape[0],))
@@ -492,11 +492,11 @@ def main_solve():
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.2
-    evaderHeading = np.deg2rad(45.0)
+    evaderHeading = np.deg2rad(0.0)
     evaderSpeed = 1.0
     min_box = np.array([-1.0, -1.0])
     max_box = np.array([2.0, 1.0])
-    dmcVal = np.deg2rad(100)
+    dmcVal = np.deg2rad(45)
 
     fig, ax = plt.subplots(figsize=(4, 4), layout="constrained")
     ax.set_aspect("equal")
