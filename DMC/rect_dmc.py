@@ -1,3 +1,4 @@
+import time
 import jax.numpy as jnp
 from matplotlib import colors
 import numpy as np
@@ -105,13 +106,13 @@ def rect_dmc_val_solve(
             pursuerSpeed,
         )
 
-    xiStar = np.abs(_wrap_angle(scipy.optimize.newton(func, 0)[0]))
-    xiStar2 = np.abs(_wrap_angle(scipy.optimize.newton(func, np.pi / 2)[0]))
+    xiStar = _wrap_angle(scipy.optimize.newton(func, 0)[0])
+    xiStar2 = np.abs(_wrap_angle(scipy.optimize.newton(func, np.pi)[0]))
     # test if evaderHeading lies inbetween -xiStar and xistar func_counterclockwise
 
     bezClockwise = rectangle_bez.box_pursuer_engagment_zone(
         evaderPosition,
-        evaderHeading + xiStar,
+        xiStar,
         evaderSpeed,
         box_min,
         box_max,
@@ -121,7 +122,7 @@ def rect_dmc_val_solve(
     )
     bezCounterClockwise = rectangle_bez.box_pursuer_engagment_zone(
         evaderPosition,
-        evaderHeading - xiStar,
+        -xiStar,
         evaderSpeed,
         box_min,
         box_max,
@@ -129,37 +130,59 @@ def rect_dmc_val_solve(
         pursuerCaptureRadius,
         pursuerSpeed,
     )
-    if not angle_between_ccw(evaderHeading, xiStar - np.pi, xiStar):
-        return 0.0, 0.0
-    print("xiStar:", xiStar)
-    print("bezClockwise:", bezClockwise)
-    print("bezCounterClockwise:", bezCounterClockwise)
-    print("evaderHeading:", evaderHeading)
+    # if not angle_between_ccw(evaderHeading, xiStar - np.pi, xiStar):
+    #     return 0.0, 0.0
     if np.abs(bezClockwise) < np.abs(bezCounterClockwise):
         return _angle_diff(xiStar, evaderHeading), _angle_diff(xiStar2, evaderHeading)
     else:
         return -_angle_diff(xiStar, evaderHeading), -_angle_diff(xiStar2, evaderHeading)
 
 
-def _bisection_root(func, lo, hi, iters=400):
+def _shortest_root_in_interval(func, lo, hi, evaderHeading, iters=20, num_samples=64):
+    """
+    Find ALL zero crossings in [lo, hi] and return the shortest-magnitude root.
+    JAX-safe, jit/vmap compatible.
+    """
     lo = jnp.asarray(lo)
     hi = jnp.asarray(hi)
 
-    def body(_, state):
-        lo, hi = state
-        mid = 0.5 * (lo + hi)
+    # ---- sample ----
+    xis = jnp.linspace(lo, hi, num_samples)
 
-        f_lo = jnp.squeeze(func(lo))
-        f_mid = jnp.squeeze(func(mid))
+    def f(x):
+        return jnp.squeeze(func(x))
 
-        same_sign = jnp.sign(f_lo) == jnp.sign(f_mid)
+    fvals = jax.vmap(f)(xis)
 
-        lo = jnp.where(same_sign, mid, lo)
-        hi = jnp.where(same_sign, hi, mid)
-        return lo, hi
+    # ---- detect sign changes ----
+    f0 = fvals[:-1]
+    f1 = fvals[1:]
+    has_root = f0 * f1 <= 0.0
 
-    lo, hi = jax.lax.fori_loop(0, iters, body, (lo, hi))
-    return 0.5 * (lo + hi)
+    lo_b = xis[:-1]
+    hi_b = xis[1:]
+
+    # ---- bisection on one bracket ----
+    def bisect(lo, hi):
+        def body(_, state):
+            lo, hi = state
+            mid = 0.5 * (lo + hi)
+            same = jnp.sign(f(lo)) == jnp.sign(f(mid))
+            lo = jnp.where(same, mid, lo)
+            hi = jnp.where(same, hi, mid)
+            return lo, hi
+
+        lo, hi = jax.lax.fori_loop(0, iters, body, (lo, hi))
+        return 0.5 * (lo + hi)
+
+    # ---- refine all brackets (masked) ----
+    roots = jax.vmap(lambda lo, hi, valid: jnp.where(valid, bisect(lo, hi), jnp.inf))(
+        lo_b, hi_b, has_root
+    )
+
+    # ---- shortest root ----
+    # return jnp.nanmin(_angle_diff(roots, evaderHeading))
+    return roots[jnp.nanargmin(jnp.abs(_angle_diff(roots, evaderHeading)))]
 
 
 def rect_dmc_val_solve_jax(
@@ -184,32 +207,9 @@ def rect_dmc_val_solve_jax(
             pursuerSpeed,
         )
 
-    # Solve
-    xiStar1 = _wrap_angle(_bisection_root(bez_at_xi, 0, jnp.pi))
-    xiStar2 = _wrap_angle(_bisection_root(bez_at_xi, -np.pi, 0))
+    # ---- FIND SHORTEST ROOT IN EACH HALF-INTERVAL ----
+    xiStar1 = _shortest_root_in_interval(bez_at_xi, -jnp.pi, jnp.pi, evaderHeading)
 
-    jax.debug.print("xiStar1: {x}, bez at xiStar: {y}", x=xiStar1, y=bez_at_xi(xiStar1))
-    jax.debug.print("xiStar2: {x}, bez at xiStar: {y}", x=xiStar2, y=bez_at_xi(xiStar2))
-    bezClockwise = rectangle_bez.box_pursuer_engagment_zone(
-        evaderPosition,
-        evaderHeading + xiStar1,
-        evaderSpeed,
-        box_min,
-        box_max,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-    )
-    bezCounterClockwise = rectangle_bez.box_pursuer_engagment_zone(
-        evaderPosition,
-        evaderHeading - xiStar1,
-        evaderSpeed,
-        box_min,
-        box_max,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-    )
     bezNominal = rectangle_bez.box_pursuer_engagment_zone(
         evaderPosition,
         evaderHeading,
@@ -220,14 +220,20 @@ def rect_dmc_val_solve_jax(
         pursuerCaptureRadius,
         pursuerSpeed,
     )
-    inBez = bezNominal <= 0.0
-    angle_diff_xiStar = _angle_diff(xiStar1, evaderHeading)
-    dmc = jnp.where(
-        jnp.abs(bezClockwise) < jnp.abs(bezCounterClockwise),
-        angle_diff_xiStar,
-        -angle_diff_xiStar,
+    rrNoEscape = rectangle_bez.box_reachable_region(
+        evaderPosition[None, :],
+        box_min,
+        box_max,
+        (1 - (evaderSpeed / pursuerSpeed)) * pursuerRange + pursuerCaptureRadius,
+        0.0,
     )
-    return jnp.where(inBez, dmc, 0.0)
+    inNoEscapeRegion = rrNoEscape <= 0.0
+
+    inBez = bezNominal <= 0.0
+
+    angle_diff_xiStar = _angle_diff(xiStar1, evaderHeading)
+
+    return jnp.where(inNoEscapeRegion, 0.0, jnp.where(inBez, angle_diff_xiStar, 0.0))
 
 
 rect_dmc_val_solve_vmap = jax.jit(
@@ -449,52 +455,51 @@ def plot_dmc_rect_solve(
             pursuerSpeed,
         )
     )
-    c = ax.pcolormesh(
+    start = time.time()
+    dmcVals = np.abs(
+        rect_dmc_val_solve_vmap(
+            points,
+            evaderHeadings,
+            evaderSpeed,
+            min_box,
+            max_box,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+        )
+    )
+    print("JAX DMC computation time:", time.time() - start)
+    # c = ax.pcolormesh(
+    #     X.reshape((numPoints, numPoints)),
+    #     Y.reshape((numPoints, numPoints)),
+    #     dmcVals.reshape((numPoints, numPoints)),
+    #     # levels=[dmcVal],
+    #     # colors=color,
+    # )
+    # plt.colorbar(c, ax=ax, label="DMC (rad)")
+    # c = ax.pcolormesh(
+    c = ax.contour(
         X.reshape((numPoints, numPoints)),
         Y.reshape((numPoints, numPoints)),
         dmcVals.reshape((numPoints, numPoints)),
-        # levels=[dmcVal],
-        # colors=color,
+        levels=[dmcVal],
+        colors=color,
     )
-    plt.colorbar(c, ax=ax, label="DMC (rad)")
+    # plt.colorbar(c, ax=ax, label="DMC (rad)")
 
 
 def main_solve():
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.2
-    evaderHeading = np.deg2rad(0.0)
+    evaderHeading = np.deg2rad(45.0)
     evaderSpeed = 1.0
     min_box = np.array([-1.0, -1.0])
     max_box = np.array([2.0, 1.0])
-    points = jnp.array([[2.6, 2.0], [-2.0, 2.0]])
-    dmcVal = np.deg2rad(10)
-    # testDMCVals = rect_dmc_val_solve_vmap(
-    #     points,
-    #     jnp.array([evaderHeading, evaderHeading]),
-    #     evaderSpeed,
-    #     min_box,
-    #     max_box,
-    #     pursuerRange,
-    #     pursuerCaptureRadius,
-    #     pursuerSpeed,
-    # )
-    # print("test points:", points)
-    # print("Test DMC Vals (vmap):", testDMCVals)
-    fig, ax = plt.subplots()
-    plot_dmc_rect_solve(
-        min_box,
-        max_box,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-        evaderHeading,
-        evaderSpeed,
-        dmcVal,
-        xlim=(-4, 4),
-        ylim=(-4, 4),
-        ax=ax,
-    )
+    dmcVal = np.deg2rad(100)
+
+    fig, ax = plt.subplots(figsize=(4, 4), layout="constrained")
+    ax.set_aspect("equal")
     rectangle_bez.plot_box_pursuer_reachable_region(
         min_box,
         max_box,
@@ -535,37 +540,77 @@ def main_solve():
         ylim=(-4, 4),
         ax=ax,
     )
+    rectangle_bez.plot_box_pursuer_engagement_zone(
+        min_box,
+        max_box,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        evaderHeading + dmcVal,
+        evaderSpeed,
+        xlim=(-4, 4),
+        ylim=(-4, 4),
+        ax=ax,
+        color="lime",
+    )
+    rectangle_bez.plot_box_pursuer_engagement_zone(
+        min_box,
+        max_box,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        evaderHeading - dmcVal,
+        evaderSpeed,
+        xlim=(-4, 4),
+        ylim=(-4, 4),
+        ax=ax,
+        color="magenta",
+    )
+    plot_dmc_rect_solve(
+        min_box,
+        max_box,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        evaderHeading,
+        evaderSpeed,
+        dmcVal,
+        xlim=(-4, 4),
+        ylim=(-4, 4),
+        ax=ax,
+        color="orange",
+    )
 
 
 def main():
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.2
-    evaderHeading = np.deg2rad(0.0)
+    evaderHeading = np.deg2rad(45.0)
     evaderSpeed = 1.0
     min_box = np.array([-1.0, -1.0])
     max_box = np.array([2.0, 1.0])
     point = np.array([-2.0, 2.0])
-    point = np.array([0.2, -2.0])
-    dmcValTest, dmcValTest2 = rect_dmc_val_solve(
-        point,
-        evaderHeading,
-        evaderSpeed,
-        min_box,
-        max_box,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-    )
-    print(
-        "DMC Value at point ",
-        point,
-        " is ",
-        dmcValTest,
-        "in degrees:",
-        np.rad2deg(dmcValTest),
-    )
-    print("DMC Value 2:", dmcValTest2, "in degrees:", np.rad2deg(dmcValTest2))
+    point = np.array([-3, 0.6])
+    # dmcValTest, dmcValTest2 = rect_dmc_val_solve(
+    #     point,
+    #     evaderHeading,
+    #     evaderSpeed,
+    #     min_box,
+    #     max_box,
+    #     pursuerRange,
+    #     pursuerCaptureRadius,
+    #     pursuerSpeed,
+    # )
+    # print(
+    #     "DMC Value at point ",
+    #     point,
+    #     " is ",
+    #     dmcValTest,
+    #     "in degrees:",
+    #     np.rad2deg(dmcValTest),
+    # )
+    # print("DMC Value 2:", dmcValTest2, "in degrees:", np.rad2deg(dmcValTest2))
     # test jax solve
     jaxDmc = rect_dmc_val_solve_jax(
         point,
@@ -758,6 +803,6 @@ def test():
 
 if __name__ == "__main__":
     main_solve()
-    main()
+    # main()
     # test()
     plt.show()

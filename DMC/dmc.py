@@ -19,7 +19,7 @@ def _angle_diff(a, b):
     return jnp.arctan2(jnp.sin(a - b), jnp.cos(a - b))
 
 
-# @jax.jit
+@jax.jit
 def dmc_from_xi_d(xi, d, mu, R, r):
     """
     Pure DMC(ξ, d; μ, R, r) as in eq. (7).
@@ -37,9 +37,7 @@ def dmc_from_xi_d(xi, d, mu, R, r):
 
     # avoid divide-by-zero in degenerate case
     arg = num / den
-    print("arcos arg", arg)
     xi_star = _safe_acos(arg)  # in [0, π]
-    print("xi star", xi_star)
 
     # unsafe set ξ ∈ [−ξ*, ξ*]
     inside = jnp.logical_and(
@@ -51,9 +49,6 @@ def dmc_from_xi_d(xi, d, mu, R, r):
     # distance to left and right boundaries
     dist_left = jnp.abs(_angle_diff(xi, -xi_star))
     dist_right = jnp.abs(_angle_diff(xi, xi_star))
-    print("xi", xi)
-    print("dist left", dist_left)
-    print("dist right", dist_right)
 
     dmc_val = jnp.sign(xi) * jnp.minimum(dist_left, dist_right)
 
