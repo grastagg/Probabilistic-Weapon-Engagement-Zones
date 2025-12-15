@@ -5,6 +5,7 @@ import jax
 import matplotlib.pyplot as plt
 
 from PEZ import pez
+from PEZ import bez
 import PEZ.pez_plotting as pez_plotting
 
 
@@ -18,7 +19,7 @@ def _angle_diff(a, b):
     return jnp.arctan2(jnp.sin(a - b), jnp.cos(a - b))
 
 
-@jax.jit
+# @jax.jit
 def dmc_from_xi_d(xi, d, mu, R, r):
     """
     Pure DMC(ξ, d; μ, R, r) as in eq. (7).
@@ -36,7 +37,9 @@ def dmc_from_xi_d(xi, d, mu, R, r):
 
     # avoid divide-by-zero in degenerate case
     arg = num / den
+    print("arcos arg", arg)
     xi_star = _safe_acos(arg)  # in [0, π]
+    print("xi star", xi_star)
 
     # unsafe set ξ ∈ [−ξ*, ξ*]
     inside = jnp.logical_and(
@@ -48,10 +51,14 @@ def dmc_from_xi_d(xi, d, mu, R, r):
     # distance to left and right boundaries
     dist_left = jnp.abs(_angle_diff(xi, -xi_star))
     dist_right = jnp.abs(_angle_diff(xi, xi_star))
+    print("xi", xi)
+    print("dist left", dist_left)
+    print("dist right", dist_right)
 
     dmc_val = jnp.sign(xi) * jnp.minimum(dist_left, dist_right)
 
     # outside ξ_unsafe ⇒ DMC = 0
+    return jnp.where(inside, dmc_val, 0.0)
     return jnp.abs(jnp.where(inside, dmc_val, 0.0))
 
 
@@ -60,7 +67,7 @@ def _wrap_angle(a):
     return jnp.arctan2(jnp.sin(a), jnp.cos(a))
 
 
-@jax.jit
+# @jax.jit
 def dmc(
     agentPosition,  # shape (2,)
     agentHeading,  # scalar (rad)
@@ -114,7 +121,34 @@ def dmc_multiple_pursuer(
     return jnp.max(dmcs, axis=0)
 
 
-@jax.jit
+# @jax.jit
+# def in_dmc(
+#     agentPosition,  # shape (2,)
+#     agentHeading,  # scalar (rad)
+#     agentSpeed,  # scalar
+#     pursuerPosition,  # shape (2,)
+#     pursuerSpeed,  # scalar
+#     pursuerRange,  # R
+#     pursuerCaptureRadius,  # r
+#     dmcVal,
+# ):
+#     speedRatio = agentSpeed / pursuerSpeed
+#     c1 = pursuerPosition - speedRatio * (pursuerRange) * jnp.array(
+#         [jnp.cos(agentHeading - dmcVal), jnp.sin(agentHeading - dmcVal)]
+#     )
+#     c2 = pursuerPosition - speedRatio * (pursuerRange) * jnp.array(
+#         [jnp.cos(agentHeading + dmcVal), jnp.sin(agentHeading + dmcVal)]
+#     )
+#     d1 = jnp.linalg.norm(agentPosition - c1)
+#     d2 = jnp.linalg.norm(agentPosition - c2)
+#     d = jnp.maximum(d1, d2)
+#     return d - (pursuerRange + pursuerCaptureRadius)
+#
+#
+# in_dmc_vmap = jax.jit(
+#     jax.vmap(in_dmc, in_axes=(0, 0, None, None, None, None, None, None))
+# )
+#
 def in_dmc(
     agentPosition,  # shape (2,)
     agentHeading,  # scalar (rad)
@@ -125,17 +159,40 @@ def in_dmc(
     pursuerCaptureRadius,  # r
     dmcVal,
 ):
-    speedRatio = agentSpeed / pursuerSpeed
-    c1 = pursuerPosition - speedRatio * (pursuerRange) * jnp.array(
-        [jnp.cos(agentHeading - dmcVal), jnp.sin(agentHeading - dmcVal)]
+    bezNominal = bez.inEngagementZoneJax(
+        agentPosition,
+        agentHeading,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        agentSpeed,
     )
-    c2 = pursuerPosition - speedRatio * (pursuerRange) * jnp.array(
-        [jnp.cos(agentHeading + dmcVal), jnp.sin(agentHeading + dmcVal)]
+    bez1 = bez.inEngagementZoneJax(
+        agentPosition,
+        agentHeading + dmcVal,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        agentSpeed,
     )
-    d1 = jnp.linalg.norm(agentPosition - c1)
-    d2 = jnp.linalg.norm(agentPosition - c2)
-    d = jnp.maximum(d1, d2)
-    return d - (pursuerRange + pursuerCaptureRadius)
+    bez2 = bez.inEngagementZoneJax(
+        agentPosition,
+        agentHeading - dmcVal,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        agentSpeed,
+    )
+    d = jnp.linalg.norm(agentPosition - pursuerPosition)
+    inNoEscape = (
+        d <= (1 - (agentSpeed / pursuerSpeed)) * pursuerRange + pursuerCaptureRadius
+    )
+    return jnp.where(
+        inNoEscape, 100.0, jnp.maximum(bez1, jnp.maximum(bez2, bezNominal))
+    )
 
 
 in_dmc_vmap = jax.jit(
@@ -154,6 +211,9 @@ def plot_dmc(
     ylim,
     numPoints=100,
     levels=[0],
+    ax=None,
+    color="purple",
+    contour=True,
 ):
     x = jnp.linspace(xlim[0], xlim[1], numPoints)
     y = jnp.linspace(ylim[0], ylim[1], numPoints)
@@ -173,15 +233,25 @@ def plot_dmc(
         )
     )
 
-    fig, ax = plt.subplots()
+    if ax is None:
+        fig, ax = plt.subplots()
     ax.set_aspect("equal")
-    c = ax.contour(
-        X.reshape(numPoints, numPoints),
-        Y.reshape(numPoints, numPoints),
-        dmc_values.reshape(numPoints, numPoints),
-        levels=levels,
-    )
-    plt.scatter(*pursuerPosition)
+    if contour:
+        c = ax.contour(
+            X.reshape(numPoints, numPoints),
+            Y.reshape(numPoints, numPoints),
+            dmc_values.reshape(numPoints, numPoints),
+            levels=levels,
+            colors=color,
+        )
+    else:
+        c = ax.pcolormesh(
+            X.reshape(numPoints, numPoints),
+            Y.reshape(numPoints, numPoints),
+            dmc_values.reshape(numPoints, numPoints),
+        )
+        cbar = plt.colorbar(c, ax=ax)
+    plt.scatter(*pursuerPosition, color="r")
     circle = plt.Circle(
         pursuerPosition, pursuerRange, color="r", fill=False, linestyle=":"
     )
@@ -249,20 +319,36 @@ def main():
     xlim = (-4, 4)
     ylim = (-4, 4)
     numPoints = 500
-    dmcVal = np.deg2rad(10)
-    ax = plot_dmc(
+    # dmcVal = np.deg2rad(60)
+    point = np.array([[0.355, 0.435]])
+    dmcVal = dmc(
+        point[0],
         agentHeading,
         agentSpeed,
         pursuerPosition,
         pursuerSpeed,
         pursuerRange,
         pursuerCaptureRadius,
-        xlim,
-        ylim,
-        numPoints,
-        levels=[dmcVal],
     )
-
+    print("dmcVal", dmcVal)
+    # dmcVal = 1.57
+    fig, ax = plt.subplots(figsize=(6, 6), layout="constrained")
+    ax.scatter(point[0, 0], point[0, 1], color="black", zorder=5)
+    # plot_dmc(
+    #     agentHeading,
+    #     agentSpeed,
+    #     pursuerPosition,
+    #     pursuerSpeed,
+    #     pursuerRange,
+    #     pursuerCaptureRadius,
+    #     xlim,
+    #     ylim,
+    #     numPoints,
+    #     levels=[dmcVal],
+    #     ax=ax,
+    #     contour=False,
+    # )
+    #
     print("DMC value (rad): ", dmcVal)
     pez_plotting.plotEngagementZone(
         agentHeading + dmcVal,
@@ -289,6 +375,19 @@ def main():
         color="magenta",
     )
 
+    pez_plotting.plotEngagementZone(
+        agentHeading,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        agentSpeed,
+        ax,
+        alpha=1.0,
+        width=1,
+        color="green",
+    )
+
     speedRatio = agentSpeed / pursuerSpeed
     c1 = pursuerPosition - speedRatio * (pursuerRange) * np.array(
         [np.cos(agentHeading - dmcVal), np.sin(agentHeading - dmcVal)]
@@ -299,6 +398,52 @@ def main():
     )
     ax.scatter(*c2, color="lime")
 
+    plot_in_dmc(
+        dmcVal,
+        agentHeading,
+        agentSpeed,
+        pursuerPosition,
+        pursuerSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        xlim,
+        ylim,
+        numPoints,
+        ax,
+    )
+    circ = plt.Circle(
+        pursuerPosition,
+        (1 - (agentSpeed / pursuerSpeed)) * pursuerRange + pursuerCaptureRadius,
+        color="red",
+        fill=True,
+        alpha=0.2,
+    )
+    ax.add_artist(circ)
+    dmcVal = np.deg2rad(90)
+    pez_plotting.plotEngagementZone(
+        agentHeading + dmcVal,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        agentSpeed,
+        ax,
+        alpha=1.0,
+        width=1,
+        color="lime",
+    )
+    pez_plotting.plotEngagementZone(
+        agentHeading - dmcVal,
+        pursuerPosition,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        agentSpeed,
+        ax,
+        alpha=1.0,
+        width=1,
+        color="magenta",
+    )
     plot_in_dmc(
         dmcVal,
         agentHeading,

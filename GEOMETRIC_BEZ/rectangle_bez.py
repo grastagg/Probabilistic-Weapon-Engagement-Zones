@@ -89,6 +89,10 @@ def plot_box_pursuer_reachable_region(
     pursuerCaptureRadius,
     ax,
     color="magenta",
+    linestyle="solid",
+    fill=False,
+    alpha=1.0,
+    numPoints=200,
 ):
     box = plt.Rectangle(
         min_box,
@@ -104,7 +108,6 @@ def plot_box_pursuer_reachable_region(
         label=r"$\partial \mathcal{P}_{\text{rect}}$",
     )
     ax.add_artist(box)
-    numPoints = 200
     xlim = (
         min_box[0] - (pursuerRange + pursuerCaptureRadius) - 0.3,
         max_box[0] + (pursuerRange + pursuerCaptureRadius) + 0.3,
@@ -118,13 +121,26 @@ def plot_box_pursuer_reachable_region(
     RR = box_reachable_region(
         points, min_box, max_box, pursuerRange, pursuerCaptureRadius
     )
-    ax.contour(
-        X.reshape((numPoints, numPoints)),
-        Y.reshape((numPoints, numPoints)),
-        RR.reshape((numPoints, numPoints)),
-        levels=[0],
-        colors=color,
-    )
+    if fill:
+        ax.contourf(
+            X.reshape((numPoints, numPoints)),
+            Y.reshape((numPoints, numPoints)),
+            RR.reshape((numPoints, numPoints)),
+            levels=[-1000, 0],
+            colors=color,
+            linestyles=linestyle,
+            alpha=alpha,
+        )
+    else:
+        ax.contour(
+            X.reshape((numPoints, numPoints)),
+            Y.reshape((numPoints, numPoints)),
+            RR.reshape((numPoints, numPoints)),
+            levels=[0],
+            colors=color,
+            linestyles=linestyle,
+            alpha=alpha,
+        )
     ax.plot([], color=color, label=r"$\partial \mathcal{R}_{\text{rect}}$")
     return ax
 
@@ -140,6 +156,7 @@ def plot_box_pursuer_engagement_zone(
     xlim,
     ylim,
     ax,
+    color="green",
 ):
     numPoints = 200
     points, X, Y = get_meshgrid_points(xlim, ylim, numPoints)
@@ -160,7 +177,7 @@ def plot_box_pursuer_engagement_zone(
         Y.reshape((numPoints, numPoints)),
         EZ.reshape((numPoints, numPoints)),
         levels=[0],
-        colors="green",
+        colors=color,
     )
     ax.plot([], label=r"$\partial \mathcal{Z}_{\text{rect}}$", color="green")
     return ax
