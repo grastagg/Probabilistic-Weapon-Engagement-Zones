@@ -101,7 +101,6 @@ def plot_dubins_EZ(
     X = X.flatten()
     Y = Y.flatten()
     evaderHeadings = np.ones_like(X) * evaderHeading
-    print(evaderHeadings.shape)
 
     ZTrue = csbez.in_dubins_engagement_zone_agumented(
         pursuerPosition,
@@ -492,7 +491,6 @@ def plot_theta_and_vectors_left_turn(
     v3 = G - C
     v4 = P - C
     theta = csbez.counterclockwise_angle(v4, v3)
-    print(theta)
     startAngle = np.arctan2(v4[1], v4[0])
     endAngle = np.arctan2(v3[1], v3[0])
     arcDrawDistance = 1.0 / 3.0
@@ -526,7 +524,6 @@ def main_EZ():
     # length, tangentPoint = find_dubins_path_length_right_strait(
     #     pursuerPosition, pursuerHeading, evaderPosition, minimumTurnRadius
     # )
-    # print("length", length)
     # plot_dubins_path(
     #     pursuerPosition,
     #     pursuerHeading,
@@ -757,7 +754,6 @@ def pursuer_heading_vs_ez_boundary():
             evaderHeading,
             evaderSpeed,
         )
-        print(ez)
 
         ez_boundary_points.append(ez)
         headings_plot.append(heading)

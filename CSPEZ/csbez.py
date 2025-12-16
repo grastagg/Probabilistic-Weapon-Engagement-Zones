@@ -1,12 +1,3 @@
-import os
-
-from jax.lax import random_gamma_grad
-from matplotlib.markers import MarkerStyle
-import numpy as np
-import time
-import matplotlib.pyplot as plt
-from matplotlib import patches
-
 import jax
 import jax.numpy as jnp
 
@@ -154,20 +145,6 @@ find_dubins_path_length_left_strait_vec = jax.vmap(
 )
 
 
-# def smooth_min(x, alpha=200.0, epsilon=1e-6):
-#     return -jnp.log(jnp.sum(jnp.exp(-alpha * x) + epsilon)) / alpha
-def smooth_min(x, alpha=10.0, epsilon=1e-6):
-    # Clip inputs to prevent exp overflow
-    x = jnp.clip(x, -1e3, 1e3)
-
-    # Replace NaNs (if not already done) — just in case
-    x = jnp.where(jnp.isnan(x), 1e6, x)
-
-    # Compute softmin
-    softmin = -jnp.log(jnp.sum(jnp.exp(-alpha * x) + epsilon)) / alpha
-    return softmin
-
-
 @jax.jit
 def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, radius):
     straitLeftLength, _ = find_dubins_path_length_right_strait(
@@ -179,34 +156,8 @@ def find_shortest_dubins_path(pursuerPosition, pursuerHeading, goalPosition, rad
 
     lengths = jnp.array([straitLeftLength, straitRightLength])
 
-    # return smooth_min(lengths)
-    # return sofmin(*lengths, 0.01)
     return jnp.min(lengths)
-    # return jnp.nanmin(lengths)
     #
-
-
-@jax.jit
-def find_shortest_dubins_path_and_turn_amount(
-    pursuerPosition, pursuerHeading, goalPosition, radius
-):
-    straitLeftLength, leftTheta = find_dubins_path_length_right_strait(
-        pursuerPosition, pursuerHeading, goalPosition, radius
-    )
-    straitRightLength, rightTheta = find_dubins_path_length_left_strait(
-        pursuerPosition, pursuerHeading, goalPosition, radius
-    )
-
-    lengths = jnp.array([straitLeftLength, straitRightLength])
-
-    def left():
-        return straitLeftLength, leftTheta
-
-    def right():
-        return straitRightLength, rightTheta
-
-    leftShorter = straitLeftLength < straitRightLength
-    return jax.lax.cond(leftShorter, left, right)
 
 
 # Vectorized version over goalPosition
@@ -230,10 +181,6 @@ def in_dubins_reachable_set_single(
 
     rs = dubinsPathLengths - pursuerRange
     return rs
-
-
-def distance_to_circle(point, center, radius):
-    return radius - jnp.linalg.norm(jnp.array(point) - jnp.array(center))
 
 
 @jax.jit
@@ -276,20 +223,6 @@ def normalize_angle(theta):
     return (theta + 2 * jnp.pi) % (2 * jnp.pi)
 
 
-#
-# @jax.jit
-# def angle_in_arc(theta_p, theta1, theta2):
-#     theta_p = normalize_angle(theta_p)
-#     theta1 = normalize_angle(theta1)
-#     theta2 = normalize_angle(theta2)
-#     if_angle_wraps = theta2 < theta1
-#     return jnp.where(
-#         if_angle_wraps,
-#         jnp.logical_or(theta_p >= theta1, theta_p <= theta2),
-#         jnp.logical_and(theta_p >= theta1, theta_p <= theta2),
-#     )
-#
-#
 @jax.jit
 def signed_distance_to_arc(point, center, radius, theta1, theta2):
     vec = point - center
@@ -501,11 +434,6 @@ def in_dubins_engagement_zone_single(
     dubinsPathLengths = find_shortest_dubins_path(
         startPosition, startHeading, goalPositions, turnRadius
     )
-    # dubinsPathLengths = find_dubins_path_length_augmented(
-    #     startPosition, startHeading, turnRadius, pursuerRange, goalPositions
-    # )
-    # return dubinsPathLengths
-
     ez = dubinsPathLengths - pursuerRange
     return ez
 
@@ -575,65 +503,3 @@ in_dubins_engagement_zone_agumented = jax.jit(
         ),  # Vectorizing over evaderPosition & evaderHeading
     )
 )
-
-
-@jax.jit
-def in_dubins_engagement_zone_right_single(
-    startPosition,
-    startHeading,
-    turnRadius,
-    captureRadius,
-    pursuerRange,
-    pursuerSpeed,
-    evaderPosition,
-    evaderHeading,
-    evaderSpeed,
-):
-    speedRatio = evaderSpeed / pursuerSpeed
-
-    # Compute goal positions
-    direction = jnp.array(
-        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
-    )  # Heading unit vector
-    goalPosition = evaderPosition + speedRatio * pursuerRange * direction
-    straitRightLength, _ = find_dubins_path_length_right_strait(
-        startPosition, startHeading, goalPosition, turnRadius
-    )
-    straitRightLength = jnp.where(
-        jnp.isnan(straitRightLength), jnp.inf, straitRightLength
-    )
-
-    ez = straitRightLength - (captureRadius + pursuerRange)
-    # return dubinsPathLengths
-    return ez
-
-
-@jax.jit
-def in_dubins_engagement_zone_left_single(
-    startPosition,
-    startHeading,
-    turnRadius,
-    captureRadius,
-    pursuerRange,
-    pursuerSpeed,
-    evaderPosition,
-    evaderHeading,
-    evaderSpeed,
-):
-    speedRatio = evaderSpeed / pursuerSpeed
-
-    # Compute goal positions
-    direction = jnp.array(
-        [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
-    )  # Heading unit vector
-    goalPosition = evaderPosition + speedRatio * pursuerRange * direction
-    straitRightLength, _ = find_dubins_path_length_left_strait(
-        startPosition, startHeading, goalPosition, turnRadius
-    )
-    straitRightLength = jnp.where(
-        jnp.isnan(straitRightLength), jnp.inf, straitRightLength
-    )
-
-    ez = straitRightLength - (captureRadius + pursuerRange)
-    # return dubinsPathLengths
-    return ez

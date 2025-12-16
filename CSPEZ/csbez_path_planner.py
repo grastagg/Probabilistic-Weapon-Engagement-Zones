@@ -1,4 +1,5 @@
 import numpy as np
+import time
 from pyoptsparse import Optimization, OPT, IPOPT
 from scipy.interpolate import BSpline
 import time
@@ -13,7 +14,7 @@ import matplotlib
 import jax
 
 # use agg
-matplotlib.use("Agg")
+# matplotlib.use("Agg")
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -30,7 +31,7 @@ import PLOT_COMMON.draw_mahalanobis as draw_mahalanobis
 import bspline.spline_opt_tools as spline_opt_tools
 
 
-numSamplesPerInterval = 15
+numSamplesPerInterval = 3
 
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
@@ -309,8 +310,6 @@ def optimize_spline_path(
 
         return funcsSens, False
 
-    # num_constraint_samples = numSamplesPerInterval*(num_cont_points-2)-2
-
     optProb = Optimization("path optimization", objfunc)
 
     tf_initial = 1.0
@@ -373,20 +372,20 @@ def optimize_spline_path(
         upper=velocity_constraints[1],
         scale=1.0 / velocity_constraints[1],
     )
-    # optProb.addConGroup(
-    #     "turn_rate",
-    #     num_constraint_samples,
-    #     lower=turn_rate_constraints[0],
-    #     upper=turn_rate_constraints[1],
-    #     scale=1.0 / turn_rate_constraints[1],
-    # )
-    # optProb.addConGroup(
-    #     "curvature",
-    #     num_constraint_samples,
-    #     lower=curvature_constraints[0],
-    #     upper=curvature_constraints[1],
-    #     scale=1.0 / curvature_constraints[1],
-    # )
+    optProb.addConGroup(
+        "turn_rate",
+        num_constraint_samples,
+        lower=turn_rate_constraints[0],
+        upper=turn_rate_constraints[1],
+        scale=1.0 / turn_rate_constraints[1],
+    )
+    optProb.addConGroup(
+        "curvature",
+        num_constraint_samples,
+        lower=curvature_constraints[0],
+        upper=curvature_constraints[1],
+        scale=1.0 / curvature_constraints[1],
+    )
     optProb.addConGroup("ez", num_constraint_samples, lower=0.0, upper=None)
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
     optProb.addConGroup("end", 2, lower=pf, upper=pf)
@@ -395,7 +394,7 @@ def optimize_spline_path(
 
     opt = OPT("ipopt")
     print("TEST")
-    opt.options["print_level"] = 5
+    opt.options["print_level"] = 0
     opt.options["max_iter"] = 500
     username = getpass.getuser()
     opt.options["hsllib"] = (
@@ -558,10 +557,10 @@ def animate_spline_path():
     initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
     initialVelocity = endingLocation - startingLocation
 
-    numControlPoints = 20
+    numControlPoints = 30
     splineOrder = 3
     turn_rate_constraints = (-1.0, 1.0)
-    curvature_constraints = (-0.2, 0.2)
+    curvature_constraints = (-1.5, 1.5)
     num_constraint_samples = 50
 
     pursuerRange = 1.0
@@ -574,6 +573,7 @@ def animate_spline_path():
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
 
     velocity_constraints = (agentSpeed - 0.001, agentSpeed + 0.001)
+    # velocity_constraints = (0.0, agentSpeed + 0.001)
     spline = optimize_spline_path(
         startingLocation,
         endingLocation,
@@ -593,6 +593,27 @@ def animate_spline_path():
         pursuerTurnRadius,
         agentSpeed,
     )
+    start = time.time()
+    spline = optimize_spline_path(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        0.0,
+        pursuerPosition,
+        pursuerHeading,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        pursuerTurnRadius,
+        agentSpeed,
+    )
+    print("time to optimize:", time.time() - start)
 
     currentTime = 0
     dt = 0.05
