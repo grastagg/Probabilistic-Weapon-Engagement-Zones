@@ -84,6 +84,34 @@ def rect_dmc(
     return jnp.maximum(rectBez1, jnp.maximum(rectBez2, rectBezNominal))
 
 
+# def rect_dmc_val_solve(
+#     evaderPosition,
+#     evaderHeading,
+#     evaderSpeed,
+#     box_min,
+#     box_max,
+#     pursuerRange,
+#     pursuerCaptureRadius,
+#     pursuerSpeed,
+# ):
+#     def func(xiStar):
+#         return rectangle_bez.box_pursuer_engagment_zone(
+#             evaderPosition,
+#             evaderHeading + xiStar,
+#             evaderSpeed,
+#             box_min,
+#             box_max,
+#             pursuerRange,
+#             pursuerCaptureRadius,
+#             pursuerSpeed,
+#         )[0]
+#
+#     xiStar = _wrap_angle(
+#         scipy.optimize.root_scalar(func, bracket=[-np.pi, np.pi])["root"]
+#     )
+#     xiStar2 = _wrap_angle(scipy.optimize.root_scalar(func, bracket=[-np.pi, 0])["root"])
+
+
 def rect_dmc_val_solve(
     evaderPosition,
     evaderHeading,
@@ -93,6 +121,8 @@ def rect_dmc_val_solve(
     pursuerRange,
     pursuerCaptureRadius,
     pursuerSpeed,
+    n_samples=2048,
+    tol=1e-6,
 ):
     def func(xiStar):
         return rectangle_bez.box_pursuer_engagment_zone(
@@ -104,38 +134,52 @@ def rect_dmc_val_solve(
             pursuerRange,
             pursuerCaptureRadius,
             pursuerSpeed,
-        )
+        )[0]
 
-    xiStar = _wrap_angle(scipy.optimize.newton(func, 0)[0])
-    xiStar2 = np.abs(_wrap_angle(scipy.optimize.newton(func, np.pi)[0]))
-    # test if evaderHeading lies inbetween -xiStar and xistar func_counterclockwise
+    # 1. Sample the interval
+    xis = np.linspace(-np.pi, np.pi, n_samples)
+    vals = np.array([func(xi) for xi in xis])
+    print(vals)
 
-    bezClockwise = rectangle_bez.box_pursuer_engagment_zone(
-        evaderPosition,
-        xiStar,
-        evaderSpeed,
-        box_min,
-        box_max,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
+    roots = []
+
+    # 2. Detect sign changes (simple roots)
+    for i in range(len(xis) - 1):
+        f0, f1 = vals[i], vals[i + 1]
+        if f0 == 0.0:
+            roots.append(xis[i])
+        elif f0 * f1 < 0:
+            try:
+                r = scipy.optimize.brentq(func, xis[i], xis[i + 1])
+                roots.append(r)
+            except ValueError:
+                pass
+
+    # 3. Detect tangential roots (double roots)
+    dvals = np.gradient(vals, xis)
+    for i in range(len(xis) - 1):
+        if dvals[i] * dvals[i + 1] < 0:
+            xi_mid = 0.5 * (xis[i] + xis[i + 1])
+            if abs(func(xi_mid)) < tol:
+                roots.append(xi_mid)
+
+    # 4. Clean up roots
+    roots = np.array(roots)
+    print(roots)
+    if roots.size == 0:
+        return []
+
+    # Wrap and uniquify
+    roots = np.unique(np.round(_wrap_angle(roots), 6))
+    absDiffs = np.abs(_angle_diff(roots, evaderHeading))
+    return _angle_diff(roots[jnp.argmin(absDiffs)], evaderHeading), _angle_diff(
+        roots[jnp.argmax(absDiffs)], evaderHeading
     )
-    bezCounterClockwise = rectangle_bez.box_pursuer_engagment_zone(
-        evaderPosition,
-        -xiStar,
-        evaderSpeed,
-        box_min,
-        box_max,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-    )
-    # if not angle_between_ccw(evaderHeading, xiStar - np.pi, xiStar):
-    #     return 0.0, 0.0
-    if np.abs(bezClockwise) < np.abs(bezCounterClockwise):
-        return _angle_diff(xiStar, evaderHeading), _angle_diff(xiStar2, evaderHeading)
-    else:
-        return -_angle_diff(xiStar, evaderHeading), -_angle_diff(xiStar2, evaderHeading)
+
+    # print("xiStar:", xiStar)
+    # print("xiStar2:", xiStar2)
+    #
+    # return _angle_diff(xiStar, evaderHeading), _angle_diff(xiStar2, evaderHeading)
 
 
 def _shortest_root_in_interval(func, lo, hi, evaderHeading, iters=20, num_samples=64):
@@ -439,7 +483,9 @@ def plot_dmc_rect_solve(
     ylim=(-4, 4),
     ax=None,
     color="purple",
-    numPoints=100,
+    numPoints=500,
+    linestyle="--",
+    linewidth=2,
 ):
     points, X, Y = rectangle_bez.get_meshgrid_points(xlim, ylim, numPoints)
     evaderHeadings = evaderHeading * jnp.ones((points.shape[0],))
@@ -455,20 +501,6 @@ def plot_dmc_rect_solve(
             pursuerSpeed,
         )
     )
-    start = time.time()
-    dmcVals = np.abs(
-        rect_dmc_val_solve_vmap(
-            points,
-            evaderHeadings,
-            evaderSpeed,
-            min_box,
-            max_box,
-            pursuerRange,
-            pursuerCaptureRadius,
-            pursuerSpeed,
-        )
-    )
-    print("JAX DMC computation time:", time.time() - start)
     # c = ax.pcolormesh(
     #     X.reshape((numPoints, numPoints)),
     #     Y.reshape((numPoints, numPoints)),
@@ -484,6 +516,8 @@ def plot_dmc_rect_solve(
         dmcVals.reshape((numPoints, numPoints)),
         levels=[dmcVal],
         colors=color,
+        linestyles=linestyle,
+        linewidths=linewidth,
     )
     # plt.colorbar(c, ax=ax, label="DMC (rad)")
 
@@ -492,11 +526,11 @@ def main_solve():
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.2
-    evaderHeading = np.deg2rad(0.0)
+    evaderHeading = np.deg2rad(45.0)
     evaderSpeed = 1.0
     min_box = np.array([-1.0, -1.0])
     max_box = np.array([2.0, 1.0])
-    dmcVal = np.deg2rad(45)
+    dmcVal = np.deg2rad(160)
 
     fig, ax = plt.subplots(figsize=(4, 4), layout="constrained")
     ax.set_aspect("equal")
@@ -582,37 +616,102 @@ def main_solve():
     )
 
 
+def plot_centroid_heading_rays(
+    box_min,
+    box_max,
+    evaderHeading,
+    thetas,
+    ray_length=5.0,
+    ax=None,
+):
+    """
+    Plot rays from rectangle centroid at evaderHeading ± theta.
+
+    Parameters
+    ----------
+    box_min : array-like, shape (2,)
+        Rectangle minimum corner [xmin, ymin]
+    box_max : array-like, shape (2,)
+        Rectangle maximum corner [xmax, ymax]
+    evaderHeading : float
+        Heading angle (rad)
+    thetas : float or iterable
+        Offset angle(s) (rad)
+    ray_length : float
+        Length of rays
+    ax : matplotlib axis (optional)
+    """
+
+    box_min = np.asarray(box_min)
+    box_max = np.asarray(box_max)
+
+    # --- centroid ---
+    centroid = 0.5 * (box_min + box_max)
+
+    # --- prepare axis ---
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(5, 5))
+
+    # --- draw centroid ---
+    ax.plot(centroid[0], centroid[1], "ko", label="Centroid")
+
+    # --- normalize thetas ---
+    if np.isscalar(thetas):
+        thetas = [thetas]
+
+    # --- draw rays ---
+    for theta in thetas:
+        for sign in [+1, -1]:
+            ang = evaderHeading + sign * theta
+            end = centroid + ray_length * np.array([np.cos(ang), np.sin(ang)])
+
+            ax.plot(
+                [centroid[0], end[0]],
+                [centroid[1], end[1]],
+                "--",
+                linewidth=2,
+                label=rf"$\psi_e \pm {theta:.2f}$",
+            )
+
+    # --- formatting ---
+    ax.set_aspect("equal")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(True)
+
+    return ax
+
+
 def main():
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.2
-    evaderHeading = np.deg2rad(45.0)
+    evaderHeading = np.deg2rad(0.0)
     evaderSpeed = 1.0
-    min_box = np.array([-1.0, -1.0])
-    max_box = np.array([2.0, 1.0])
+    min_box = np.array([0.0, -1.0])
+    max_box = np.array([1.0, 1.0])
     point = np.array([-2.0, 2.0])
-    point = np.array([-3, 0.6])
-    # dmcValTest, dmcValTest2 = rect_dmc_val_solve(
-    #     point,
-    #     evaderHeading,
-    #     evaderSpeed,
-    #     min_box,
-    #     max_box,
-    #     pursuerRange,
-    #     pursuerCaptureRadius,
-    #     pursuerSpeed,
-    # )
-    # print(
-    #     "DMC Value at point ",
-    #     point,
-    #     " is ",
-    #     dmcValTest,
-    #     "in degrees:",
-    #     np.rad2deg(dmcValTest),
-    # )
-    # print("DMC Value 2:", dmcValTest2, "in degrees:", np.rad2deg(dmcValTest2))
-    # test jax solve
-    jaxDmc = rect_dmc_val_solve_jax(
+    point = np.array([1.6, 1.9])
+    dmcValJax = rect_dmc_val_solve_jax(
+        point,
+        evaderHeading,
+        evaderSpeed,
+        min_box,
+        max_box,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+    ).flatten()
+    print(
+        "JAX DMC Value at point ",
+        point,
+        " is ",
+        dmcValJax,
+        "in degrees:",
+        np.rad2deg(dmcValJax),
+    )
+
+    dmcValTest, dmcValTest2 = rect_dmc_val_solve(
         point,
         evaderHeading,
         evaderSpeed,
@@ -623,14 +722,16 @@ def main():
         pursuerSpeed,
     )
     print(
-        "JAX DMC Value at point ",
+        "DMC Value at point ",
         point,
         " is ",
-        jaxDmc,
+        dmcValTest,
         "in degrees:",
-        np.rad2deg(jaxDmc),
+        np.rad2deg(dmcValTest),
     )
-
+    print("DMC Value 2:", dmcValTest2, "in degrees:", np.rad2deg(dmcValTest2))
+    # dmcVals = np.array(dmcVal)
+    # dmcVals = np.deg2rad([90])
     dmcVals = np.array([dmcValTest, dmcValTest2])
 
     fig, ax = plt.subplots(figsize=(4, 4), layout="constrained")
@@ -651,34 +752,34 @@ def main():
     # Optional: force ticks at your discrete DMC values
     cbar.set_ticks(dmcVals)
     cbar.set_ticklabels([f"{v:.2f}" for v in dmcVals])
-    # rectangle_bez.plot_box_pursuer_reachable_region(
-    #     min_box,
-    #     max_box,
-    #     pursuerRange,
-    #     pursuerCaptureRadius,
-    #     ax,
-    #     color="red",
-    #     linestyle="--",
-    # )
-    # rectangle_bez.plot_box_pursuer_reachable_region(
-    #     min_box,
-    #     max_box,
-    #     pursuerRange,
-    #     0.0,
-    #     ax,
-    #     color="red",
-    #     linestyle=":",
-    # )
-    # rectangle_bez.plot_box_pursuer_reachable_region(
-    #     min_box,
-    #     max_box,
-    #     (1 - (evaderSpeed / pursuerSpeed)) * pursuerRange + pursuerCaptureRadius,
-    #     0.0,
-    #     ax,
-    #     color="red",
-    #     fill=True,
-    #     alpha=0.2,
-    # )
+    rectangle_bez.plot_box_pursuer_reachable_region(
+        min_box,
+        max_box,
+        pursuerRange,
+        pursuerCaptureRadius,
+        ax,
+        color="red",
+        linestyle="--",
+    )
+    rectangle_bez.plot_box_pursuer_reachable_region(
+        min_box,
+        max_box,
+        pursuerRange,
+        0.0,
+        ax,
+        color="red",
+        linestyle=":",
+    )
+    rectangle_bez.plot_box_pursuer_reachable_region(
+        min_box,
+        max_box,
+        (1 - (evaderSpeed / pursuerSpeed)) * pursuerRange + pursuerCaptureRadius,
+        0.0,
+        ax,
+        color="red",
+        fill=True,
+        alpha=0.2,
+    )
     rectangle_bez.plot_box_pursuer_engagement_zone(
         min_box,
         max_box,
@@ -735,30 +836,44 @@ def main():
             numPoints=numPoints,
         )
         # plot dmc for four corners of the box
-        pursuerPositions = np.array(
-            [
-                [min_box[0], min_box[1]],
-                [min_box[0], max_box[1]],
-                [max_box[0], min_box[1]],
-                [max_box[0], max_box[1]],
-            ]
-        )
-        for pursuerPosition in pursuerPositions:
-            dmc.plot_dmc(
-                evaderHeading,
-                evaderSpeed,
-                pursuerPosition,
-                pursuerSpeed,
-                pursuerRange,
-                pursuerCaptureRadius,
-                xlim=(-4, 4),
-                ylim=(-4, 4),
-                numPoints=numPoints,
-                levels=[dmcVal],
-                ax=ax,
-                color=colors[i],
-            )
+        # pursuerPositions = np.array(
+        #     [
+        #         [min_box[0], min_box[1]],
+        #         [min_box[0], max_box[1]],
+        #         [max_box[0], min_box[1]],
+        #         [max_box[0], max_box[1]],
+        #     ]
+        # )
+        # for pursuerPosition in pursuerPositions:
+        #     dmc.plot_dmc(
+        #         evaderHeading,
+        #         evaderSpeed,
+        #         pursuerPosition,
+        #         pursuerSpeed,
+        #         pursuerRange,
+        #         pursuerCaptureRadius,
+        #         xlim=(-4, 4),
+        #         ylim=(-4, 4),
+        #         numPoints=numPoints,
+        #         levels=[dmcVal],
+        #         ax=ax,
+        #         color=colors[i],
+        #     )
 
+        plot_dmc_rect_solve(
+            min_box,
+            max_box,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            evaderHeading,
+            evaderSpeed,
+            dmcVal,
+            xlim=(-4, 4),
+            ylim=(-4, 4),
+            ax=ax,
+            color=colors[i],
+        )
     ax.set_aspect("equal")
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
@@ -770,7 +885,7 @@ def test():
     pursuerCaptureRadius = 0.2
     evaderHeading = np.deg2rad(45.0)
     evaderSpeed = 1.0
-    min_box = np.array([-1.0, -1.0])
+    min_box = np.array([0.0, -1.0])
     max_box = np.array([2.0, 1.0])
     dmcVal = np.deg2rad(10)
 
@@ -802,7 +917,7 @@ def test():
 
 
 if __name__ == "__main__":
-    main_solve()
-    # main()
+    # main_solve()
+    main()
     # test()
     plt.show()

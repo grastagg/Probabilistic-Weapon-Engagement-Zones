@@ -1061,7 +1061,7 @@ def animate_spline_path():
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
 
     velocity_constraints = (agentSpeed - 0.001, agentSpeed + 0.001)
-    detSpline = csbez_path_planner.optimize_spline_path(
+    spline = csbez_path_planner.optimize_spline_path(
         startingLocation,
         endingLocation,
         initialVelocity,
@@ -1080,36 +1080,36 @@ def animate_spline_path():
         pursuerTurnRadius,
         agentSpeed,
     )
-    spline = optimize_spline_path(
-        startingLocation,
-        endingLocation,
-        initialVelocity,
-        numControlPoints,
-        splineOrder,
-        velocity_constraints,
-        turn_rate_constraints,
-        curvature_constraints,
-        num_constraint_samples,
-        pez_limit,
-        pursuerPosition,
-        pursuerPositionCov,
-        pursuerHeading,
-        pursuerHeadingVar,
-        pursuerRange,
-        pursuerRangeVar,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        pursuerTurnRadius,
-        pursuerTurnRadiusVar,
-        agentSpeed,
-        detSpline.c.flatten(),
-        detSpline.t[-detSpline.k - 1],
-        linearPez=False,
-        quadraticPez=False,
-        neuralNetworkPez=True,
-    )
-
+    # spline = optimize_spline_path(
+    #     startingLocation,
+    #     endingLocation,
+    #     initialVelocity,
+    #     numControlPoints,
+    #     splineOrder,
+    #     velocity_constraints,
+    #     turn_rate_constraints,
+    #     curvature_constraints,
+    #     num_constraint_samples,
+    #     pez_limit,
+    #     pursuerPosition,
+    #     pursuerPositionCov,
+    #     pursuerHeading,
+    #     pursuerHeadingVar,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     pursuerCaptureRadius,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     pursuerTurnRadius,
+    #     pursuerTurnRadiusVar,
+    #     agentSpeed,
+    #     detSpline.c.flatten(),
+    #     detSpline.t[-detSpline.k - 1],
+    #     linearPez=False,
+    #     quadraticPez=False,
+    #     neuralNetworkPez=True,
+    # )
+    #
     currentTime = 0
     dt = 0.1
     finalTime = spline.t[-1 - spline.k]
@@ -1190,5 +1190,5 @@ def animate_spline_path():
 
 
 if __name__ == "__main__":
-    # animate_spline_path()
-    main()
+    animate_spline_path()
+    # main()
