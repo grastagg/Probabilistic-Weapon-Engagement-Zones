@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import matplotlib
 import jax
 
+# use agg
+matplotlib.use("Agg")
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -23,6 +25,7 @@ import CSPEZ.csbez_plotting as csbez_plotting
 # import pez_path_planner
 import PEZ.pez_path_planner as pez_path_planner
 import PEZ.pez_plotting as pez_plotting
+import PLOT_COMMON.draw_mahalanobis as draw_mahalanobis
 
 import bspline.spline_opt_tools as spline_opt_tools
 
@@ -59,26 +62,27 @@ def plot_spline(
     agentHeadings = np.arctan2(yDot, xDot)
 
     pos = spline(t)
-    ez = csbez.in_dubins_engagement_zone(
-        pursuerPosition,
-        pursuerHeading,
-        pursuerTurnRadius,
-        pursuerCaptureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        pos,
-        agentHeadings,
-        agentSpeed,
-    )
-
-    c = ax.scatter(x, y, c=ez, s=4)
-    cbar = plt.colorbar(c, shrink=0.8)
-    cbar.ax.tick_params(labelsize=26)
+    # ez = csbez.in_dubins_engagement_zone(
+    #     pursuerPosition,
+    #     pursuerHeading,
+    #     pursuerTurnRadius,
+    #     pursuerCaptureRadius,
+    #     pursuerRange,
+    #     pursuerSpeed,
+    #     pos,
+    #     agentHeadings,
+    #     agentSpeed,
+    # )
+    #
+    ax.plot(x, y, c="blue", linewidth=2)
+    # c = ax.scatter(x, y, c=ez, s=4)
+    # cbar = plt.colorbar(c, shrink=0.8)
+    # cbar.ax.tick_params(labelsize=26)
 
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
-    plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r")
-    ax.add_artist(c)
+    # plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r")
+    # ax.add_artist(c)
     plt.xlabel("X")
     plt.ylabel("Y")
 
@@ -369,20 +373,20 @@ def optimize_spline_path(
         upper=velocity_constraints[1],
         scale=1.0 / velocity_constraints[1],
     )
-    optProb.addConGroup(
-        "turn_rate",
-        num_constraint_samples,
-        lower=turn_rate_constraints[0],
-        upper=turn_rate_constraints[1],
-        scale=1.0 / turn_rate_constraints[1],
-    )
-    optProb.addConGroup(
-        "curvature",
-        num_constraint_samples,
-        lower=curvature_constraints[0],
-        upper=curvature_constraints[1],
-        scale=1.0 / curvature_constraints[1],
-    )
+    # optProb.addConGroup(
+    #     "turn_rate",
+    #     num_constraint_samples,
+    #     lower=turn_rate_constraints[0],
+    #     upper=turn_rate_constraints[1],
+    #     scale=1.0 / turn_rate_constraints[1],
+    # )
+    # optProb.addConGroup(
+    #     "curvature",
+    #     num_constraint_samples,
+    #     lower=curvature_constraints[0],
+    #     upper=curvature_constraints[1],
+    #     scale=1.0 / curvature_constraints[1],
+    # )
     optProb.addConGroup("ez", num_constraint_samples, lower=0.0, upper=None)
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
     optProb.addConGroup("end", 2, lower=pf, upper=pf)
@@ -390,7 +394,8 @@ def optimize_spline_path(
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 0
+    print("TEST")
+    opt.options["print_level"] = 5
     opt.options["max_iter"] = 500
     username = getpass.getuser()
     opt.options["hsllib"] = (
@@ -544,5 +549,109 @@ def main():
     plt.show()
 
 
+def animate_spline_path():
+    pursuerPosition = np.array([0.0, 0.0])
+    pursuerHeading = (-15.0 / 20.0) * np.pi
+
+    startingLocation = np.array([-2.0, -2.0])
+    endingLocation = np.array([2.0, 2.0])
+    initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
+    initialVelocity = endingLocation - startingLocation
+
+    numControlPoints = 20
+    splineOrder = 3
+    turn_rate_constraints = (-1.0, 1.0)
+    curvature_constraints = (-0.2, 0.2)
+    num_constraint_samples = 50
+
+    pursuerRange = 1.0
+    # pursuerRangeVar = 0.1
+    pursuerCaptureRadius = 0.0
+    pursuerSpeed = 2.0
+    pursuerTurnRadius = 0.2
+    agentSpeed = 1
+
+    initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
+
+    velocity_constraints = (agentSpeed - 0.001, agentSpeed + 0.001)
+    spline = optimize_spline_path(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        0.0,
+        pursuerPosition,
+        pursuerHeading,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        pursuerTurnRadius,
+        agentSpeed,
+    )
+
+    currentTime = 0
+    dt = 0.05
+    finalTime = spline.t[-1 - spline.k]
+    ind = 0
+    while currentTime < finalTime:
+        fig, ax = plt.subplots()
+        pdot = spline.derivative(1)(currentTime)
+        currentPosition = spline(currentTime)
+        currentHeading = np.arctan2(pdot[1], pdot[0])
+
+        plot_spline(
+            spline,
+            pursuerPosition,
+            pursuerHeading,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            pursuerTurnRadius,
+            agentSpeed,
+            ax,
+        )
+        csbez_plotting.plot_dubins_EZ(
+            pursuerPosition,
+            pursuerHeading,
+            pursuerSpeed,
+            pursuerTurnRadius,
+            0.0,
+            pursuerRange,
+            currentHeading,
+            agentSpeed,
+            ax,
+            alpha=1.0,
+        )
+        plt.arrow(
+            currentPosition[0],
+            currentPosition[1],
+            1e-6 * np.cos(currentHeading),  # essentially zero-length tail
+            1e-6 * np.sin(currentHeading),
+            head_width=0.15,
+            head_length=0.15,
+            width=0,  # no line
+            fc="blue",
+            ec="blue",
+            zorder=5,
+        )
+        ax.set_xlim(-2.5, 2.5)
+        ax.set_ylim(-2.5, 2.5)
+        plt.xticks([])
+        plt.yticks([])
+        plt.xlabel("")
+        plt.ylabel("")
+
+        fig.savefig(f"video/{ind}.png", dpi=300)
+        ind += 1
+        currentTime += dt
+        plt.close(fig)
+
+
 if __name__ == "__main__":
-    main()
+    animate_spline_path()
+    # main()
