@@ -274,13 +274,42 @@ def area_objective_function_trajectory(
     deltas = pos[1:] - pos[:-1]
     ds = jnp.linalg.norm(deltas, axis=1)
     ds = jnp.concatenate([ds, ds[-1:]])  # (K,)
+    tf = knotPoints[-3 - 1]
+    vel = spline_opt_tools.get_spline_velocity(
+        controlPoints.flatten(), tf, 3, numSamplesPerInterval
+    )
+    dt = ds / vel
 
     # Hazard per step and survival weighting
-    h = hazard_from_reach(p_reach, ds, alpha=alpha)  # (K,)
+    h = hazard_from_reach(p_reach, dt, alpha=alpha)  # (K,)
     S_prev = survival_prefix(h)  # (K,)
 
     expected_gain = jnp.sum(S_prev * h * areaDiffs)
-    return -expected_gain
+
+    #     jax.debug.print(
+    #         """
+    # --- AREA OBJECTIVE DEBUG ---
+    # oldArea        = {oldArea}
+    # ΔM min / max   = {dmin} / {dmax}
+    # p_reach min/max= {prmin} / {prmax}
+    # hazard min/max = {hmin} / {hmax}
+    # S_prev(end)    = {Send}
+    # expected_gain  = {J}
+    # """,
+    #         oldArea=oldArea,
+    #         dmin=jnp.min(areaDiffs),
+    #         dmax=jnp.max(areaDiffs),
+    #         prmin=jnp.min(p_reach),
+    #         prmax=jnp.max(p_reach),
+    #         hmin=jnp.min(h),
+    #         hmax=jnp.max(h),
+    #         Send=S_prev[-1],
+    #         J=expected_gain,
+    #     )
+    return -100 * expected_gain
+
+
+dAreaObjectiveDControlPoints = jax.jit(jax.jacfwd(area_objective_function_trajectory))
 
 
 @jax.jit
@@ -317,7 +346,6 @@ def optimize_spline_path(
     velocity_constraints,
     turn_rate_constraints,
     curvature_constraints,
-    num_constraint_samples,
     sacraficialAgentSpeed,
     pursuerRange,
     pursuerCaptureRadius,
@@ -386,8 +414,21 @@ def optimize_spline_path(
             controlPoints, tf, 3, numSamplesPerInterval
         )
 
+        dAreaObjectiveDControlPointsVal = dAreaObjectiveDControlPoints(
+            controlPoints,
+            knotPoints,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pastInterseptionLocations,
+            pastRadaii,
+            dArea,
+            integrationPoints,
+            launchPdf,
+            alpha=1.0,
+        )
+
         funcsSens["obj"] = {
-            "control_points": np.zeros((1, 2 * num_cont_points)),
+            "control_points": dAreaObjectiveDControlPointsVal,
         }
         funcsSens["start"] = {
             "control_points": dStartDControlPointsVal,
@@ -456,14 +497,15 @@ def optimize_spline_path(
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
-    # opt.options["derivative_test"] = "first-order"
+    opt.options["derivative_test"] = "first-order"
     # opt.options["warm_start_init_point"] = "yes"
     # opt.options["mu_init"] = 1e-1
     # opt.options["nlp_scaling_method"] = "gradient-based"
     opt.options["tol"] = 1e-8
 
-    sol = opt(optProb, sens="FD")
-    # sol = opt(optProb, sens=sens)
+    # sol = opt(optProb, sens="FD")
+    sol = opt(optProb, sens=sens)
+    print(sol)
 
     controlPoints = sol.xStar["control_points"].reshape((num_cont_points, 2))
 
@@ -471,47 +513,87 @@ def optimize_spline_path(
     return create_spline(knotPoints, controlPoints, spline_order)
 
 
+@jax.jit
+def expected_position_from_pdf(integrationPoints, launchPdf, dArea, eps=1e-12):
+    """
+    integrationPoints: (M,2)
+    launchPdf: (M,)    values of a PDF at integrationPoints
+    dArea: scalar      area per grid cell
+    Returns:
+        mu: (2,) expected position
+        Z:  scalar normalization check (≈1 if already normalized)
+    """
+    Z = jnp.sum(launchPdf) * dArea
+    w = launchPdf / (
+        Z + eps
+    )  # normalized weights per point (still need dArea in expectation)
+    mu = jnp.sum(integrationPoints * w[:, None], axis=0) * dArea
+    return mu, Z
+
+
 def plot_area_objective_function(interceptionPositions, oldRadii, fig, ax):
     x_range = [-5.0, 5.0]
     y_range = [-5.0, 5.0]
     num_pts = 50
+
     pursuerRange = 1.0
     pursuerCaptureRadius = 0.2
+    R_eff = pursuerRange + pursuerCaptureRadius
 
     x = jnp.linspace(x_range[0], x_range[1], num_pts)
     y = jnp.linspace(y_range[0], y_range[1], num_pts)
     X, Y = jnp.meshgrid(x, y)
 
+    # Use the same grid as both eval_points and integration_points
     points = jnp.stack([X.flatten(), Y.flatten()], axis=-1)  # (M,2)
 
     dx = (x_range[1] - x_range[0]) / (num_pts - 1)
     dy = (y_range[1] - y_range[0]) / (num_pts - 1)
     dArea = dx * dy
 
-    R_eff = pursuerRange + pursuerCaptureRadius
-
-    # Old feasible mask / area in the same grid where you'll evaluate the objective
-    old_mask = old_feasible_mask(points, interceptionPositions, oldRadii)
+    # ---- Old feasible set (for launch locations) ----
+    old_mask = old_feasible_mask(points, interceptionPositions, oldRadii)  # (M,) bool
     oldArea = area_from_mask(old_mask, dArea)
 
-    # Evaluate ΔM(x) = oldArea - newArea(x) at every grid point x
-    # Here the "new circle" radius is R_eff (consistent with your trajectory objective)
+    # Uniform launchPdf over the feasible set (normalized so sum(pdf)*dArea = 1)
+    launchPdf_unnorm = old_mask.astype(points.dtype)  # 1 inside feasible, 0 outside
+    Z = jnp.sum(launchPdf_unnorm) * dArea
+    launchPdf = jnp.where(Z > 0, launchPdf_unnorm / Z, launchPdf_unnorm)  # (M,)
+
+    # ---- ΔM(x): area removed if a kill occurs at x ----
     areaDiff = area_diff_from_oldmask(
-        points,  # treat each grid point as a candidate new interception location
+        points,  # candidate kill locations (M,2)
         R_eff,
-        points,  # integration points (same grid)
+        points,  # integration points (M,2)
         old_mask,
         oldArea,
         dArea,
     )  # (M,)
 
-    # If you want to plot the objective you minimize (negative expected gain proxy):
-    obj = -areaDiff  # (M,)
+    # ---- p_reach(x): probability reachable from launchPdf ----
+    # p_reach(x) = ∫ 1(||L-x|| <= R_eff) * launchPdf(L) dL
+    p_reach = pez_from_interceptions.prob_reach_numerical(
+        points,  # eval_points (M,2)
+        points,  # integration_points (M,2)
+        launchPdf,  # pdf_vals (M,)
+        R_eff,
+        dArea,
+    )  # (M,)
+
+    # ---- "Trajectory-like" per-point objective proxy ----
+    # In the trajectory objective you use S_prev * h * ΔM. For a static plot, a good proxy is:
+    # score(x) = ΔM(x) * p_reach(x)
+    score = areaDiff * p_reach
+
+    # Plot the objective you'd MINIMIZE (negative score)
+    obj = -score
+
+    ax.set_aspect("equal")
 
     c = ax.pcolormesh(X, Y, obj.reshape((num_pts, num_pts)))
     ax.scatter(interceptionPositions[:, 0], interceptionPositions[:, 1], color="red")
 
-    plt.colorbar(c, ax=ax, label="-ΔArea (lower is better)")
+    plt.colorbar(c, ax=ax, label="-(ΔArea · p_reach)  (lower is better)")
 
 
 def main():
@@ -542,27 +624,40 @@ def main_planner():
     dArea = (x_range[1] - x_range[0]) / num_pts * (y_range[1] - y_range[0]) / num_pts
 
     interceptionPositions = jnp.array([[0.0, 0.0], [0.5, 0.5]])
-    interceptionPositions = jnp.array([[0.0, 0.0]])
+    # interceptionPositions = jnp.array([[-1.0, 0.0]])
     oldRadii = jnp.array(
         [pursuerRange + pursuerCaptureRadius, pursuerRange + pursuerCaptureRadius]
     )
-    oldRadii = jnp.array([pursuerRange + pursuerCaptureRadius])
+    # oldRadii = jnp.array([pursuerRange + pursuerCaptureRadius])
 
     launchPdf = pez_from_interceptions.uniform_pdf_from_interception_points(
         points, interceptionPositions, pursuerRange, pursuerCaptureRadius, dArea
     )
 
-    sacraficialLaunchPosition = np.array([-2.0, -2.0])
-    initialGoal = np.array([0.0, 0.0])
-    initialSacraficialVelocity = np.array([1.0, 0.0])
-    pursuerCaptureRadius = 0.0
+    expected_launch_pos, Z = expected_position_from_pdf(points, launchPdf, dArea)
+    print("Expected launch position:", expected_launch_pos, "Z=", Z)
+
+    sacraficialRange = 10.0
+
+    sacraficialLaunchPosition = np.array([-4.0, -4.0])
+    initialGoal = expected_launch_pos
+    direction = initialGoal - sacraficialLaunchPosition
     sacraficialSpeed = 1.0
+    initialSacraficialVelocity = (
+        direction / np.linalg.norm(direction)
+    ) * sacraficialSpeed
+
+    initialGoal = (
+        direction / np.linalg.norm(direction) * sacraficialRange * 0.5
+        + sacraficialLaunchPosition
+    )
+
+    pursuerCaptureRadius = 0.0
     num_cont_points = 8
     spline_order = 3
     velocity_constraints = (0.0, sacraficialSpeed)
     curvature_constraints = (-0.5, 0.5)
     turn_rate_constraints = (-1.0, 1.0)
-    num_constraint_samples = 50
 
     spline = optimize_spline_path(
         sacraficialLaunchPosition,
@@ -573,7 +668,6 @@ def main_planner():
         velocity_constraints,
         turn_rate_constraints,
         curvature_constraints,
-        num_constraint_samples,
         sacraficialSpeed,
         pursuerRange,
         pursuerCaptureRadius,
@@ -582,7 +676,7 @@ def main_planner():
         dArea,
         points,
         launchPdf,
-        sacraficialAgentRange=10,
+        sacraficialAgentRange=sacraficialRange,
     )
     fig, ax = plt.subplots()
     plot_area_objective_function(interceptionPositions, oldRadii, fig, ax)
