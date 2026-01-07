@@ -9,6 +9,8 @@ from bspline.matrix_evaluation import (
     matrix_bspline_derivative_evaluation_for_dataset,
 )
 
+_VEL_FLOOR = 1e-8
+
 
 def evaluate_spline(controlPoints, knotPoints, numSamplesPerInterval):
     knotPoints = knotPoints.reshape((-1,))
@@ -64,7 +66,8 @@ def get_spline_turn_rate(controlPoints, tf, splineOrder, numSamplesPerInterval):
         controlPoints, knotPoints, splineOrder, 2, numSamplesPerInterval
     )
     v = jnp.linalg.norm(out_d1, axis=1)
-    u = jnp.cross(out_d1, out_d2) / (v**2)
+    v_safe = jnp.maximum(v, _VEL_FLOOR)
+    u = jnp.cross(out_d1, out_d2) / (v_safe**2)
     return u
 
 
@@ -80,8 +83,9 @@ def get_spline_curvature(controlPoints, tf, splineOrder, numSamplesPerInterval):
         controlPoints, knotPoints, splineOrder, 2, numSamplesPerInterval
     )
     v = jnp.linalg.norm(out_d1, axis=1)
-    u = jnp.cross(out_d1, out_d2) / (v**2)
-    return u / v
+    v_safe = jnp.maximum(v, _VEL_FLOOR)
+    u = jnp.cross(out_d1, out_d2) / (v_safe**2)
+    return u / v_safe
 
 
 @partial(jit, static_argnums=(2, 3))
@@ -143,7 +147,8 @@ def get_turn_rate_velocity_and_headings(
         controlPoints, knotPoints, 3, 2, numSamplesPerInterval
     )
     v = jnp.linalg.norm(out_d1, axis=1)
-    u = jnp.cross(out_d1, out_d2) / (v**2)
+    v_safe = jnp.maximum(v, _VEL_FLOOR)
+    u = jnp.cross(out_d1, out_d2) / (v_safe**2)
     heading = jnp.arctan2(out_d1[:, 1], out_d1[:, 0])
     return u, v, heading
 

@@ -11,6 +11,7 @@ import getpass
 import matplotlib.pyplot as plt
 import matplotlib
 import jax
+import os
 
 
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -48,6 +49,133 @@ def plot_spline(spline, ax, width=1):
     ax.set_aspect(1)
     plt.xlabel("X")
     plt.ylabel("Y")
+
+
+def _sigmoid(x):
+    return jax.nn.sigmoid(x)
+
+
+@jax.jit
+def _soft_inside_disc_weights(points, centers, radii, eps):
+    """
+    Smooth approximation of the intersection indicator of discs:
+      1(dist(p, c_i) <= r_i)  ->  sigmoid((r_i - dist)/eps)
+    Returns weights in (0,1] of shape (M,).
+    """
+    if centers.shape[0] == 0:
+        return jnp.ones((points.shape[0],), dtype=points.dtype)
+    diff = points[:, None, :] - centers[None, :, :]  # (M,N,2)
+    dists = jnp.linalg.norm(diff, axis=-1)  # (M,N)
+    soft = _sigmoid((radii[None, :] - dists) / eps)  # (M,N)
+    return jnp.prod(soft, axis=1)  # (M,)
+
+
+def _make_soft_objective(
+    knotPoints,
+    num_cont_points,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pastInterseptionLocations,
+    pastRadaii,
+    dArea,
+    integrationPoints,
+    launchPdf,
+    *,
+    alpha=1.0,
+    eps=0.1,
+    ds_floor=1e-6,
+    gain_weight=1.0,
+    smoothness_weight=1e-3,
+    debug=False,
+):
+    """
+    Builds a JAX-jittable objective function of only the flattened control points.
+    """
+    knotPoints = jnp.asarray(knotPoints)
+    integrationPoints = jnp.asarray(integrationPoints)
+    launchPdf = jnp.asarray(launchPdf)
+    pastInterseptionLocations = jnp.asarray(pastInterseptionLocations)
+    pastRadaii = jnp.asarray(pastRadaii)
+    dArea = jnp.asarray(dArea)
+
+    R_eff = jnp.asarray(pursuerRange + pursuerCaptureRadius)
+
+    @jax.jit
+    def obj(controlPointsFlat):
+        controlPoints = controlPointsFlat.reshape((num_cont_points, 2))
+
+        pos = spline_opt_tools.evaluate_spline(
+            controlPoints, knotPoints, numSamplesPerInterval
+        )  # (K,2)
+
+        old_w = _soft_inside_disc_weights(
+            integrationPoints, pastInterseptionLocations, pastRadaii, eps
+        )  # (M,)
+        oldArea = jnp.sum(old_w) * dArea
+
+        def new_area_for_pos(p):
+            d = jnp.linalg.norm(integrationPoints - p[None, :], axis=1)  # (M,)
+            w_new = _sigmoid((R_eff - d) / eps)  # (M,)
+            return jnp.sum(old_w * w_new) * dArea
+
+        newAreas = jax.vmap(new_area_for_pos)(pos)  # (K,)
+        areaDiffs = oldArea - newAreas  # (K,)
+
+        def p_reach_for_pos(p):
+            d = jnp.linalg.norm(integrationPoints - p[None, :], axis=1)  # (M,)
+            w = _sigmoid((R_eff - d) / eps)  # (M,)
+            return jnp.sum(w * launchPdf) * dArea
+
+        p_reach = jax.vmap(p_reach_for_pos)(pos)  # (K,)
+
+        deltas = pos[1:] - pos[:-1]
+        ds = jnp.linalg.norm(deltas, axis=1)
+        ds = jnp.concatenate([ds, ds[-1:]])  # (K,)
+        ds = jnp.maximum(ds, ds_floor)
+
+        h = hazard_from_reach(p_reach, ds, alpha=alpha)  # (K,)
+        S_prev = survival_prefix(h)  # (K,)
+        expected_gain = jnp.sum(S_prev * h * areaDiffs)
+
+        dd = controlPoints[2:] - 2.0 * controlPoints[1:-1] + controlPoints[:-2]
+        smoothness = jnp.sum(dd * dd)
+
+        val = gain_weight * (-expected_gain) + smoothness_weight * smoothness
+
+        finite = (
+            jnp.isfinite(val)
+            & jnp.all(jnp.isfinite(pos))
+            & jnp.all(jnp.isfinite(areaDiffs))
+            & jnp.all(jnp.isfinite(p_reach))
+            & jnp.all(jnp.isfinite(ds))
+            & jnp.all(jnp.isfinite(h))
+        )
+        val = jax.lax.cond(
+            finite, lambda _: val, lambda _: 1e9 + smoothness, operand=None
+        )
+
+        if debug:
+            jax.debug.print(
+                "obj={obj} gain={gain} smooth={smooth} oldArea={oldArea} "
+                "ΔA[min,max]=({dmin},{dmax}) p[min,max]=({pmin},{pmax}) "
+                "ds[min,max]=({dsmin},{dsmax}) h[min,max]=({hmin},{hmax})",
+                obj=val,
+                gain=expected_gain,
+                smooth=smoothness,
+                oldArea=oldArea,
+                dmin=jnp.min(areaDiffs),
+                dmax=jnp.max(areaDiffs),
+                pmin=jnp.min(p_reach),
+                pmax=jnp.max(p_reach),
+                dsmin=jnp.min(ds),
+                dsmax=jnp.max(ds),
+                hmin=jnp.min(h),
+                hmax=jnp.max(h),
+            )
+
+        return val
+
+    return obj
 
 
 @jax.jit
@@ -176,7 +304,6 @@ def area_objective_function_trajectory(
     deltas = pos[1:] - pos[:-1]
     ds = jnp.linalg.norm(deltas, axis=1)
     ds = jnp.concatenate([ds, ds[-1:]])  # (K,)
-    tf = knotPoints[-3 - 1]
     # Hazard per step and survival weighting
     h = hazard_from_reach(p_reach, ds, alpha=alpha)  # (K,)
     S_prev = survival_prefix(h)  # (K,)
@@ -206,90 +333,6 @@ def area_objective_function_trajectory(
     return -expected_gain
 
 
-# @jax.jit
-# def area_objective_function_trajectory(
-#     controlPoints,
-#     knotPoints,
-#     pursuerRange,
-#     pursuerCaptureRadius,
-#     pastInterseptionLocations,
-#     pastRadaii,
-#     dArea,
-#     integrationPoints,
-#     launchPdf,
-#     alpha=1.0,
-#     numSamplesPerInterval=10,
-#     splineDegree=3,
-#     speed_floor=1e-3,
-# ):
-#     """
-#     Time-based hazard version of your objective.
-#
-#     Key changes vs your current code:
-#     - Uses dt = ds / speed (time exposure), not ds directly.
-#     - Computes hazard on *segments* (K-1), not padded nodes.
-#     - Uses segment-averaged p_reach and areaDiff for consistent discretization.
-#     - Clamps speed away from 0 for stability with IPOPT.
-#     """
-#     controlPoints = controlPoints.reshape((-1, 2))
-#
-#     # (K,2) sampled trajectory positions (candidate kill points)
-#     pos = spline_opt_tools.evaluate_spline(
-#         controlPoints, knotPoints, numSamplesPerInterval
-#     )
-#
-#     # Effective radius
-#     R_eff = pursuerRange + pursuerCaptureRadius
-#
-#     # Precompute old feasible launch-region mask and area
-#     old_mask = old_feasible_mask(
-#         integrationPoints, pastInterseptionLocations, pastRadaii
-#     )
-#     oldArea = area_from_mask(old_mask, dArea)
-#
-#     # ΔM_k at nodes: (K,)
-#     areaDiffs = area_diff_from_oldmask(
-#         pos, R_eff, integrationPoints, old_mask, oldArea, dArea
-#     )
-#
-#     # Reach probability at nodes: (K,)
-#     p_reach = pez_from_interceptions.prob_reach_numerical(
-#         pos, integrationPoints, launchPdf, R_eff, dArea
-#     )
-#
-#     # --- Segment geometry: ds and dt are (K-1,) ---
-#     deltas = pos[1:] - pos[:-1]
-#     ds = jnp.linalg.norm(deltas, axis=1)  # (K-1,)
-#
-#     # Spline speed at nodes (K,). (Your existing approach)
-#     tf = knotPoints[-(splineDegree + 1)]  # commonly -4 for degree=3
-#     speed_node = spline_opt_tools.get_spline_velocity(
-#         controlPoints.flatten(), tf, splineDegree, numSamplesPerInterval
-#     )
-#
-#     # Ensure we have scalar speed (K,)
-#
-#     # Segment speed via endpoint average: (K-1,)
-#     speed_seg = 0.5 * (speed_node[1:] + speed_node[:-1])
-#     speed_seg = jnp.maximum(speed_seg, speed_floor)
-#
-#     # Segment time increments: (K-1,)
-#     dt = ds / speed_seg
-#
-#     # Segment-averaged reach probability and gain: (K-1,)
-#     p_seg = 0.5 * (p_reach[1:] + p_reach[:-1])
-#     area_seg = 0.5 * (areaDiffs[1:] + areaDiffs[:-1])
-#
-#     # Time-based hazard per segment: (K-1,)
-#     h = 1.0 - jnp.exp(-alpha * p_seg * dt)
-#
-#     # Survival prefix on segments: S_prev[k] = Π_{i<k} (1 - h_i)
-#     S_prev = jnp.concatenate([jnp.ones((1,)), jnp.cumprod(1.0 - h[:-1])])
-#
-#     expected_gain = jnp.sum(S_prev * h * area_seg)
-#     return -expected_gain
-
-
 dAreaObjectiveDControlPoints = jax.jit(jax.jacfwd(area_objective_function_trajectory))
 
 
@@ -308,7 +351,7 @@ def compute_spline_constraints(
         )
     )
 
-    curvature = turn_rate / velocity
+    curvature = turn_rate / jnp.maximum(velocity, 1e-8)
 
     return velocity, turn_rate, curvature, pos, evaderHeadings
 
@@ -336,8 +379,23 @@ def optimize_spline_path(
     integrationPoints,
     launchPdf,
     sacraficialAgentRange=5.5,
+    *,
+    use_smooth_objective=True,
+    smooth_eps=None,
+    alpha=1.0,
+    gain_weight=0.1,
+    smoothness_weight=1e-2,
+    debug=None,
 ):
     # Compute Jacobian of engagement zone function
+
+    if debug is None:
+        debug = os.environ.get("SACRIFICIAL_DEBUG", "0") not in (
+            "0",
+            "",
+            "false",
+            "False",
+        )
 
     tf = sacraficialAgentRange / sacraficialAgentSpeed
 
@@ -345,19 +403,35 @@ def optimize_spline_path(
         0, tf, num_cont_points, 3
     )
 
-    def objfunc(xDict):
-        controlPoints = xDict["control_points"]
-        funcs = {}
-        funcs["start"] = spline_opt_tools.get_start_constraint(controlPoints)
-        controlPoints = controlPoints.reshape((num_cont_points, 2))
+    if velocity_constraints[0] <= 0.0:
+        v_floor = max(1e-3, 0.05 * float(velocity_constraints[1]))
+        velocity_constraints = (v_floor, float(velocity_constraints[1]))
 
-        velocity, turn_rate, curvature, pos, evaderHeading = compute_spline_constraints(
-            controlPoints,
+    if smooth_eps is None:
+        # Use a transition width comparable to grid spacing.
+        smooth_eps = 1.5 * float(np.sqrt(dArea))
+
+    if use_smooth_objective:
+        obj_jax = _make_soft_objective(
             knotPoints,
+            num_cont_points,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pastInterseptionLocations,
+            pastRadaii,
+            dArea,
+            integrationPoints,
+            launchPdf,
+            alpha=alpha,
+            eps=float(smooth_eps),
+            gain_weight=float(gain_weight),
+            smoothness_weight=float(smoothness_weight),
+            debug=bool(debug),
         )
-
-        expected_gain = area_objective_function_trajectory(
-            controlPoints,
+        dobj_jax = jax.jit(jax.jacfwd(obj_jax))
+    else:
+        obj_jax = lambda cp: area_objective_function_trajectory(
+            cp.reshape((num_cont_points, 2)),
             knotPoints,
             pursuerRange,
             pursuerCaptureRadius,
@@ -366,16 +440,51 @@ def optimize_spline_path(
             dArea,
             integrationPoints,
             launchPdf,
-            alpha=1.0,
+            alpha=float(alpha),
+        )
+        dobj_jax = jax.jit(jax.jacfwd(obj_jax))
+
+    eval_counter = {"n": 0}
+    debug_every = int(os.environ.get("SACRIFICIAL_DEBUG_EVERY", "20"))
+
+    def objfunc(xDict):
+        controlPoints = xDict["control_points"]
+        funcs = {}
+        funcs["start"] = spline_opt_tools.get_start_constraint(controlPoints)
+        controlPoints2 = controlPoints.reshape((num_cont_points, 2))
+
+        velocity, turn_rate, curvature, pos, evaderHeading = compute_spline_constraints(
+            controlPoints2,
+            knotPoints,
         )
 
-        funcs["obj"] = expected_gain
-        funcs["turn_rate"] = turn_rate
-        funcs["velocity"] = velocity
-        funcs["curvature"] = curvature
-        funcs["pos"] = pos
-        funcs["heading"] = evaderHeading
-        return funcs, False
+        obj_val = obj_jax(jnp.asarray(controlPoints))
+
+        funcs["obj"] = float(np.asarray(obj_val))
+        funcs["turn_rate"] = np.asarray(turn_rate)
+        funcs["velocity"] = np.asarray(velocity)
+        funcs["curvature"] = np.asarray(curvature)
+
+        if debug:
+            eval_counter["n"] += 1
+            if eval_counter["n"] % max(1, debug_every) == 0:
+                v = funcs["velocity"]
+                tr = funcs["turn_rate"]
+                k = funcs["curvature"]
+                print(
+                    f"[eval {eval_counter['n']}] obj={funcs['obj']:.6e} "
+                    f"v[min,max]=({v.min():.3e},{v.max():.3e}) "
+                    f"tr[min,max]=({tr.min():.3e},{tr.max():.3e}) "
+                    f"k[min,max]=({k.min():.3e},{k.max():.3e})"
+                )
+
+        fail = (
+            (not np.isfinite(funcs["obj"]))
+            or (not np.all(np.isfinite(funcs["turn_rate"])))
+            or (not np.all(np.isfinite(funcs["velocity"])))
+            or (not np.all(np.isfinite(funcs["curvature"])))
+        )
+        return funcs, fail
 
     def sens(xDict, funcs):
         funcsSens = {}
@@ -395,36 +504,28 @@ def optimize_spline_path(
             controlPoints, tf, 3, numSamplesPerInterval
         )
 
-        dAreaObjectiveDControlPointsVal = dAreaObjectiveDControlPoints(
-            controlPoints,
-            knotPoints,
-            pursuerRange,
-            pursuerCaptureRadius,
-            pastInterseptionLocations,
-            pastRadaii,
-            dArea,
-            integrationPoints,
-            launchPdf,
-            alpha=1.0,
-        )
+        dObjDControlPointsVal = dobj_jax(controlPoints)
 
-        funcsSens["obj"] = {
-            "control_points": dAreaObjectiveDControlPointsVal,
-        }
+        dObj = np.asarray(dObjDControlPointsVal)
+        dVel = np.asarray(dVelocityDControlPointsVal)
+        dTr = np.asarray(dTurnRateDControlPointsVal)
+        dCurv = np.asarray(dCurvatureDControlPointsVal)
+
+        funcsSens["obj"] = {"control_points": dObj}
         funcsSens["start"] = {
             "control_points": dStartDControlPointsVal,
         }
-        funcsSens["velocity"] = {
-            "control_points": dVelocityDControlPointsVal,
-        }
-        funcsSens["turn_rate"] = {
-            "control_points": dTurnRateDControlPointsVal,
-        }
-        funcsSens["curvature"] = {
-            "control_points": dCurvatureDControlPointsVal,
-        }
+        funcsSens["velocity"] = {"control_points": dVel}
+        funcsSens["turn_rate"] = {"control_points": dTr}
+        funcsSens["curvature"] = {"control_points": dCurv}
 
-        return funcsSens, False
+        fail = (
+            (not np.all(np.isfinite(dObj)))
+            or (not np.all(np.isfinite(dVel)))
+            or (not np.all(np.isfinite(dTr)))
+            or (not np.all(np.isfinite(dCurv)))
+        )
+        return funcsSens, fail
 
     # num_constraint_samples = numSamplesPerInterval*(num_cont_points-2)-2
 
@@ -473,16 +574,29 @@ def optimize_spline_path(
     opt = OPT("ipopt")
     opt.options["print_level"] = 5
     opt.options["max_iter"] = 1000
-    username = getpass.getuser()
-    opt.options["hsllib"] = (
-        "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
+    opt.options["hessian_approximation"] = "limited-memory"
+    opt.options["nlp_scaling_method"] = "gradient-based"
+    opt.options["acceptable_tol"] = float(
+        os.environ.get("IPOPT_ACCEPTABLE_TOL", "1e-4")
     )
-    opt.options["linear_solver"] = "ma97"
-    opt.options["derivative_test"] = "first-order"
+    opt.options["acceptable_constr_viol_tol"] = float(
+        os.environ.get("IPOPT_ACCEPTABLE_CONSTR_VIOL_TOL", "1e-6")
+    )
+    opt.options["acceptable_dual_inf_tol"] = float(
+        os.environ.get("IPOPT_ACCEPTABLE_DUAL_INF_TOL", "1e-3")
+    )
+    opt.options["acceptable_iter"] = int(os.environ.get("IPOPT_ACCEPTABLE_ITER", "10"))
+    opt.options["mu_strategy"] = "adaptive"
+    username = getpass.getuser()
+    hsllib = "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
+    if os.path.exists(hsllib):
+        opt.options["hsllib"] = hsllib
+        opt.options["linear_solver"] = "ma97"
+    else:
+        opt.options["linear_solver"] = "mumps"
     # opt.options["warm_start_init_point"] = "yes"
     # opt.options["mu_init"] = 1e-1
-    # opt.options["nlp_scaling_method"] = "gradient-based"
-    opt.options["tol"] = 1e-8
+    opt.options["tol"] = float(os.environ.get("IPOPT_TOL", "1e-6"))
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
@@ -621,7 +735,7 @@ def main_planner():
 
     sacraficialRange = 10.0
 
-    sacraficialLaunchPosition = np.array([-4.0, 0.0])
+    sacraficialLaunchPosition = np.array([-4.0, -4.0])
     initialGoal = expected_launch_pos
     direction = initialGoal - sacraficialLaunchPosition
     sacraficialSpeed = 1.0
