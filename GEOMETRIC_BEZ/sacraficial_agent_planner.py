@@ -50,103 +50,6 @@ def plot_spline(spline, ax, width=1):
     plt.ylabel("Y")
 
 
-# @jax.jit
-# def area_of_circle_intersections(centers, radii, points, dArea):
-#     dists_squared = jnp.square(points[:, None, :] - centers[None, :, :]).sum(axis=-1)
-#     in_all_circles = jnp.all(dists_squared <= radii[None, :] ** 2, axis=-1)
-#     area = jnp.sum(in_all_circles) * dArea
-#     return area
-#
-#
-# def area_diff_single(
-#     newInterseptionLocation,
-#     radius,
-#     pastInterseptionLocations,
-#     pastRadaii,
-#     dArea,
-#     integrationPoints,
-#     oldArea,
-# ):
-#     combinedCenters = jnp.vstack([pastInterseptionLocations, newInterseptionLocation])
-#     combinedRadii = jnp.hstack([pastRadaii, radius])
-#     newArea = area_of_circle_intersections(
-#         combinedCenters, combinedRadii, integrationPoints, dArea
-#     )
-#     # probReachable = pez_from_interceptions.prob_reach_numerical(
-#     #     jnp.array([newInterseptionLocation]),
-#     #     points,
-#     #     launchPdf,
-#     #     pursuerRange + pursuerCaptureRadius,
-#     #     dArea,
-#     # )[0]
-#
-#     return oldArea - newArea  # * probReachable
-#
-#
-# # vectorized version
-# area_diff = jax.jit(
-#     jax.vmap(
-#         area_diff_single,
-#         in_axes=(0, None, None, None, None, None, None),
-#     )
-# )
-#
-#
-# def hazard_from_reach(p_reach, ds, alpha=1.0):
-#     # small-hazard approximation (stable and simple)
-#     h = alpha * p_reach * ds
-#     return jnp.clip(h, 0.0, 1.0)
-#
-#
-# def area_objective_function_trajectory(
-#     controlPoints,
-#     knotPoints,
-#     pursuerRange,
-#     pursuerCaptureRadius,
-#     pastInterseptionLocations,
-#     pastRadaii,
-#     dArea,
-#     integrationPoints,
-#     oldArea,
-#     launchPdf,
-# ):
-#     controlPoints = controlPoints.reshape((-1, 2))
-#     pos = spline_opt_tools.evaluate_spline(
-#         controlPoints, knotPoints, numSamplesPerInterval
-#     )
-#     areaDiffs = area_diff(
-#         pos,
-#         pursuerRange + pursuerCaptureRadius,
-#         pastInterseptionLocations,
-#         pastRadaii,
-#         dArea,
-#         integrationPoints,
-#         oldArea,
-#     )
-#
-#     # Reach probability at each trajectory sample: (K,)
-#     p_reach = pez_from_interceptions.prob_reach_numerical(
-#         pos, integrationPoints, launchPdf, pursuerRange + pursuerCaptureRadius, dArea
-#     )
-#
-#     # Step length along path (K-1,), pad to (K,)
-#     deltas = pos[1:] - pos[:-1]
-#     ds = jnp.linalg.norm(deltas, axis=1)
-#     ds = jnp.concatenate([ds, ds[-1:]])  # (K,)
-#
-#     # Hazard per step (K,)
-#     h = hazard_from_reach(p_reach, ds, alpha=1.0)
-#     # Survival-weighted expected gain
-#     # S_{k-1} for each k can be built via cumulative product.
-#     # S_prev[0]=1, S_prev[k]=prod_{i<k}(1-h_i)
-#     S_prev = jnp.concatenate([jnp.ones((1,)), jnp.cumprod(1.0 - h[:-1])])  # (K,)
-#
-#     expected_gain = jnp.sum(S_prev * h * areaDiffs)  # scalar
-#
-#     return -expected_gain
-#
-
-
 @jax.jit
 def old_feasible_mask(points, past_centers, past_radii):
     """
@@ -240,7 +143,6 @@ def area_objective_function_trajectory(
     Fast, non-differentiable (hard-mask) expected-gain objective.
     - Precomputes old feasible mask once.
     - Computes areaDiffs using only the new circle test for each trajectory sample.
-
     NOTE: This recomputes oldArea from past circles for consistency (so you don't
     have to pass oldArea in). If you already have oldArea elsewhere and want to
     trust it, you can pass it and remove the recompute.
@@ -275,13 +177,8 @@ def area_objective_function_trajectory(
     ds = jnp.linalg.norm(deltas, axis=1)
     ds = jnp.concatenate([ds, ds[-1:]])  # (K,)
     tf = knotPoints[-3 - 1]
-    vel = spline_opt_tools.get_spline_velocity(
-        controlPoints.flatten(), tf, 3, numSamplesPerInterval
-    )
-    dt = ds / vel
-
     # Hazard per step and survival weighting
-    h = hazard_from_reach(p_reach, dt, alpha=alpha)  # (K,)
+    h = hazard_from_reach(p_reach, ds, alpha=alpha)  # (K,)
     S_prev = survival_prefix(h)  # (K,)
 
     expected_gain = jnp.sum(S_prev * h * areaDiffs)
@@ -306,7 +203,91 @@ def area_objective_function_trajectory(
     #         Send=S_prev[-1],
     #         J=expected_gain,
     #     )
-    return -100 * expected_gain
+    return -expected_gain
+
+
+# @jax.jit
+# def area_objective_function_trajectory(
+#     controlPoints,
+#     knotPoints,
+#     pursuerRange,
+#     pursuerCaptureRadius,
+#     pastInterseptionLocations,
+#     pastRadaii,
+#     dArea,
+#     integrationPoints,
+#     launchPdf,
+#     alpha=1.0,
+#     numSamplesPerInterval=10,
+#     splineDegree=3,
+#     speed_floor=1e-3,
+# ):
+#     """
+#     Time-based hazard version of your objective.
+#
+#     Key changes vs your current code:
+#     - Uses dt = ds / speed (time exposure), not ds directly.
+#     - Computes hazard on *segments* (K-1), not padded nodes.
+#     - Uses segment-averaged p_reach and areaDiff for consistent discretization.
+#     - Clamps speed away from 0 for stability with IPOPT.
+#     """
+#     controlPoints = controlPoints.reshape((-1, 2))
+#
+#     # (K,2) sampled trajectory positions (candidate kill points)
+#     pos = spline_opt_tools.evaluate_spline(
+#         controlPoints, knotPoints, numSamplesPerInterval
+#     )
+#
+#     # Effective radius
+#     R_eff = pursuerRange + pursuerCaptureRadius
+#
+#     # Precompute old feasible launch-region mask and area
+#     old_mask = old_feasible_mask(
+#         integrationPoints, pastInterseptionLocations, pastRadaii
+#     )
+#     oldArea = area_from_mask(old_mask, dArea)
+#
+#     # ΔM_k at nodes: (K,)
+#     areaDiffs = area_diff_from_oldmask(
+#         pos, R_eff, integrationPoints, old_mask, oldArea, dArea
+#     )
+#
+#     # Reach probability at nodes: (K,)
+#     p_reach = pez_from_interceptions.prob_reach_numerical(
+#         pos, integrationPoints, launchPdf, R_eff, dArea
+#     )
+#
+#     # --- Segment geometry: ds and dt are (K-1,) ---
+#     deltas = pos[1:] - pos[:-1]
+#     ds = jnp.linalg.norm(deltas, axis=1)  # (K-1,)
+#
+#     # Spline speed at nodes (K,). (Your existing approach)
+#     tf = knotPoints[-(splineDegree + 1)]  # commonly -4 for degree=3
+#     speed_node = spline_opt_tools.get_spline_velocity(
+#         controlPoints.flatten(), tf, splineDegree, numSamplesPerInterval
+#     )
+#
+#     # Ensure we have scalar speed (K,)
+#
+#     # Segment speed via endpoint average: (K-1,)
+#     speed_seg = 0.5 * (speed_node[1:] + speed_node[:-1])
+#     speed_seg = jnp.maximum(speed_seg, speed_floor)
+#
+#     # Segment time increments: (K-1,)
+#     dt = ds / speed_seg
+#
+#     # Segment-averaged reach probability and gain: (K-1,)
+#     p_seg = 0.5 * (p_reach[1:] + p_reach[:-1])
+#     area_seg = 0.5 * (areaDiffs[1:] + areaDiffs[:-1])
+#
+#     # Time-based hazard per segment: (K-1,)
+#     h = 1.0 - jnp.exp(-alpha * p_seg * dt)
+#
+#     # Survival prefix on segments: S_prev[k] = Π_{i<k} (1 - h_i)
+#     S_prev = jnp.concatenate([jnp.ones((1,)), jnp.cumprod(1.0 - h[:-1])])
+#
+#     expected_gain = jnp.sum(S_prev * h * area_seg)
+#     return -expected_gain
 
 
 dAreaObjectiveDControlPoints = jax.jit(jax.jacfwd(area_objective_function_trajectory))
@@ -635,11 +616,12 @@ def main_planner():
     )
 
     expected_launch_pos, Z = expected_position_from_pdf(points, launchPdf, dArea)
+    # expected_launch_pos = np.array([0.0, 1.0])
     print("Expected launch position:", expected_launch_pos, "Z=", Z)
 
     sacraficialRange = 10.0
 
-    sacraficialLaunchPosition = np.array([-4.0, -4.0])
+    sacraficialLaunchPosition = np.array([-4.0, 0.0])
     initialGoal = expected_launch_pos
     direction = initialGoal - sacraficialLaunchPosition
     sacraficialSpeed = 1.0
@@ -655,9 +637,15 @@ def main_planner():
     pursuerCaptureRadius = 0.0
     num_cont_points = 8
     spline_order = 3
-    velocity_constraints = (0.0, sacraficialSpeed)
-    curvature_constraints = (-0.5, 0.5)
-    turn_rate_constraints = (-1.0, 1.0)
+    # velocity_constraints = (0.0, sacraficialSpeed)
+    # curvature_constraints = (-0.5, 0.5)
+    # turn_rate_constraints = (-1.0, 1.0)
+    v = sacraficialSpeed
+    R_min = 0.3
+
+    velocity_constraints = (0.6 * v, v)  # don’t allow near-zero speed
+    curvature_constraints = (-1.0 / R_min, 1.0 / R_min)  # ±0.167
+    turn_rate_constraints = (-v / R_min, v / R_min)  # consistent with curvature
 
     spline = optimize_spline_path(
         sacraficialLaunchPosition,
