@@ -208,6 +208,26 @@ def prob_reach_numerical(eval_points, integration_points, pdf_vals, R_eff, dA):
 
 
 @jax.jit
+def prob_reach_numerical_soft(
+    eval_points, integration_points, pdf_vals, R_eff, dA, tau
+):
+    """
+    Smooth approximation to P(reach) = ∫ 1(||x - e|| <= R_eff) p(x) dx
+    using a sigmoid boundary.
+
+    tau: softness length scale (same units as positions). Smaller -> sharper.
+    """
+    diff = integration_points[None, :, :] - eval_points[:, None, :]
+    dists = jnp.linalg.norm(diff, axis=-1)  # (K, M)
+
+    # soft indicator in (0,1)
+    in_range_soft = jax.nn.sigmoid((R_eff - dists) / tau)  # (K, M)
+
+    weighted = in_range_soft * pdf_vals[None, :]
+    return jnp.sum(weighted, axis=1) * dA  # (K,)
+
+
+@jax.jit
 def pez_numerical(
     evaderPosition,
     evaderHeading,
