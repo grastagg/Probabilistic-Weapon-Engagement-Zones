@@ -654,12 +654,12 @@ def main_planner():
 
     interceptionPositions = jnp.array([[-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]])
     # interceptionPositions = jnp.array([[-0.5, 0.5], [0.5, -0.5]])
-    # interceptionPositions = jnp.array([[0.0, 0.0]])
+    interceptionPositions = jnp.array([[0.0, 0.0]])
     oldRadii = jnp.array(
         [
             pursuerRange + pursuerCaptureRadius,
-            pursuerRange + pursuerCaptureRadius,
-            pursuerRange + pursuerCaptureRadius,
+            # pursuerRange + pursuerCaptureRadius,
+            # pursuerRange + pursuerCaptureRadius,
             # pursuerRange + pursuerCaptureRadius,
         ]
     )
