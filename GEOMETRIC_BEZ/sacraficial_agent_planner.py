@@ -156,82 +156,146 @@ def dist_objective_function_trajectory(
 dDistaObjectiveDControlPoints = jax.jit(jax.jacfwd(dist_objective_function_trajectory))
 
 
+# ---------------------------
+# Smooth disk membership
+# ---------------------------
 @jax.jit
-def old_feasible_mask(points, past_centers, past_radii):
+def _soft_inside_disk(dist, radius, tau, eps=1e-12):
     """
-    points: (M,2)          integration grid over launch-space
-    past_centers: (N,2)    past kill locations (centers of constraint disks in launch-space)
-    past_radii: (N,)       corresponding radii
+    Smooth approximation to 1{dist <= radius} using a sigmoid on signed distance.
+
+    dist  : (...,) >= 0
+    radius: scalar or (...,)
+    tau   : softness length scale (same units as dist). Larger = softer boundary.
+    """
+    # signed distance: positive inside, negative outside
+    s = (radius - dist) / (tau + eps)
+    return jax.nn.sigmoid(s)
+
+
+# ---------------------------
+# Smooth feasible mask for intersection of past disks
+# ---------------------------
+@jax.jit
+def smooth_feasible_mask(points, past_centers, past_radii, tau_area, eps=1e-12):
+    """
+    points      : (M,2) integration grid over launch-space
+    past_centers: (N,2) past kill locations (centers of constraint disks in launch-space)
+    past_radii  : (N,)  corresponding radii (<=0 means inactive)
+    tau_area    : scalar softness for disk boundary (launch-space units)
+
     returns:
-        mask: (M,) bool, True where point is inside ALL past disks
+        mask_soft: (M,) in (0,1], approx 1 inside ALL disks, ~0 outside
     """
     # (M,N,2) -> (M,N)
-    dists_squared = jnp.sum(
-        jnp.square(points[:, None, :] - past_centers[None, :, :]), axis=-1
-    )
-    return jnp.all(dists_squared <= past_radii[None, :] ** 2, axis=1)
+    diff = points[:, None, :] - past_centers[None, :, :]
+    dsq = jnp.sum(diff * diff, axis=-1)  # (M,N)
+    dist = jnp.sqrt(dsq + 1e-12)
+
+    active = past_radii > 0.0  # (N,)
+    # Soft membership per disk: (M,N)
+    phi = _soft_inside_disk(dist, past_radii[None, :], tau_area, eps=eps)
+    # Inactive disks should contribute multiplicative identity = 1
+    phi = jnp.where(active[None, :], phi, 1.0)
+
+    # Intersection via product, computed stably in log-space:
+    log_phi = jnp.log(phi + eps)  # (M,N)
+    log_mask = jnp.sum(log_phi, axis=1)  # (M,)
+    mask_soft = jnp.exp(log_mask)  # (M,)
+
+    return mask_soft
 
 
 @jax.jit
-def area_from_mask(mask, dArea):
-    """mask: (M,) bool"""
-    return jnp.sum(mask) * dArea
+def area_from_soft_mask(mask_soft, dArea):
+    """
+    mask_soft: (M,) in [0,1]
+    """
+    return jnp.sum(mask_soft) * dArea
 
 
+# ---------------------------
+# Smooth area difference for adding a new disk
+# ---------------------------
 @jax.jit
-def area_diff_single_from_oldmask(
+def area_diff_single_from_oldmask_smooth(
     newInterseptionLocation,
     radius,
     integrationPoints,
-    old_mask,
+    old_mask_soft,
     oldArea,
     dArea,
+    tau_area,
+    eps=1e-12,
 ):
     """
-    Computes oldArea - newArea where:
-      oldArea = area of points inside all past circles (given by old_mask)
-      newArea = area of points inside old_mask AND inside the new circle centered at newInterseptionLocation
+    Smooth version of:
+      areaDiff = oldArea - newArea
+    where:
+      oldArea = sum(old_mask_soft) * dArea
+      newArea = sum(old_mask_soft * soft_inside_new_disk) * dArea
+
+    newInterseptionLocation: (2,)
+    radius                : scalar
+    integrationPoints     : (M,2)
+    old_mask_soft         : (M,) in [0,1]
+    oldArea               : scalar
     """
-    dsq_new = jnp.sum(
-        jnp.square(integrationPoints - newInterseptionLocation[None, :]), axis=-1
-    )  # (M,)
-    in_new = dsq_new <= radius**2  # (M,)
-    new_mask = old_mask & in_new
-    newArea = jnp.sum(new_mask) * dArea
+    diff = integrationPoints - newInterseptionLocation[None, :]  # (M,2)
+    dsq_new = jnp.sum(diff * diff, axis=-1)  # (M,)
+    dist_new = jnp.sqrt(dsq_new + 1e-12)
+
+    phi_new = _soft_inside_disk(dist_new, radius, tau_area, eps=eps)  # (M,)
+    new_mask_soft = old_mask_soft * phi_new
+    newArea = jnp.sum(new_mask_soft) * dArea
     return oldArea - newArea
 
 
-# Vectorized over a trajectory of candidate interception/kill locations: pos is (K,2)
-area_diff_from_oldmask = jax.jit(
+# Vectorized over a trajectory of candidate kill locations: pos is (K,2)
+area_diff_from_oldmask_smooth = jax.jit(
     jax.vmap(
-        area_diff_single_from_oldmask,
-        in_axes=(0, None, None, None, None, None),
+        area_diff_single_from_oldmask_smooth,
+        in_axes=(
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),  # pos[k], radius, pts, old_mask, oldArea, dArea, tau_area
     )
 )
 
 
+# ---------------------------
+# Hazard + survival (already smooth, kept as-is)
+# ---------------------------
 @jax.jit
 def hazard_from_reach(p_reach, ds, alpha=0.35):
     """
-    Convert reachability 'likelihood' into a per-step hazard.
-    Uses an exponential survival model so it's stable for larger ds.
-    p_reach: (K,)
-    ds: (K,)
+    Smooth per-step hazard via exponential survival model.
+    p_reach: (K,) in [0,1]
+    ds     : (K,) >= 0
     """
-    return 1.0 - jnp.exp(-alpha * p_reach * ds)
+    return 1.0 - jnp.exp(-alpha * jnp.clip(p_reach, 0.0, 1.0) * ds)
 
 
 @jax.jit
-def survival_prefix(h):
+def survival_prefix(h, eps=1e-12):
     """
-    Given hazard h_k = P(kill at step k | alive at step k),
-    returns S_prev where:
-      S_prev[0] = 1
-      S_prev[k] = Π_{i<k} (1 - h_i)
+    h: (K,) in [0,1)
+    returns S_prev: (K,) where S_prev[k] = Π_{j<k} (1 - h[j])
+    Uses cumprod; if K is large, a log-space version is also possible.
     """
-    return jnp.concatenate([jnp.ones((1,)), jnp.cumprod(1.0 - h[:-1])])
+    one_minus = 1.0 - h
+    cp = jnp.cumprod(one_minus + eps)
+    return jnp.concatenate([jnp.ones((1,), dtype=cp.dtype), cp[:-1]])
 
 
+# ---------------------------
+# Smooth area objective along a trajectory
+# ---------------------------
 @jax.jit
 def area_objective_function_trajectory(
     controlPoints,
@@ -244,14 +308,19 @@ def area_objective_function_trajectory(
     integrationPoints,
     launchPdf,
     alpha=1.0,
+    *,
+    tau_area=None,  # softness in launch-space units
+    tau_area_scale=1.0,  # used only if tau_area is None: tau_area = tau_area_scale * sqrt(dArea)
+    tau_reach_scale=0.75,  # reach softness in units of sqrt(dArea) (as you had)
+    ds_floor=1e-6,
+    normalize_ds=False,
 ):
     """
-    Fast, non-differentiable (hard-mask) expected-gain objective.
-    - Precomputes old feasible mask once.
-    - Computes areaDiffs using only the new circle test for each trajectory sample.
-    NOTE: This recomputes oldArea from past circles for consistency (so you don't
-    have to pass oldArea in). If you already have oldArea elsewhere and want to
-    trust it, you can pass it and remove the recompute.
+    Smooth expected area-gain objective:
+
+      expected_gain = Σ_k S_prev[k] * h[k] * ΔA_soft(pos_k)
+
+    where ΔA_soft is computed with soft intersections in launch-space.
     """
     controlPoints = controlPoints.reshape((-1, 2))
 
@@ -262,63 +331,51 @@ def area_objective_function_trajectory(
 
     R_eff = pursuerRange + pursuerCaptureRadius
 
-    # Precompute old feasible launch-region mask and area
-    old_mask = old_feasible_mask(
-        integrationPoints, pastInterseptionLocations, pastRadaii
-    )
-    oldArea = area_from_mask(old_mask, dArea)
+    # Choose tau_area: tie to grid resolution if you do not want "tuning"
+    # If integrationPoints is a uniform grid, sqrt(dArea) is the cell side length.
+    if tau_area is None:
+        tau_area = tau_area_scale * jnp.sqrt(dArea)
 
-    # ΔM_k = oldArea - newArea(pos_k)
-    areaDiffs = area_diff_from_oldmask(
-        pos, R_eff, integrationPoints, old_mask, oldArea, dArea
+    # Precompute old feasible launch-region soft mask and soft area
+    old_mask_soft = smooth_feasible_mask(
+        integrationPoints, pastInterseptionLocations, pastRadaii, tau_area
+    )
+    oldArea = area_from_soft_mask(old_mask_soft, dArea)
+
+    # ΔA_k = oldArea - newArea_soft(pos_k)
+    areaDiffs = area_diff_from_oldmask_smooth(
+        pos, R_eff, integrationPoints, old_mask_soft, oldArea, dArea, tau_area
     )  # (K,)
 
-    # Reach probability at each trajectory sample: (K,)
-    tau = 0.75 * jnp.sqrt(dArea)
+    # Smooth reach probability at each trajectory sample: (K,)
+    tau_reach = tau_reach_scale * jnp.sqrt(dArea)
     p_reach = pez_from_interceptions.prob_reach_numerical_soft(
-        pos, integrationPoints, launchPdf, R_eff, dArea, tau
+        pos, integrationPoints, launchPdf, R_eff, dArea, tau_reach
     )
 
     # Step length along path (K-1,), pad to (K,)
     deltas = pos[1:] - pos[:-1]
     ds = jnp.linalg.norm(deltas, axis=1)
+    ds = jnp.maximum(ds, ds_floor)
     ds = jnp.concatenate([ds, ds[-1:]])  # (K,)
+
+    if normalize_ds:
+        ds = ds / (jnp.sum(ds) + 1e-12)
+
     # Hazard per step and survival weighting
     h = hazard_from_reach(p_reach, ds, alpha=alpha)  # (K,)
     S_prev = survival_prefix(h)  # (K,)
 
     expected_gain = jnp.sum(S_prev * h * areaDiffs)
-    # expected_gain = jnp.sum(p_reach * areaDiffs)
-
-    #     jax.debug.print(
-    #         """
-    # --- AREA OBJECTIVE DEBUG ---
-    # oldArea        = {oldArea}
-    # ΔM min / max   = {dmin} / {dmax}
-    # p_reach min/max= {prmin} / {prmax}
-    # hazard min/max = {hmin} / {hmax}
-    # S_prev(end)    = {Send}
-    # expected_gain  = {J}
-    # """,
-    #         oldArea=oldArea,
-    #         dmin=jnp.min(areaDiffs),
-    #         dmax=jnp.max(areaDiffs),
-    #         prmin=jnp.min(p_reach),
-    #         prmax=jnp.max(p_reach),
-    #         hmin=jnp.min(h),
-    #         hmax=jnp.max(h),
-    #         Send=S_prev[-1],
-    #         J=expected_gain,
-    #     )
     return -expected_gain
 
 
 dAreaObjectiveDControlPoints = jax.jit(jax.jacfwd(area_objective_function_trajectory))
 
-objfunction_trajectory = dist_objective_function_trajectory
-objfunction_trajectory_jacobian = dDistaObjectiveDControlPoints
-# objfunction_trajectory = area_objective_function_trajectory
-# objfunction_trajectory_jacobian = dAreaObjectiveDControlPoints
+# objfunction_trajectory = dist_objective_function_trajectory
+# objfunction_trajectory_jacobian = dDistaObjectiveDControlPoints
+objfunction_trajectory = area_objective_function_trajectory
+objfunction_trajectory_jacobian = dAreaObjectiveDControlPoints
 
 
 @jax.jit
@@ -587,7 +644,101 @@ def expected_position_from_pdf(integrationPoints, launchPdf, dArea, eps=1e-12):
     return mu, Z
 
 
-def plot_area_objective_function(
+def plot_area_reduction_field(
+    interceptionPositions,
+    pursuerRange,
+    pursuerCaptureRadius,
+    oldRadii,
+    fig,
+    ax,
+    *,
+    x_range=(-5.0, 5.0),
+    y_range=(-5.0, 5.0),
+    num_pts=150,
+    tau_area=None,  # if None: tau_area = tau_area_scale * sqrt(dArea)
+    tau_area_scale=1.0,
+    cmap=None,  # e.g. "viridis" if you want, otherwise matplotlib default
+    show_old_mask_contour=True,
+    contour_level=0.5,
+):
+    """
+    Plots ΔA(c) over candidate centers c in the same 2D coordinate system as interceptionPositions.
+
+    This visualizes ONLY the geometric area-reduction term:
+      ΔA(c) = area(old feasible set) - area(old feasible set ∩ disk(center=c, radius=R_eff))
+
+    Notes:
+    - This uses a smooth disk membership with softness tau_area.
+    - oldRadii <= 0 are treated as inactive (ignored).
+    """
+    R_eff = pursuerRange + pursuerCaptureRadius
+
+    x = jnp.linspace(x_range[0], x_range[1], num_pts)
+    y = jnp.linspace(y_range[0], y_range[1], num_pts)
+    X, Y = jnp.meshgrid(x, y)
+    points = jnp.stack([X.reshape(-1), Y.reshape(-1)], axis=-1)  # (M,2)
+
+    dx = (x_range[1] - x_range[0]) / (num_pts - 1)
+    dy = (y_range[1] - y_range[0]) / (num_pts - 1)
+    dArea = dx * dy
+
+    if tau_area is None:
+        tau_area = tau_area_scale * jnp.sqrt(dArea)
+
+    # Soft old feasible set (intersection of prior disks)
+    old_mask_soft = smooth_feasible_mask(
+        points, interceptionPositions, oldRadii, tau_area
+    )
+    oldArea = jnp.sum(old_mask_soft) * dArea
+
+    # For each candidate center c (= each grid point), compute ΔA(c)
+    areaDiffs = area_diff_from_oldmask_smooth(
+        points, R_eff, points, old_mask_soft, oldArea, dArea, tau_area
+    )  # (M,)
+
+    field = areaDiffs.reshape((num_pts, num_pts))
+
+    ax.set_aspect("equal")
+
+    # Plot: by default pcolormesh likes numpy arrays
+    c = ax.pcolormesh(
+        jnp.asarray(X),
+        jnp.asarray(Y),
+        jnp.asarray(field),
+        shading="auto",
+        cmap=cmap,
+    )
+
+    # Past interceptions
+    ax.scatter(
+        jnp.asarray(interceptionPositions[:, 0]),
+        jnp.asarray(interceptionPositions[:, 1]),
+        color="red",
+        s=25,
+        label="Past interceptions",
+    )
+
+    # Optional: show the current feasible set as a contour of the soft mask
+    if show_old_mask_contour:
+        old_field = old_mask_soft.reshape((num_pts, num_pts))
+        ax.contour(
+            jnp.asarray(X),
+            jnp.asarray(Y),
+            jnp.asarray(old_field),
+            levels=[contour_level],
+            linewidths=1.5,
+        )
+
+    cb = fig.colorbar(c, ax=ax)
+    cb.set_label(
+        r"$\Delta A(c)$ (expected area reduction if next disk centered at $c$)"
+    )
+
+    ax.set_title("Smooth area-reduction field (geometry only)")
+    ax.legend(loc="upper right")
+
+
+def plot_dist_objective_function(
     interceptionPositions, pursuerRange, pursuerCaptureRadius, oldRadii, fig, ax
 ):
     x_range = [-5.0, 5.0]
@@ -635,7 +786,7 @@ def plot_area_objective_function(
     c = ax.pcolormesh(X, Y, obj.reshape((num_pts, num_pts)))
     ax.scatter(interceptionPositions[:, 0], interceptionPositions[:, 1], color="red")
 
-    plt.colorbar(c, ax=ax, label="-(ΔArea · p_reach)  (lower is better)")
+    plt.colorbar(c, ax=ax)
 
 
 def main_planner():
@@ -652,14 +803,14 @@ def main_planner():
     dy = (y_range[1] - y_range[0]) / (num_pts - 1)
     dArea = dx * dy
 
-    interceptionPositions = jnp.array([[-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]])
+    interceptionPositions = jnp.array([[0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]])
     # interceptionPositions = jnp.array([[-0.5, 0.5], [0.5, -0.5]])
-    interceptionPositions = jnp.array([[0.0, 0.0]])
+    # interceptionPositions = jnp.array([[0.0, 0.0]])
     oldRadii = jnp.array(
         [
             pursuerRange + pursuerCaptureRadius,
-            # pursuerRange + pursuerCaptureRadius,
-            # pursuerRange + pursuerCaptureRadius,
+            pursuerRange + pursuerCaptureRadius,
+            pursuerRange + pursuerCaptureRadius,
             # pursuerRange + pursuerCaptureRadius,
         ]
     )
@@ -689,7 +840,7 @@ def main_planner():
     # )
 
     pursuerCaptureRadius = 0.0
-    num_cont_points = 8
+    num_cont_points = 14
     spline_order = 3
     # velocity_constraints = (0.0, sacraficialSpeed)
     # curvature_constraints = (-0.5, 0.5)
@@ -721,7 +872,10 @@ def main_planner():
         sacraficialAgentRange=sacraficialRange,
     )
     fig, ax = plt.subplots()
-    plot_area_objective_function(
+    # plot_area_objective_function(
+    #     interceptionPositions, pursuerRange, pursuerCaptureRadius, oldRadii, fig, ax
+    # )
+    plot_area_reduction_field(
         interceptionPositions, pursuerRange, pursuerCaptureRadius, oldRadii, fig, ax
     )
     plot_spline(spline, ax)
