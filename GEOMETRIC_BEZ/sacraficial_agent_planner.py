@@ -846,7 +846,7 @@ def main_planner():
     # curvature_constraints = (-0.5, 0.5)
     # turn_rate_constraints = (-1.0, 1.0)
     v = sacraficialSpeed
-    R_min = 0.3
+    R_min = 0.2
 
     velocity_constraints = (0.01, v)  # don’t allow near-zero speed
     curvature_constraints = (-1.0 / R_min, 1.0 / R_min)  # ±0.167
