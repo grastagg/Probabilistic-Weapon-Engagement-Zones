@@ -56,12 +56,12 @@ jax.config.update("jax_enable_x64", True)
 
 positionAndHeadingOnly = True
 knownSpeed = True
-interceptionOnBoundary = False
+interceptionOnBoundary = True
 randomPath = False
 noisyMeasurementsFlag = False
-saveResults = True
-plotAllFlag = False
-planHPPath = True
+saveResults = False
+plotAllFlag = True
+planHPPath = False
 
 dataDir = "results"
 if not planHPPath:
@@ -82,7 +82,10 @@ else:
 if noisyMeasurementsFlag:
     saveDir += "WithNoise"
 
-print("saving data to: ", saveDir)
+if saveResults:
+    print("saving data to: ", saveDir)
+else:
+    print("not saving data")
 
 if positionAndHeadingOnly:
     parameterMask = np.array([True, True, True, False, False, False])
@@ -1524,7 +1527,7 @@ def solve_measurement(
     interceptedPathWeight,
     flattenLearningLossAmount,
     initialPursuerXList,
-    workers=2,
+    workers=1,
 ):
     # 1) ensure pool exists (spawn ONCE)
     ex = start_pool(workers)
