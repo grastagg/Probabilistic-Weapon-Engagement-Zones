@@ -231,7 +231,7 @@ def plot_dubins_reachable_set(
     # contour_proxy = plt.plot(
     #     [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
     # )
-    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label="RR")
+    # contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label="RR")
     ax.set_aspect("equal", "box")
     return ax
 

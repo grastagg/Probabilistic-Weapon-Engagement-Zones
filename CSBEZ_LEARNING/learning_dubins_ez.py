@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 # set maplotlib to faster backend
-# matplotlib.use("Agg")
+matplotlib.use("Agg")
 
 
 # get rid of type 3 fonts
@@ -58,7 +58,7 @@ positionAndHeadingOnly = True
 knownSpeed = True
 interceptionOnBoundary = True
 randomPath = False
-noisyMeasurementsFlag = False
+noisyMeasurementsFlag = True
 saveResults = False
 plotAllFlag = True
 planHPPath = False
@@ -4076,12 +4076,13 @@ def plot_all(
     plotLPPaths=True,
     ax=None,
     fig=None,
+    title="True and Learned Pursuer Reachable Sets",
+    legend=True,
 ):
     numPlots = len(pursuerXList)
     # make 2 rows and ceil(numPlots/2) columns
     # numPlots = 10
     numPlots = min(numPlots, 10)
-    # fig1, axes = make_axes(numPlots)
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(3, 3))
@@ -4133,64 +4134,65 @@ def plot_all(
         #     pursuerHeadingLearned1,
         #     ax,
         # )
-    # (
-    #     pursuerPositionLearned1,
-    #     pursuerHeadingLearned1,
-    #     pursuerSpeedLearned1,
-    #     minimumTurnRadiusLearned1,
-    #     pursuerRangeLearned1,
-    # ) = pursuerX_to_params(meanPursuerX, trueParams)
-    # csbez_plotting.plot_dubins_reachable_set(
-    #     pursuerPositionLearned1,
-    #     pursuerHeadingLearned1,
-    #     pursuerRangeLearned1,
-    #     minimumTurnRadiusLearned1,
-    #     ax,
-    #     colors=["orange"],
-    #     # colors=[colors[i % len(colors)]],
-    #     alpha=1,
-    # )
+    (
+        pursuerPositionLearned1,
+        pursuerHeadingLearned1,
+        pursuerSpeedLearned1,
+        minimumTurnRadiusLearned1,
+        pursuerRangeLearned1,
+    ) = pursuerX_to_params(meanPursuerX, trueParams)
+    csbez_plotting.plot_dubins_reachable_set(
+        pursuerPositionLearned1,
+        pursuerHeadingLearned1,
+        pursuerRangeLearned1,
+        minimumTurnRadiusLearned1,
+        ax,
+        colors=["orange"],
+        # colors=[colors[i % len(colors)]],
+        alpha=1,
+    )
     if plotLPPaths:
         plot_low_priority_paths(
             startPositions, interceptedList, endPoints, pathHistories, ax
         )
 
     # proxies for legend
-    linewidithSize = 5
-    ax.plot(
-        [],
-        [],
-        color="blue",
-        label="Intercepted Trajectory",
-        linewidth=linewidithSize,
-    )
-    ax.plot(
-        [],
-        [],
-        color="green",
-        label="Survived Trajectory",
-        linewidth=linewidithSize,
-    )
-    ax.plot([], [], color="red", label="True RS", linewidth=linewidithSize)
-    ax.plot(
-        [],
-        [],
-        color="magenta",
-        label="Feasible Learned RS",
-        linewidth=linewidithSize,
-    )
-    ax.plot(
-        [],
-        [],
-        color="orange",
-        label="Mean Learned RS",
-        linewidth=linewidithSize,
-    )
+    if legend:
+        linewidithSize = 4
+        ax.plot(
+            [],
+            [],
+            color="blue",
+            label="Sacrificial",
+            linewidth=linewidithSize,
+        )
+        # ax.plot(
+        #     [],
+        #     [],
+        #     color="green",
+        #     label="Survived Trajectory",
+        #     linewidth=linewidithSize,
+        # )
+        ax.plot([], [], color="red", label="True RR", linewidth=linewidithSize)
+        ax.plot(
+            [],
+            [],
+            color="magenta",
+            label="Potential RR",
+            linewidth=linewidithSize,
+        )
+        ax.plot(
+            [],
+            [],
+            color="orange",
+            label="Mean RR",
+            linewidth=linewidithSize,
+        )
     # ax.legend(loc="lower left")
     ax.set_aspect("equal", "box")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_title("True and Learned Pursuer Reachable Sets")
+    # ax.set_xlabel("X")
+    # ax.set_ylabel("Y")
+    ax.set_title(title)
     csbez_plotting.plot_dubins_reachable_set(
         pursuerPosition,
         pursuerHeading,
@@ -4213,6 +4215,9 @@ def plot_all(
     #         speeds[i],
     #         ax,
     #     )
+    if legend:
+        # put legend outside of all plot on the bottom center
+        fig.legend(ncol=4, loc="outside lower center")
     return fig, ax
 
 
@@ -4327,6 +4332,7 @@ def plot_pursuer_parameters_spread(
         axes[-1].set_xlabel("Num Sacrificial Agents")
         axes[0].legend()
         fig.tight_layout()
+        plt.savefig("video/pursuer_parameter_spread.pdf")
 
 
 # def get_unique_rows_by_proximity(arr, lossList, rtol=1e-3):
@@ -4790,6 +4796,15 @@ def run_simulation_with_random_pursuer(
     splinePath = None
     splineRightPrev = None
     splineLeftPrev = None
+
+    combinedPlot = True
+    if combinedPlot:
+        fig, axes = plt.subplots(2, 2, figsize=(6, 6), layout="constrained")
+        axes = axes.flatten()
+    else:
+        fig = None
+        ax = None
+
     if planHPPath:
         splinePath, pathTime = plan_path_around_all_learned_pursuer_params_fist(
             [jnp.array(trueParams[parameterMask])],
@@ -5083,6 +5098,17 @@ def run_simulation_with_random_pursuer(
         #
         # Plot
         if i % plotEvery == 0 and plotAllFlag:
+            legend = False
+            if combinedPlot:
+                ax = axes[i % 4]
+                # only label x axis on bottom plots
+            if i == 3:
+                legend = True
+
+            if i == 0:
+                title = "1 Agent"
+            else:
+                title = f"{i + 1} Agents"
             fig, ax = plot_all(
                 startPositions,
                 interceptedList,
@@ -5100,9 +5126,25 @@ def run_simulation_with_random_pursuer(
                 trueParams,
                 mean,
                 np.array(interceptionPointEZList),
+                ax=ax,
+                fig=fig,
+                title=title,
+                legend=legend,
             )
-            fig.savefig(f"video/{i}.png")
-            plt.close(fig)
+            if combinedPlot:
+                if i in [2, 3]:
+                    ax.set_xlabel("X")
+                else:
+                    ax.set_xticklabels([])
+                if i in [0, 2]:
+                    ax.set_ylabel("Y")
+                else:
+                    ax.set_yticklabels([])
+            if combinedPlot:
+                fig.savefig(f"video/{i}.pdf")
+            else:
+                fig.savefig(f"video/{i}.png")
+                plt.close(fig)
             # close all figures to save memory
             # plt.close("all")
 
