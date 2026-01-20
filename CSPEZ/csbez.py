@@ -183,6 +183,11 @@ def in_dubins_reachable_set_single(
     return rs
 
 
+in_dubins_reachable_set = jax.jit(
+    jax.vmap(in_dubins_reachable_set_single, in_axes=(None, None, None, None, 0))
+)
+
+
 @jax.jit
 def angle_in_arc(theta_p, theta1, theta2):
     theta_p = jnp.mod(theta_p, 2 * jnp.pi)
@@ -402,9 +407,6 @@ def in_dubins_reachable_set_augmented_single(
     return rs
 
 
-in_dubins_reachable_set = jax.jit(
-    jax.vmap(in_dubins_reachable_set_single, in_axes=(None, None, None, None, 0))
-)
 in_dubins_reachable_set_augmented = jax.jit(
     jax.vmap(
         in_dubins_reachable_set_augmented_single, in_axes=(None, None, None, None, 0)
