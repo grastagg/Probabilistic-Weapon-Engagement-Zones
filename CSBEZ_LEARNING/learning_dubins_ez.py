@@ -54,11 +54,11 @@ jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax.config.update("jax_platform_name", "gpu")")
 #
 
-positionAndHeadingOnly = True
+positionAndHeadingOnly = False
 knownSpeed = True
-interceptionOnBoundary = True
+interceptionOnBoundary = False
 randomPath = False
-noisyMeasurementsFlag = True
+noisyMeasurementsFlag = False
 saveResults = False
 plotAllFlag = True
 planHPPath = False
@@ -1734,7 +1734,7 @@ def info_for_trajectory_int_ez(
             theta, intercepted_point[None, :], jnp.array([heading]), speed, true_params
         )[0]
         z_hit = r_end - flatten_margin
-        w_hit = activation_smooth(z_hit)  # ≥ 0
+        w_hit = activation_smooth(z_hit) ** 2  # ≥ 0
         g_end = grad_theta_EZ_path(
             theta, intercepted_point[None, :], jnp.array([heading]), speed, true_params
         )[0]
@@ -1766,7 +1766,7 @@ def info_for_trajectory_int_ez(
         )[0]
 
         # scale by weight
-        I = w_t[idx] * jnp.outer(g, g)
+        I = w_t[idx] ** 2 * jnp.outer(g, g)
         return 0.5 * (I + I.T)
 
     I = jax.lax.cond(intercepted, interception_fn, miss_fn)
@@ -4797,7 +4797,7 @@ def run_simulation_with_random_pursuer(
     splineRightPrev = None
     splineLeftPrev = None
 
-    combinedPlot = True
+    combinedPlot = False
     if combinedPlot:
         fig, axes = plt.subplots(2, 2, figsize=(6, 6), layout="constrained")
         axes = axes.flatten()
@@ -5126,8 +5126,8 @@ def run_simulation_with_random_pursuer(
                 trueParams,
                 mean,
                 np.array(interceptionPointEZList),
-                ax=ax,
-                fig=fig,
+                ax=None,
+                fig=None,
                 title=title,
                 legend=legend,
             )
@@ -5145,6 +5145,10 @@ def run_simulation_with_random_pursuer(
             else:
                 fig.savefig(f"video/{i}.png")
                 plt.close(fig)
+                # clear all plots
+                plt.clf()
+                plt.cla()
+
             # close all figures to save memory
             # plt.close("all")
 
@@ -5819,6 +5823,7 @@ def plot_outer_union_approximation_size():
     fig, axes = plt.subplots(1, 3, figsize=(9, 3), layout="tight")
 
     folder = "interior"
+    folder = "boundary"
     results_dir = "results/" + folder + "/knownSpeedAndShape"
     maxSteps = 15
     saveDir = "/home/ggs24/Desktop/learningez_figures/size_all.pdf"
@@ -5842,7 +5847,7 @@ def plot_outer_union_approximation_size():
         label="Noise",
         fig=fig,
         ax=axes[0],
-        title="Known Speed and Shape",
+        title="Case 1",
     )
     results_dir = "results/" + folder + "/knownSpeed"
     plot_median_outer_approximation_size(
@@ -5861,7 +5866,7 @@ def plot_outer_union_approximation_size():
         label="Noise",
         fig=fig,
         ax=axes[1],
-        title="Known Speed",
+        title="Case 2",
     )
     results_dir = "results/" + folder + "/unknownSpeed"
     plot_median_outer_approximation_size(
@@ -5881,7 +5886,7 @@ def plot_outer_union_approximation_size():
         fig=fig,
         ax=axes[2],
         legend=True,
-        title="All Unknown",
+        title="Case 3",
     )
     fig.savefig(saveDir)
 
@@ -5941,7 +5946,7 @@ def plot_path_time_vs_number_of_agents_single(
 
 
 def plot_path_time_vs_number_of_agents():
-    boundary = True
+    boundary = False
     if boundary:
         folder = "plannedHP/boundary/"
         saveDir = "/home/ggs24/Desktop/learningez_figures/path_time_vs_number_of_agents_boundary.pdf"
@@ -5978,7 +5983,7 @@ def plot_path_time_vs_number_of_agents():
         results_dir, max_steps, axes[2], color="orange", label="Noise"
     )
     # set title of all x
-    titles = ["Known Speed and Shape", "Known Speed", "All Unknown"]
+    titles = ["Case 1", "Case 2", "Case 3"]
     for ax in axes:
         ax.set_xlabel("Number of Sacrificial Agents")
         ax.grid(True)
@@ -6064,8 +6069,8 @@ if __name__ == "__main__":
         # #
     else:
         # plot_path_time_vs_number_of_agents()
-        # plot_outer_union_approximation_size()
-        plot_error()
+        plot_outer_union_approximation_size()
+        # plot_error()
         # summarize_percent_covered_columns("interior")
 
 plt.show()
