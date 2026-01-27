@@ -1,4 +1,5 @@
 """
+idx=-1
 Sacrificial agent B-spline planner (pyOptSparse + IPOPT + JAX).
 """
 
@@ -22,12 +23,14 @@ matplotlib.rcParams["ps.fonttype"] = 42
 
 from GEOMETRIC_BEZ import bez_from_interceptions
 import GEOMETRIC_BEZ.pez_from_interceptions as pez_from_interceptions
+import GEOMETRIC_BEZ.rectangle_pez as rectangle_pez
+import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
 
 
 import bspline.spline_opt_tools as spline_opt_tools
 
 
-NUM_SAMPLES_PER_INTERVAL = 15
+NUM_SAMPLES_PER_INTERVAL = 5
 numSamplesPerInterval = NUM_SAMPLES_PER_INTERVAL
 
 
@@ -297,7 +300,7 @@ def survival_prefix(h, eps=1e-12):
 # Smooth area objective along a trajectory
 # ---------------------------
 @jax.jit
-def area_objective_function_trajectory(
+def area_objective_function_trajectory_and_intercepted(
     controlPoints,
     knotPoints,
     pursuerRange,
@@ -307,13 +310,6 @@ def area_objective_function_trajectory(
     dArea,
     integrationPoints,
     launchPdf,
-    alpha=1.0,
-    *,
-    tau_area=None,  # softness in launch-space units
-    tau_area_scale=1.0,  # used only if tau_area is None: tau_area = tau_area_scale * sqrt(dArea)
-    tau_reach_scale=0.75,  # reach softness in units of sqrt(dArea) (as you had)
-    ds_floor=1e-6,
-    normalize_ds=False,
 ):
     """
     Smooth expected area-gain objective:
@@ -322,6 +318,13 @@ def area_objective_function_trajectory(
 
     where ΔA_soft is computed with soft intersections in launch-space.
     """
+    alpha = 1.0
+    tau_area = None  # softness in launch-space units
+    tau_area_scale = (
+        1.0  # used only if tau_area is None: tau_area = tau_area_scale * sqrt(dArea)
+    )
+    tau_reach_scale = 0.75  # reach softness in units of sqrt(dArea) (as you had)
+    ds_floor = 1e-6
     controlPoints = controlPoints.reshape((-1, 2))
 
     # (K,2) sampled trajectory positions (candidate kill points)
@@ -359,18 +362,70 @@ def area_objective_function_trajectory(
     ds = jnp.maximum(ds, ds_floor)
     ds = jnp.concatenate([ds, ds[-1:]])  # (K,)
 
-    if normalize_ds:
-        ds = ds / (jnp.sum(ds) + 1e-12)
-
     # Hazard per step and survival weighting
     h = hazard_from_reach(p_reach, ds, alpha=alpha)  # (K,)
     S_prev = survival_prefix(h)  # (K,)
+    intercepted = 1.0 - jnp.prod(1.0 - h + 1e-12)
 
     expected_gain = jnp.sum(S_prev * h * areaDiffs)
-    return -expected_gain
+    intercepted = 1.0 - jnp.prod(1.0 - h + 1e-12)
+
+    return -expected_gain, intercepted
+
+
+@jax.jit
+def area_objective_function_trajectory(
+    controlPoints,
+    knotPoints,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pastInterseptionLocations,
+    pastRadaii,
+    dArea,
+    integrationPoints,
+    launchPdf,
+):
+    l, intercepted = area_objective_function_trajectory_and_intercepted(
+        controlPoints,
+        knotPoints,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pastInterseptionLocations,
+        pastRadaii,
+        dArea,
+        integrationPoints,
+        launchPdf,
+    )
+    return l
+
+
+def intercepted(
+    controlPoints,
+    knotPoints,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pastInterseptionLocations,
+    pastRadaii,
+    dArea,
+    integrationPoints,
+    launchPdf,
+):
+    l, intercepted = area_objective_function_trajectory_and_intercepted(
+        controlPoints,
+        knotPoints,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pastInterseptionLocations,
+        pastRadaii,
+        dArea,
+        integrationPoints,
+        launchPdf,
+    )
+    return intercepted
 
 
 dAreaObjectiveDControlPoints = jax.jit(jax.jacfwd(area_objective_function_trajectory))
+dAreaInterceptedDControlPoints = jax.jit(jax.jacfwd(intercepted))
 
 # objfunction_trajectory = dist_objective_function_trajectory
 # objfunction_trajectory_jacobian = dDistaObjectiveDControlPoints
@@ -413,7 +468,7 @@ def create_spline(knotPoints, controlPoints, order):
     return spline
 
 
-def optimize_spline_path(
+def optimize_spline_path_minimize_area(
     p0,
     pf,
     v0,
@@ -431,12 +486,6 @@ def optimize_spline_path(
     integrationPoints,
     launchPdf,
     sacraficialAgentRange=5.5,
-    *,
-    use_smooth_objective=False,
-    smooth_eps=None,
-    alpha=1.0,
-    gain_weight=0.1,
-    smoothness_weight=1e-2,
     debug=None,
 ):
     """
@@ -449,10 +498,6 @@ def optimize_spline_path(
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf, num_cont_points, 3
     )
-
-    if velocity_constraints[0] <= 0.0:
-        v_floor = max(1e-3, 0.05 * float(velocity_constraints[1]))
-        velocity_constraints = (v_floor, float(velocity_constraints[1]))
 
     eval_counter = {"n": 0}
     debug_every = int(os.environ.get("SACRIFICIAL_DEBUG_EVERY", "20"))
@@ -468,7 +513,7 @@ def optimize_spline_path(
             knotPoints,
         )
 
-        obj_val = objfunction_trajectory(
+        obj_val, intercepted = area_objective_function_trajectory_and_intercepted(
             control_points_flat,
             knotPoints,
             pursuerRange,
@@ -484,6 +529,7 @@ def optimize_spline_path(
         funcs["turn_rate"] = np.asarray(turn_rate)
         funcs["velocity"] = np.asarray(velocity)
         funcs["curvature"] = np.asarray(curvature)
+        funcs["intercepted"] = float(np.asarray(intercepted))
 
         if debug:
             eval_counter["n"] += 1
@@ -534,6 +580,363 @@ def optimize_spline_path(
             dArea,
             integrationPoints,
             launchPdf,
+        )
+        dInterceptedDControlPointsVal = dAreaInterceptedDControlPoints(
+            control_points_flat,
+            knotPoints,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pastInterseptionLocations,
+            pastRadaii,
+            dArea,
+            integrationPoints,
+            launchPdf,
+        )
+
+        dObj = np.asarray(dObjDControlPointsVal)
+        dVel = np.asarray(dVelocityDControlPointsVal)
+        dTr = np.asarray(dTurnRateDControlPointsVal)
+        dCurv = np.asarray(dCurvatureDControlPointsVal)
+        dIntercepted = np.asarray(dInterceptedDControlPointsVal)
+
+        funcsSens["obj"] = {"control_points": dObj}
+        funcsSens["start"] = {
+            "control_points": dStartDControlPointsVal,
+        }
+        funcsSens["velocity"] = {"control_points": dVel}
+        funcsSens["turn_rate"] = {"control_points": dTr}
+        funcsSens["curvature"] = {"control_points": dCurv}
+        funcsSens["intercepted"] = {"control_points": dIntercepted}
+
+        fail = (
+            (not np.all(np.isfinite(dObj)))
+            or (not np.all(np.isfinite(dVel)))
+            or (not np.all(np.isfinite(dTr)))
+            or (not np.all(np.isfinite(dCurv)))
+        )
+        return funcsSens, fail
+
+    # num_constraint_samples = numSamplesPerInterval*(num_cont_points-2)-2
+
+    optProb = Optimization("path optimization", objfunc)
+
+    x0 = np.linspace(p0, pf, num_cont_points).flatten()
+    x0 = spline_opt_tools.move_first_control_point_so_spline_passes_through_start(
+        x0, knotPoints, p0, v0
+    ).flatten()
+
+    print("TEST")
+    print("x0:", x0.shape)
+    tempVelocityContstraints = spline_opt_tools.get_spline_velocity(
+        x0, 1, 3, numSamplesPerInterval
+    )
+    print("here")
+    start = time.time()
+    num_constraint_samples = len(tempVelocityContstraints)
+
+    optProb.addVarGroup(
+        name="control_points", nVars=2 * (num_cont_points), varType="c", value=x0
+    )
+    #
+    optProb.addConGroup(
+        "velocity",
+        num_constraint_samples,
+        lower=velocity_constraints[0],
+        upper=velocity_constraints[1],
+        scale=1.0 / velocity_constraints[1],
+    )
+    optProb.addConGroup(
+        "turn_rate",
+        num_constraint_samples,
+        lower=turn_rate_constraints[0],
+        upper=turn_rate_constraints[1],
+        scale=1.0 / turn_rate_constraints[1],
+    )
+    optProb.addConGroup(
+        "curvature",
+        num_constraint_samples,
+        lower=curvature_constraints[0],
+        upper=curvature_constraints[1],
+        scale=1.0 / curvature_constraints[1],
+    )
+    optProb.addConGroup("start", 2, lower=p0, upper=p0)
+    optProb.addConGroup("intercepted", 1, lower=0.90, upper=None)
+
+    optProb.addObj("obj")
+
+    opt = OPT("ipopt")
+    opt.options["print_level"] = 5
+
+    opt.options["max_iter"] = 1000
+    opt.options["derivative_test"] = "first-order"
+    # opt.options["hessian_approximation"] = "limited-memory"
+    # opt.options["nlp_scaling_method"] = "gradient-based"
+    # opt.options["mu_strategy"] = "adaptive"
+    username = getpass.getuser()
+    hsllib = "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
+    opt.options["hsllib"] = hsllib
+    opt.options["linear_solver"] = "ma97"
+    opt.options["tol"] = 1e-8
+
+    # sol = opt(optProb, sens="FD")
+    sol = opt(optProb, sens=sens)
+    print(sol)
+
+    controlPoints = sol.xStar["control_points"].reshape((num_cont_points, 2))
+
+    if debug:
+        print("Optimization time:", time.time() - start)
+    return create_spline(knotPoints, controlPoints, spline_order)
+
+
+def hazard_with_coverage(p_reach, ds, alpha=0.35):
+    K = p_reach.shape[0]
+
+    def step(carry, inputs):
+        S_prev = carry
+        p, ds_k = inputs
+
+        # hazard modulated by remaining uncovered mass
+        h = 1.0 - jnp.exp(-alpha * p * ds_k * S_prev)
+
+        # update remaining uncovered
+        S_new = S_prev * (1.0 - p)
+
+        return S_new, h
+
+    _, h = jax.lax.scan(step, 1.0, (p_reach, ds))
+    return h
+
+
+def _sigmoid(x):
+    # stable-ish sigmoid using tanh
+    return 0.5 * (jnp.tanh(0.5 * x) + 1.0)
+
+
+def _make_launch_grid(min_box, max_box, nx=32, ny=32):
+    """
+    Deterministic uniform grid of launch points inside the rectangle.
+    min_box, max_box: (2,) arrays [xmin, ymin], [xmax, ymax]
+    returns: (M,2), dA
+    """
+    xs = jnp.linspace(min_box[0], max_box[0], nx)
+    ys = jnp.linspace(min_box[1], max_box[1], ny)
+    X, Y = jnp.meshgrid(xs, ys, indexing="xy")
+    pts = jnp.stack([X.reshape(-1), Y.reshape(-1)], axis=1)  # (M,2)
+
+    # cell area (approx). If nx,ny include endpoints, use (nx-1),(ny-1) spacing.
+    dx = (max_box[0] - min_box[0]) / jnp.maximum(nx - 1, 1)
+    dy = (max_box[1] - min_box[1]) / jnp.maximum(ny - 1, 1)
+    dA = dx * dy
+    return pts, dA
+
+
+@jax.jit
+def get_hit_objective_function(
+    controlPoints,
+    knotPoints,
+    pursuerRange,
+    pursuerCaptureRadius,
+    min_box,
+    max_box,
+):
+    """
+    Drop-in replacement that *spreads* by maximizing launch-rectangle coverage:
+
+      coverage = Area( (box ∩ ⋃_k Disk(pos_k, R_eff)) ) / Area(box)
+
+    Approximated by a deterministic grid of launch points + smooth softmin.
+
+    Returns: negative coverage (so minimizing objective => maximize coverage).
+    """
+    controlPoints = controlPoints.reshape((-1, 2))
+
+    # (K,2) sampled trajectory positions
+    pos = spline_opt_tools.evaluate_spline(
+        controlPoints, knotPoints, numSamplesPerInterval
+    )
+
+    R_eff = pursuerRange + pursuerCaptureRadius
+
+    # Deterministic launch grid (M,2) and cell area dA
+    launch_pts, dA = _make_launch_grid(min_box, max_box, nx=32, ny=32)  # M=1024
+
+    # Characteristic length tied to grid spacing
+    cell = jnp.sqrt(dA + 1e-12)
+
+    # Softness parameters (reasonable defaults)
+    tau_d = 0.75 * cell  # softmin temperature (distance units)
+    tau = 1.00 * cell  # softness around R_eff
+
+    # dist(i,k): (M,K)
+    diff = launch_pts[:, None, :] - pos[None, :, :]
+    dist = jnp.linalg.norm(diff, axis=-1)
+
+    # softmin over k of dist(i,k): (M,)
+    d_soft = -tau_d * jax.nn.logsumexp(-dist / (tau_d + 1e-12), axis=1)
+
+    # soft "covered" indicator per launch point
+    covered_i = _sigmoid((R_eff - d_soft) / (tau + 1e-12))  # (M,)
+
+    # coverage fraction in [0,1] (grid-weighted)
+    box_area = (max_box[0] - min_box[0]) * (max_box[1] - min_box[1])
+    coverage = jnp.sum(covered_i) * dA / (box_area + 1e-12)
+
+    return -coverage
+
+
+# @jax.jit
+# def get_hit_objective_function(
+#     controlPoints,
+#     knotPoints,
+#     pursuerRange,
+#     pursuerCaptureRadius,
+#     min_box,
+#     max_box,
+#     alpha=1.0,
+#     *,
+#     ds_floor=1e-6,
+# ):
+#     """
+#     """
+#     controlPoints = controlPoints.reshape((-1, 2))
+#
+#     # (K,2) sampled trajectory positions (candidate kill points)
+#     pos = spline_opt_tools.evaluate_spline(
+#         controlPoints, knotPoints, numSamplesPerInterval
+#     )
+#
+#     R_eff = pursuerRange + pursuerCaptureRadius
+#
+#     p_reach = rectangle_pez.prob_reachable_uniform_box(
+#         pos, pursuerRange, pursuerCaptureRadius, min_box, max_box
+#     )
+#
+#     # Step length along path (K-1,), pad to (K,)
+#     deltas = pos[1:] - pos[:-1]
+#     ds = jnp.linalg.norm(deltas, axis=1)
+#     ds = jnp.maximum(ds, ds_floor)
+#     ds = jnp.concatenate([ds, ds[-1:]])  # (K,)
+#
+#     # Hazard per step and survival weighting
+#     h = hazard_from_reach(p_reach, ds, alpha=alpha)  # (K,)
+#     S_prev = survival_prefix(h)
+#     return np.sum(S_prev * p_reach)
+#     gotHit = 1.0 - jnp.prod(1.0 - h + 1e-12)
+#
+#     return -gotHit
+
+
+dHitObjectiveDControlPoints = jax.jit(jax.jacfwd(get_hit_objective_function))
+
+
+def optimize_spline_path_get_intercepted(
+    p0,
+    pf,
+    v0,
+    num_cont_points,
+    spline_order,
+    velocity_constraints,
+    turn_rate_constraints,
+    curvature_constraints,
+    sacraficialAgentSpeed,
+    pursuerRange,
+    pursuerCaptureRadius,
+    min_box,
+    max_box,
+    dArea,
+    sacraficialAgentRange=5.5,
+    debug=None,
+):
+    """
+    Optimize B-spline control points subject to kinematic constraints.
+
+    Returns a SciPy `BSpline` using the optimized control points.
+    """
+    tf = sacraficialAgentRange / sacraficialAgentSpeed
+
+    knotPoints = spline_opt_tools.create_unclamped_knot_points(
+        0, tf, num_cont_points, 3
+    )
+
+    if velocity_constraints[0] <= 0.0:
+        v_floor = max(1e-3, 0.05 * float(velocity_constraints[1]))
+        velocity_constraints = (v_floor, float(velocity_constraints[1]))
+
+    eval_counter = {"n": 0}
+    debug_every = int(os.environ.get("SACRIFICIAL_DEBUG_EVERY", "20"))
+
+    def objfunc(xDict):
+        control_points_flat = xDict["control_points"]
+        funcs = {}
+        funcs["start"] = spline_opt_tools.get_start_constraint(control_points_flat)
+        control_points = control_points_flat.reshape((num_cont_points, 2))
+
+        velocity, turn_rate, curvature, _, _ = compute_spline_constraints(
+            control_points,
+            knotPoints,
+        )
+
+        obj_val = get_hit_objective_function(
+            control_points_flat,
+            knotPoints,
+            pursuerRange,
+            pursuerCaptureRadius,
+            min_box,
+            max_box,
+        )
+
+        funcs["obj"] = float(np.asarray(obj_val))
+        funcs["turn_rate"] = np.asarray(turn_rate)
+        funcs["velocity"] = np.asarray(velocity)
+        funcs["curvature"] = np.asarray(curvature)
+
+        if debug:
+            eval_counter["n"] += 1
+            if eval_counter["n"] % max(1, debug_every) == 0:
+                v = funcs["velocity"]
+                tr = funcs["turn_rate"]
+                k = funcs["curvature"]
+                print(
+                    f"[eval {eval_counter['n']}] obj={funcs['obj']:.6e} "
+                    f"v[min,max]=({v.min():.3e},{v.max():.3e}) "
+                    f"tr[min,max]=({tr.min():.3e},{tr.max():.3e}) "
+                    f"k[min,max]=({k.min():.3e},{k.max():.3e})"
+                )
+
+        fail = (
+            (not np.isfinite(funcs["obj"]))
+            or (not np.all(np.isfinite(funcs["turn_rate"])))
+            or (not np.all(np.isfinite(funcs["velocity"])))
+            or (not np.all(np.isfinite(funcs["curvature"])))
+        )
+        return funcs, fail
+
+    def sens(xDict, funcs):
+        funcsSens = {}
+        control_points_flat = jnp.array(xDict["control_points"])
+
+        dStartDControlPointsVal = spline_opt_tools.get_start_constraint_jacobian(
+            control_points_flat
+        )
+
+        dVelocityDControlPointsVal = spline_opt_tools.dVelocityDControlPoints(
+            control_points_flat, tf, 3, numSamplesPerInterval
+        )
+        dTurnRateDControlPointsVal = spline_opt_tools.dTurnRateDControlPoints(
+            control_points_flat, tf, 3, numSamplesPerInterval
+        )
+        dCurvatureDControlPointsVal = spline_opt_tools.dCurvatureDControlPoints(
+            control_points_flat, tf, 3, numSamplesPerInterval
+        )
+
+        dObjDControlPointsVal = dHitObjectiveDControlPoints(
+            control_points_flat,
+            knotPoints,
+            pursuerRange,
+            pursuerCaptureRadius,
+            min_box,
+            max_box,
         )
 
         dObj = np.asarray(dObjDControlPointsVal)
@@ -642,6 +1045,44 @@ def expected_position_from_pdf(integrationPoints, launchPdf, dArea, eps=1e-12):
     )  # normalized weights per point (still need dArea in expectation)
     mu = jnp.sum(integrationPoints * w[:, None], axis=0) * dArea
     return mu, Z
+
+
+def sample_intercept(traj_xy, x_p, R, alpha, beta, D_min=0.0, rng=None):
+    traj = np.asarray(traj_xy, float)
+    x_p = np.asarray(x_p, float)
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Sample D in [D_min, R]
+    U = rng.beta(alpha, beta)
+    D = D_min + (R - D_min) * U
+    print("commitmet distance D =", D)
+
+    dists = np.linalg.norm(traj - x_p, axis=1)
+    print("minimum distance to pursuer along traj:", dists.min())
+
+    inside = dists <= D
+    crossings = np.where((~inside[:-1]) & inside[1:])[0]
+
+    if len(crossings) == 0:
+        return False, None, None, D
+
+    idx = crossings[0] + 1
+    return True, idx, traj[idx], D
+
+
+def sample_intercept_from_spline(
+    spline, truePursuerPos, pursuerRange, alpha=2.0, beta=2.0, D_min=0.0, rng=None
+):
+    t0 = spline.t[spline.k]
+    tf = spline.t[-1 - spline.k]
+    t = np.linspace(t0, tf, 1000, endpoint=True)
+    pos = spline(t)
+    isIntercepted, idx, interceptPoint, D = sample_intercept(
+        pos, truePursuerPos, pursuerRange, alpha, beta, D_min, rng=rng
+    )
+    return isIntercepted, idx, interceptPoint, D
 
 
 def plot_area_reduction_field(
@@ -804,13 +1245,13 @@ def main_planner():
     dArea = dx * dy
 
     interceptionPositions = jnp.array([[0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]])
-    # interceptionPositions = jnp.array([[-0.5, 0.5], [0.5, -0.5]])
+    interceptionPositions = jnp.array([[-0.5, 0.5], [0.5, -0.5]])
     # interceptionPositions = jnp.array([[0.0, 0.0]])
     oldRadii = jnp.array(
         [
             pursuerRange + pursuerCaptureRadius,
             pursuerRange + pursuerCaptureRadius,
-            pursuerRange + pursuerCaptureRadius,
+            # pursuerRange + pursuerCaptureRadius,
             # pursuerRange + pursuerCaptureRadius,
         ]
     )
@@ -852,7 +1293,7 @@ def main_planner():
     curvature_constraints = (-1.0 / R_min, 1.0 / R_min)  # ±0.167
     turn_rate_constraints = (-v / R_min, v / R_min)  # consistent with curvature
 
-    spline = optimize_spline_path(
+    spline = optimize_spline_path_minimize_area(
         sacraficialLaunchPosition,
         initialGoal,
         initialSacraficialVelocity,
@@ -871,6 +1312,16 @@ def main_planner():
         launchPdf,
         sacraficialAgentRange=sacraficialRange,
     )
+    t0 = spline.t[spline.k]
+    tf = spline.t[-1 - spline.k]
+    t = np.linspace(t0, tf, 1000, endpoint=True)
+    pos = spline(t)
+    alpha = 8
+    beta = 2
+    isIntercepted, idx, interceptPoint, D = sample_intercept(
+        pos, expected_launch_pos, pursuerRange, alpha, beta, D_min=0.5 * pursuerRange
+    )
+    print("Is intercepted:", isIntercepted)
     fig, ax = plt.subplots()
     # plot_area_objective_function(
     #     interceptionPositions, pursuerRange, pursuerCaptureRadius, oldRadii, fig, ax
@@ -889,9 +1340,297 @@ def main_planner():
     bez_from_interceptions.plot_potential_pursuer_reachable_region(
         arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
     )
+    ax.scatter(*interceptPoint, color="red", s=50, label="Intercept Point", marker="x")
     plt.show()
 
 
+def main_planner_box():
+    x_range = [-5.0, 5.0]
+    y_range = [-5.0, 5.0]
+    num_pts = 50
+    pursuerRange = 1.0
+    pursuerCaptureRadius = 0.2
+    x = jnp.linspace(x_range[0], x_range[1], num_pts)
+    y = jnp.linspace(y_range[0], y_range[1], num_pts)
+    [X, Y] = jnp.meshgrid(x, y)
+    points = jnp.stack([X.flatten(), Y.flatten()], axis=-1)
+    dx = (x_range[1] - x_range[0]) / (num_pts - 1)
+    dy = (y_range[1] - y_range[0]) / (num_pts - 1)
+    dArea = dx * dy
+    min_box = jnp.array([-2.0, -2.0])
+    max_box = jnp.array([2.0, 0.0])
+    # sample true pursuer position uniformly in box
+    truePursuerPos = np.array(
+        [
+            np.random.uniform(min_box[0], max_box[0]),
+            np.random.uniform(min_box[1], max_box[1]),
+        ]
+    )
+
+    expected_launch_pos = np.array([0.0, 0.0])
+    # expected_launch_pos = np.array([2.5, 2.5])
+    # print("Expected launch position:", expected_launch_pos, "Z=", Z)
+
+    sacraficialRange = 10.0
+
+    sacraficialLaunchPosition = np.array([-4.0, -4.0])
+    initialGoal = expected_launch_pos
+    direction = initialGoal - sacraficialLaunchPosition
+    sacraficialSpeed = 1.0
+    initialSacraficialVelocity = (
+        direction / np.linalg.norm(direction)
+    ) * sacraficialSpeed
+
+    # initialGoal = (
+    # direction / np.linalg.norm(direction) * sacraficialRange * 0.5
+    #     + sacraficialLaunchPosition
+    # )
+
+    pursuerCaptureRadius = 0.0
+    num_cont_points = 14
+    spline_order = 3
+    v = sacraficialSpeed
+    R_min = 0.2
+
+    velocity_constraints = (0.01, v)  # don’t allow near-zero speed
+    curvature_constraints = (-1.0 / R_min, 1.0 / R_min)  # ±0.167
+    turn_rate_constraints = (-v / R_min, v / R_min)  # consistent with curvature
+
+    spline = optimize_spline_path_get_intercepted(
+        sacraficialLaunchPosition,
+        initialGoal,
+        initialSacraficialVelocity,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        sacraficialSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        min_box,
+        max_box,
+        dArea,
+        sacraficialAgentRange=sacraficialRange,
+    )
+
+    t0 = spline.t[spline.k]
+    tf = spline.t[-1 - spline.k]
+    t = np.linspace(t0, tf, 1000, endpoint=True)
+    pos = spline(t)
+    isIntercepted, idx, interceptPoint, D = sample_intercept(
+        pos, truePursuerPos, pursuerRange, 2.0, 2.0, D_min=0.5 * pursuerRange
+    )
+    print("Is intercepted:", isIntercepted)
+    fig, ax = plt.subplots()
+    plot_spline(spline, ax)
+
+    ax.set_aspect("equal")
+
+    # bez_from_interceptions.plot_potential_pursuer_reachable_region(
+    #     arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
+    # )
+    rectangle_bez.plot_box_pursuer_reachable_region(
+        min_box,
+        max_box,
+        pursuerRange,
+        pursuerCaptureRadius,
+        ax=ax,
+    )
+    ax.scatter(*interceptPoint, color="red", s=50, label="Intercept Point", marker="x")
+    ax.scatter(
+        *truePursuerPos, color="red", s=50, label="True Pursuer Position", marker="o"
+    )
+    plt.show()
+
+
+# simulation for monte carlo runs, sample single pursuer position, send agents sequentially
+def run_monte_carlo_simulation(randomSeed=0):
+    rng = np.random.default_rng(randomSeed)
+
+    x_range = [-6.0, 6.0]
+    y_range = [-6.0, 6.0]
+    num_pts = 50
+    pursuerRange = 1.0
+    pursuerCaptureRadius = 0.2
+    pursuerSpeed = 1.5
+    x = jnp.linspace(x_range[0], x_range[1], num_pts)
+    y = jnp.linspace(y_range[0], y_range[1], num_pts)
+    [X, Y] = jnp.meshgrid(x, y)
+    points = jnp.stack([X.flatten(), Y.flatten()], axis=-1)
+    dx = (x_range[1] - x_range[0]) / (num_pts - 1)
+    dy = (y_range[1] - y_range[0]) / (num_pts - 1)
+    dArea = dx * dy
+    min_box = jnp.array([-4.0, -4.0])
+    max_box = jnp.array([4.0, 4.0])
+
+    sacraficialLaunchPosition = np.array([-5.0, -5.0])
+    sacraficialSpeed = 1.0
+
+    initialSacraficialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
+    num_cont_points = 14
+    spline_order = 3
+    sacraficialRange = 25.0
+    v = sacraficialSpeed
+    R_min = 0.5
+
+    velocity_constraints = (0.01, v)  # don’t allow near-zero speed
+    curvature_constraints = (-1.0 / R_min, 1.0 / R_min)  # ±0.167
+    turn_rate_constraints = (-v / R_min, v / R_min)  # consistent with curvature
+
+    numAgents = 5
+
+    alpha = 8.0
+    beta = 2.0
+
+    truePursuerPos = np.array(
+        [rng.uniform(min_box[0], max_box[0]), rng.uniform(min_box[1], max_box[1])]
+    )
+
+    interceptionPositions = []
+    interceptionRadii = []
+
+    plot = True
+
+    for agentIdx in range(numAgents):
+        if len(interceptionPositions) == 0:
+            launchPdf = None
+            spline = optimize_spline_path_get_intercepted(
+                sacraficialLaunchPosition,
+                np.array([0.0, 0.0]),
+                initialSacraficialVelocity,
+                num_cont_points,
+                spline_order,
+                velocity_constraints,
+                turn_rate_constraints,
+                curvature_constraints,
+                sacraficialSpeed,
+                pursuerRange,
+                pursuerCaptureRadius,
+                min_box,
+                max_box,
+                dArea,
+                sacraficialAgentRange=sacraficialRange,
+            )
+        else:
+            launchPdf = pez_from_interceptions.uniform_pdf_from_interception_points(
+                points,
+                np.array(interceptionPositions),
+                pursuerRange,
+                pursuerCaptureRadius,
+                dArea,
+            )
+
+            expected_launch_pos, Z = expected_position_from_pdf(
+                points, launchPdf, dArea
+            )
+            print("expected launch position:", expected_launch_pos, "Z=", Z)
+            spline = optimize_spline_path_minimize_area(
+                sacraficialLaunchPosition,
+                expected_launch_pos,
+                initialSacraficialVelocity,
+                num_cont_points,
+                spline_order,
+                velocity_constraints,
+                turn_rate_constraints,
+                curvature_constraints,
+                sacraficialSpeed,
+                pursuerRange,
+                pursuerCaptureRadius,
+                np.array(interceptionPositions),
+                np.array(interceptionRadii),
+                dArea,
+                points,
+                launchPdf,
+                sacraficialAgentRange=sacraficialRange,
+            )
+        isIntercepted, idx, interceptPoint, D = sample_intercept_from_spline(
+            spline,
+            truePursuerPos,
+            pursuerRange,
+            alpha,
+            beta,
+            D_min=0.5 * pursuerRange,
+            rng=rng,
+        )
+        if isIntercepted:
+            print(f"Agent {agentIdx} intercepted at point {interceptPoint} (D={D})")
+            interceptionPositions.append(np.array(interceptPoint))
+            interceptionRadii.append(pursuerRange + pursuerCaptureRadius)
+        if plot:
+            fig, ax = plt.subplots()
+            t0 = spline.t[spline.k]
+            tf = spline.t[-1 - spline.k]
+            t = np.linspace(t0, tf, 1000, endpoint=True)
+            idx = -1
+            pos = spline(t)[0:idx]
+            ax.plot(pos[:, 0], pos[:, 1], label=f"Sacraficial Agent {agentIdx} Path")
+
+            ax.set_aspect("equal")
+
+            if len(interceptionPositions) > 0:
+                arcs = bez_from_interceptions.compute_potential_pursuer_region_from_interception_position(
+                    # np.array(interceptionPositions[0:-1]),
+                    np.array(interceptionPositions),
+                    pursuerRange,
+                    pursuerCaptureRadius,
+                )
+
+                ax.set_aspect("equal")
+                bez_from_interceptions.plot_potential_pursuer_reachable_region(
+                    arcs,
+                    pursuerRange,
+                    pursuerCaptureRadius,
+                    xlim=x_range,
+                    ylim=y_range,
+                    ax=ax,
+                )
+                bez_from_interceptions.plot_circle_intersection_arcs(arcs, ax=ax)
+            else:
+                rectangle_bez.plot_box_pursuer_reachable_region(
+                    min_box,
+                    max_box,
+                    pursuerRange,
+                    pursuerCaptureRadius,
+                    ax=ax,
+                )
+            ax.scatter(
+                *truePursuerPos,
+                color="red",
+                s=50,
+                label="True Pursuer Position",
+                marker="o",
+            )
+            if isIntercepted:
+                ax.scatter(
+                    *interceptPoint,
+                    color="blue",
+                    s=50,
+                    label="Intercept Point",
+                    marker="x",
+                )
+                for i, pos in enumerate(interceptionPositions[0:-1]):
+                    ax.scatter(
+                        *pos,
+                        color="red",
+                        s=50,
+                        label=f"Past Interception {i}",
+                        marker="x",
+                    )
+            else:
+                for i, pos in enumerate(interceptionPositions):
+                    ax.scatter(
+                        *pos,
+                        color="red",
+                        s=50,
+                        label=f"Past Interception {i}",
+                        marker="x",
+                    )
+            plt.show()
+
+
 if __name__ == "__main__":
-    main_planner()
+    run_monte_carlo_simulation(10)
+    # main_planner()
+    # main_planner_box()
     # plot_area_objective_function()
