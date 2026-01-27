@@ -472,7 +472,7 @@ def plan_path_box_BEZ(
     velocity_constraints,
     turn_rate_constraints,
     curvature_constraints,
-    num_constraint_samples,
+    num_constraint_samples=None,
 ):
     (splineRight, tfRight) = optimize_spline_path_box_BEZ(
         initialEvaderPosition,
@@ -521,7 +521,7 @@ def plan_path_box_BEZ(
         spline = splineLeft
         tf = tfLeft
     print("path time", tf)
-    return spline
+    return spline, tf
 
 
 def main_box():

@@ -474,7 +474,7 @@ def plan_path_from_interception_points(
     velocity_constraints,
     turn_rate_constraints,
     curvature_constraints,
-    num_constraint_samples,
+    num_constraint_samples=None,
 ):
     arcs = bez_from_interceptions.intersection_arcs(
         interceptionPositions, [pursuerRange] * np.ones(len(interceptionPositions))
@@ -532,7 +532,7 @@ def plan_path_from_interception_points(
         spline = splineLeft
         tf = tfLeft
     print("path time", tf)
-    return spline, arcs
+    return spline, arcs, tf
 
 
 def main(interceptionPositions):

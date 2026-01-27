@@ -25,6 +25,8 @@ from GEOMETRIC_BEZ import bez_from_interceptions
 import GEOMETRIC_BEZ.pez_from_interceptions as pez_from_interceptions
 import GEOMETRIC_BEZ.rectangle_pez as rectangle_pez
 import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
+from GEOMETRIC_BEZ import rectangle_bez_path_planner
+from GEOMETRIC_BEZ import bez_from_interceptions_path_planner
 
 
 import bspline.spline_opt_tools as spline_opt_tools
@@ -51,112 +53,34 @@ def plot_spline(spline, ax, width=1):
     ax.set_aspect(1)
 
 
-def _survival_prefix(h):
-    """
-    h: (K,) with values in [0,1)
-    returns S_prev: (K,) where S_prev[k] = Π_{j<k} (1 - h[j])
-    """
-    one_minus = 1.0 - h
-    cp = jnp.cumprod(one_minus + 1e-12)
-    return jnp.concatenate([jnp.array([1.0], dtype=cp.dtype), cp[:-1]])
+def circle_intersection_area(centers, radii, num_integration_points=5000, pad=0.0):
+    centers = np.asarray(centers, dtype=float)
+    radii = np.asarray(radii, dtype=float)
 
+    if centers.ndim != 2 or centers.shape[1] != 2:
+        raise ValueError("centers must be (N,2)")
+    if radii.ndim != 1 or radii.shape[0] != centers.shape[0]:
+        raise ValueError("radii must be (N,) matching centers")
+    if np.any(radii < 0):
+        raise ValueError("radii must be nonnegative")
 
-@jax.jit
-def dist_objective_function_trajectory(
-    controlPoints,
-    knotPoints,
-    pursuerRange,
-    pursuerCaptureRadius,
-    pastInterseptionLocations,
-    pastRadaii,
-    dArea,
-    integrationPoints,
-    launchPdf,
-    alpha=1.0,
-    *,
-    # smoothing / conditioning knobs
-    tau_reach_scale=0.75,  # reach softness in units of sqrt(dArea)
-    tau_dist=0.25,  # distance softmin length scale (same units as pos)
-    ds_floor=1e-6,
-    normalize_ds=True,
-    # "shotdown process" knobs
-    hazard_gain=8.0,  # sharpness of converting p_reach->hazard (bigger = more "eventy")
-    p_power=2.0,  # emphasize high p_reach in hazard (>=1)
-    # "informativeness" knobs
-    d_star=1.0,  # distance threshold: below this is "low info"
-    d_tau=0.25,  # softness of the threshold
-    # optional: reward shaping
-    use_log_reward=False,  # use log(1+d) instead of d to reduce incentive for extreme d
-):
-    """
-    Event-based objective:
-      - first exposure should be maximally informative
-      - subsequent exposures should also be informative
-      - low-info exposures are discouraged because they terminate survival early with little utility
+    # tight bounding box around all circles
+    min_box = np.min(centers - radii[:, None], axis=0) - pad
+    max_box = np.max(centers + radii[:, None], axis=0) + pad
 
-    Expected utility:
-      E = Σ_k S_prev[k] * h[k] * U(d_k)
+    K = int(num_integration_points)
+    x = np.linspace(min_box[0], max_box[0], K)
+    y = np.linspace(min_box[1], max_box[1], K)
+    dA = (x[1] - x[0]) * (y[1] - y[0])
 
-    where:
-      h[k] = 1 - exp(-hazard_gain * (p_reach[k]^p_power) * ds_k)
-      U(d) ≈ 0 when d < d_star, increases when d > d_star (smooth gate)
-    """
-    controlPoints = controlPoints.reshape((-1, 2))
-    pos = spline_opt_tools.evaluate_spline(
-        controlPoints, knotPoints, numSamplesPerInterval
-    )  # (K,2)
+    X, Y = np.meshgrid(x, y, indexing="xy")
+    pts = np.stack([X.ravel(), Y.ravel()], axis=1)  # (M,2)
 
-    R_eff = pursuerRange + pursuerCaptureRadius
+    dx = pts[:, None, 0] - centers[None, :, 0]
+    dy = pts[:, None, 1] - centers[None, :, 1]
+    inside = (dx * dx + dy * dy) <= (radii[None, :] * radii[None, :])
 
-    # ---- smooth reach ----
-    tau_reach = tau_reach_scale * jnp.sqrt(dArea)
-    p_reach = pez_from_interceptions.prob_reach_numerical_soft(
-        pos, integrationPoints, launchPdf, R_eff, dArea, tau_reach
-    )  # (K,)
-
-    # ---- smooth distance-to-past interceptions ----
-    active = pastRadaii > 0.0
-    any_active = jnp.any(active)
-
-    diff = pos[:, None, :] - pastInterseptionLocations[None, :, :]
-    dists = jnp.sqrt(jnp.sum(diff**2, axis=-1) + 1e-12)  # (K,N)
-    dists = jnp.where(active[None, :], dists, jnp.inf)
-
-    d_softmin = -tau_dist * jax.scipy.special.logsumexp(
-        -dists / tau_dist, axis=1
-    )  # (K,)
-    d_softmin = jnp.where(any_active, d_softmin, 0.0)
-
-    # ---- arc-length weights ----
-    deltas = pos[1:] - pos[:-1]
-    ds = jnp.linalg.norm(deltas, axis=1)
-    ds = jnp.maximum(ds, ds_floor)
-    ds = jnp.concatenate([ds, ds[-1:]])  # (K,)
-
-    if normalize_ds:
-        ds = ds / (jnp.sum(ds) + 1e-12)
-
-    # ---- hazard: probability of being shot down "at this step given survival so far" ----
-    # Make hazard concentrate where p_reach is truly high.
-    p_eff = jnp.clip(p_reach, 0.0, 1.0) ** p_power
-    h = 1.0 - jnp.exp(-hazard_gain * p_eff * ds)  # (K,) in [0,1)
-
-    # ---- informativeness utility U(d): ~0 below d_star, grows above ----
-    gate = jax.nn.sigmoid((d_softmin - d_star) / d_tau)  # ~0 low-info, ~1 high-info
-    if use_log_reward:
-        U = gate * jnp.log1p(d_softmin)
-    else:
-        U = gate * d_softmin
-
-    # ---- expected utility of the first (and only) exposure event ----
-    S_prev = _survival_prefix(h)  # (K,)
-    w = S_prev * h  # (K,) first-hit distribution
-    expected_utility = jnp.sum(w * U)
-
-    return -expected_utility
-
-
-dDistaObjectiveDControlPoints = jax.jit(jax.jacfwd(dist_objective_function_trajectory))
+    return np.count_nonzero(np.all(inside, axis=1)) * dA
 
 
 # ---------------------------
@@ -427,8 +351,6 @@ def intercepted(
 dAreaObjectiveDControlPoints = jax.jit(jax.jacfwd(area_objective_function_trajectory))
 dAreaInterceptedDControlPoints = jax.jit(jax.jacfwd(intercepted))
 
-# objfunction_trajectory = dist_objective_function_trajectory
-# objfunction_trajectory_jacobian = dDistaObjectiveDControlPoints
 objfunction_trajectory = area_objective_function_trajectory
 objfunction_trajectory_jacobian = dAreaObjectiveDControlPoints
 
@@ -625,12 +547,9 @@ def optimize_spline_path_minimize_area(
         x0, knotPoints, p0, v0
     ).flatten()
 
-    print("TEST")
-    print("x0:", x0.shape)
     tempVelocityContstraints = spline_opt_tools.get_spline_velocity(
         x0, 1, 3, numSamplesPerInterval
     )
-    print("here")
     start = time.time()
     num_constraint_samples = len(tempVelocityContstraints)
 
@@ -665,7 +584,7 @@ def optimize_spline_path_minimize_area(
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 5
+    opt.options["print_level"] = 0
 
     opt.options["max_iter"] = 1000
     opt.options["derivative_test"] = "first-order"
@@ -680,12 +599,9 @@ def optimize_spline_path_minimize_area(
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
-    print(sol)
 
     controlPoints = sol.xStar["control_points"].reshape((num_cont_points, 2))
 
-    if debug:
-        print("Optimization time:", time.time() - start)
     return create_spline(knotPoints, controlPoints, spline_order)
 
 
@@ -783,48 +699,6 @@ def get_hit_objective_function(
     coverage = jnp.sum(covered_i) * dA / (box_area + 1e-12)
 
     return -coverage
-
-
-# @jax.jit
-# def get_hit_objective_function(
-#     controlPoints,
-#     knotPoints,
-#     pursuerRange,
-#     pursuerCaptureRadius,
-#     min_box,
-#     max_box,
-#     alpha=1.0,
-#     *,
-#     ds_floor=1e-6,
-# ):
-#     """
-#     """
-#     controlPoints = controlPoints.reshape((-1, 2))
-#
-#     # (K,2) sampled trajectory positions (candidate kill points)
-#     pos = spline_opt_tools.evaluate_spline(
-#         controlPoints, knotPoints, numSamplesPerInterval
-#     )
-#
-#     R_eff = pursuerRange + pursuerCaptureRadius
-#
-#     p_reach = rectangle_pez.prob_reachable_uniform_box(
-#         pos, pursuerRange, pursuerCaptureRadius, min_box, max_box
-#     )
-#
-#     # Step length along path (K-1,), pad to (K,)
-#     deltas = pos[1:] - pos[:-1]
-#     ds = jnp.linalg.norm(deltas, axis=1)
-#     ds = jnp.maximum(ds, ds_floor)
-#     ds = jnp.concatenate([ds, ds[-1:]])  # (K,)
-#
-#     # Hazard per step and survival weighting
-#     h = hazard_from_reach(p_reach, ds, alpha=alpha)  # (K,)
-#     S_prev = survival_prefix(h)
-#     return np.sum(S_prev * p_reach)
-#     gotHit = 1.0 - jnp.prod(1.0 - h + 1e-12)
-#
-#     return -gotHit
 
 
 dHitObjectiveDControlPoints = jax.jit(jax.jacfwd(get_hit_objective_function))
@@ -1005,7 +879,7 @@ def optimize_spline_path_get_intercepted(
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 5
+    opt.options["print_level"] = 0
 
     opt.options["max_iter"] = 1000
     opt.options["derivative_test"] = "first-order"
@@ -1020,12 +894,9 @@ def optimize_spline_path_get_intercepted(
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
-    print(sol)
 
     controlPoints = sol.xStar["control_points"].reshape((num_cont_points, 2))
 
-    if debug:
-        print("Optimization time:", time.time() - start)
     return create_spline(knotPoints, controlPoints, spline_order)
 
 
@@ -1445,7 +1316,9 @@ def main_planner_box():
 
 
 # simulation for monte carlo runs, sample single pursuer position, send agents sequentially
-def run_monte_carlo_simulation(randomSeed=0):
+def run_monte_carlo_simulation(
+    randomSeed=0, numAgents=5, saveData=True, dataDir="GEOMETRIC_BEZ/data/"
+):
     rng = np.random.default_rng(randomSeed)
 
     x_range = [-6.0, 6.0]
@@ -1461,11 +1334,16 @@ def run_monte_carlo_simulation(randomSeed=0):
     dx = (x_range[1] - x_range[0]) / (num_pts - 1)
     dy = (y_range[1] - y_range[0]) / (num_pts - 1)
     dArea = dx * dy
-    min_box = jnp.array([-4.0, -4.0])
-    max_box = jnp.array([4.0, 4.0])
+    min_box = jnp.array([-2.0, -2.0])
+    max_box = jnp.array([2.0, 2.0])
 
     sacraficialLaunchPosition = np.array([-5.0, -5.0])
     sacraficialSpeed = 1.0
+
+    highPriorityStart = sacraficialLaunchPosition.copy()
+    highPriorityGoal = np.array([5.0, 5.0])
+    initialHighPriorityVel = np.array([1.0, 1.0]) / np.sqrt(2)
+    highPrioritySpeed = 1.0
 
     initialSacraficialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
     num_cont_points = 14
@@ -1478,8 +1356,6 @@ def run_monte_carlo_simulation(randomSeed=0):
     curvature_constraints = (-1.0 / R_min, 1.0 / R_min)  # ±0.167
     turn_rate_constraints = (-v / R_min, v / R_min)  # consistent with curvature
 
-    numAgents = 5
-
     alpha = 8.0
     beta = 2.0
 
@@ -1490,7 +1366,34 @@ def run_monte_carlo_simulation(randomSeed=0):
     interceptionPositions = []
     interceptionRadii = []
 
-    plot = True
+    potentialPursuerRegionAreas = []
+    highPriorityPathTimes = []
+
+    potentialPursuerRegionAreas.append(
+        (max_box[0] - min_box[0]) * (max_box[1] - min_box[1])
+    )
+
+    planHighPriorityPaths = True
+    plot = False
+
+    if planHighPriorityPaths:
+        splineHP, tfHP = rectangle_bez_path_planner.plan_path_box_BEZ(
+            min_box,
+            max_box,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            highPriorityStart,
+            highPriorityGoal,
+            initialHighPriorityVel,
+            highPrioritySpeed,
+            num_cont_points,
+            spline_order,
+            velocity_constraints,
+            turn_rate_constraints,
+            curvature_constraints,
+        )
+        highPriorityPathTimes.append(tfHP)
 
     for agentIdx in range(numAgents):
         if len(interceptionPositions) == 0:
@@ -1557,6 +1460,32 @@ def run_monte_carlo_simulation(randomSeed=0):
             print(f"Agent {agentIdx} intercepted at point {interceptPoint} (D={D})")
             interceptionPositions.append(np.array(interceptPoint))
             interceptionRadii.append(pursuerRange + pursuerCaptureRadius)
+        if planHighPriorityPaths:
+            splineHP, arcs, tf = (
+                bez_from_interceptions_path_planner.plan_path_from_interception_points(
+                    interceptionPositions,
+                    pursuerRange,
+                    pursuerCaptureRadius,
+                    pursuerSpeed,
+                    highPriorityStart,
+                    highPriorityGoal,
+                    initialHighPriorityVel,
+                    highPrioritySpeed,
+                    num_cont_points,
+                    spline_order,
+                    velocity_constraints,
+                    turn_rate_constraints,
+                    curvature_constraints,
+                )
+            )
+            highPriorityPathTimes.append(tf)
+
+        if saveData:
+            intersectionArea = circle_intersection_area(
+                np.array(interceptionPositions),
+                np.array(interceptionRadii),
+            )
+            potentialPursuerRegionAreas.append(intersectionArea)
         if plot:
             fig, ax = plt.subplots()
             t0 = spline.t[spline.k]
@@ -1565,6 +1494,13 @@ def run_monte_carlo_simulation(randomSeed=0):
             idx = -1
             pos = spline(t)[0:idx]
             ax.plot(pos[:, 0], pos[:, 1], label=f"Sacraficial Agent {agentIdx} Path")
+
+            t0 = splineHP.t[splineHP.k]
+            tf = splineHP.t[-1 - splineHP.k]
+            t = np.linspace(t0, tf, 1000, endpoint=True)
+
+            posHP = splineHP(t)
+            ax.plot(posHP[:, 0], posHP[:, 1], label="High-Priority Agent Path")
 
             ax.set_aspect("equal")
 
@@ -1627,10 +1563,36 @@ def run_monte_carlo_simulation(randomSeed=0):
                         marker="x",
                     )
             plt.show()
+    if saveData:
+        data = {
+            "truePursuerPos": truePursuerPos,
+            "interceptionPositions": np.array(interceptionPositions),
+            "interceptionRadii": np.array(interceptionRadii),
+            "potentialPursuerRegionAreas": np.array(potentialPursuerRegionAreas),
+            "highPriorityPathTimes": np.array(highPriorityPathTimes),
+        }
+        filename = dataDir + f"{randomSeed}.npz"
+        np.savez_compressed(filename, **data)
+        print(f"Saved simulation data to {filename}")
+
+
+def parse_data(dataDir):
+    for filename in os.listdir(dataDir):
+        if filename.endswith(".npz"):
+            data = np.load(os.path.join(dataDir, filename))
+            # process data as needed
+            print(f"Loaded data from {filename}:")
+            print("True Pursuer Position:", data["truePursuerPos"])
+            print("Interception Positions:", data["interceptionPositions"])
+            print(
+                "Potential Pursuer Region Areas:", data["potentialPursuerRegionAreas"]
+            )
+            print("highPriorityPathTimes:", data["highPriorityPathTimes"])
 
 
 if __name__ == "__main__":
-    run_monte_carlo_simulation(10)
+    run_monte_carlo_simulation(20, 2)
+    parse_data(dataDir="GEOMETRIC_BEZ/data/")
     # main_planner()
     # main_planner_box()
     # plot_area_objective_function()
