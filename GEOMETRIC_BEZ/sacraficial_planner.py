@@ -419,7 +419,7 @@ def optimize_spline_path_minimize_area(
     integrationPoints,
     launchPdf,
     sacraficialAgentRange=5.5,
-    debug=None,
+    pmin=0.9,
 ):
     """
     Optimize B-spline control points subject to kinematic constraints.
@@ -463,19 +463,6 @@ def optimize_spline_path_minimize_area(
         funcs["velocity"] = np.asarray(velocity)
         funcs["curvature"] = np.asarray(curvature)
         funcs["intercepted"] = float(np.asarray(intercepted))
-
-        if debug:
-            eval_counter["n"] += 1
-            if eval_counter["n"] % max(1, debug_every) == 0:
-                v = funcs["velocity"]
-                tr = funcs["turn_rate"]
-                k = funcs["curvature"]
-                print(
-                    f"[eval {eval_counter['n']}] obj={funcs['obj']:.6e} "
-                    f"v[min,max]=({v.min():.3e},{v.max():.3e}) "
-                    f"tr[min,max]=({tr.min():.3e},{tr.max():.3e}) "
-                    f"k[min,max]=({k.min():.3e},{k.max():.3e})"
-                )
 
         fail = (
             (not np.isfinite(funcs["obj"]))
@@ -590,7 +577,7 @@ def optimize_spline_path_minimize_area(
         scale=1.0 / curvature_constraints[1],
     )
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
-    optProb.addConGroup("intercepted", 1, lower=0.90, upper=None)
+    optProb.addConGroup("intercepted", 1, lower=pmin, upper=None)
 
     optProb.addObj("obj")
 

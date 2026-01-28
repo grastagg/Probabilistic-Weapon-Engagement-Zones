@@ -75,6 +75,7 @@ def run_monte_carlo_simulation(
         "alpha": 8.0,
         "beta": 2.0,
         "D_min_frac": 0.5,
+        "p_min": 0.95,
     }
     cfg["D_min"] = cfg["D_min_frac"] * cfg["pursuerRange"]
 
@@ -224,6 +225,7 @@ def run_monte_carlo_simulation(
                 points,
                 launchPdf,
                 sacraficialAgentRange=cfg["sacrificialRange"],
+                pmin=cfg["p_min"],
             )
             print(f"time for agent {agentIdx} optimization: {time.time() - t0:.3f}s")
 
