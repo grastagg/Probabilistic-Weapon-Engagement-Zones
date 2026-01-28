@@ -129,6 +129,7 @@ def run_monte_carlo_simulation(
     truePursuerPos = np.array(
         [rng.uniform(min_box[0], max_box[0]), rng.uniform(min_box[1], max_box[1])]
     )
+    print(f"True pursuer position: {truePursuerPos}")
 
     # -----------------------------
     # Storage
