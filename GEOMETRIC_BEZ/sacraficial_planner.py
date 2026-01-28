@@ -5,6 +5,7 @@ Sacrificial agent B-spline planner (pyOptSparse + IPOPT + JAX).
 
 from __future__ import annotations
 
+import sys
 import getpass
 import os
 import time
@@ -16,7 +17,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pyoptsparse import OPT, Optimization
 from scipy.interpolate import BSpline
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
+import os
+
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = (
+    "0.30"  # try 0.30; adjust if you run 2–3 workers
+)
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("MPLBACKEND", "Agg")  # avoid X11 ("Invalid MIT-MAGIC-COOKIE-1")
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -1134,7 +1145,6 @@ def main_planner():
 
     expected_launch_pos, Z = expected_position_from_pdf(points, launchPdf, dArea)
     # expected_launch_pos = np.array([2.5, 2.5])
-    print("Expected launch position:", expected_launch_pos, "Z=", Z)
 
     sacraficialRange = 10.0
 
@@ -1317,8 +1327,16 @@ def main_planner_box():
 
 # simulation for monte carlo runs, sample single pursuer position, send agents sequentially
 def run_monte_carlo_simulation(
-    randomSeed=0, numAgents=5, saveData=True, dataDir="GEOMETRIC_BEZ/data/"
+    randomSeed=0,
+    numAgents=5,
+    saveData=True,
+    dataDir="GEOMETRIC_BEZ/data/test/",
+    runName="test",
 ):
+    # make data directory and directory for runName is they don't exist
+    os.makedirs(dataDir, exist_ok=True)
+    os.makedirs(os.path.join(dataDir, runName), exist_ok=True)
+    dataDir = os.path.join(dataDir, runName) + "/"
     rng = np.random.default_rng(randomSeed)
 
     x_range = [-6.0, 6.0]
@@ -1368,6 +1386,7 @@ def run_monte_carlo_simulation(
 
     potentialPursuerRegionAreas = []
     highPriorityPathTimes = []
+    interceptionHistory = []
 
     potentialPursuerRegionAreas.append(
         (max_box[0] - min_box[0]) * (max_box[1] - min_box[1])
@@ -1398,6 +1417,7 @@ def run_monte_carlo_simulation(
     for agentIdx in range(numAgents):
         if len(interceptionPositions) == 0:
             launchPdf = None
+            start = time.time()
             spline = optimize_spline_path_get_intercepted(
                 sacraficialLaunchPosition,
                 np.array([0.0, 0.0]),
@@ -1415,6 +1435,7 @@ def run_monte_carlo_simulation(
                 dArea,
                 sacraficialAgentRange=sacraficialRange,
             )
+            print("First agent optimization time:", time.time() - start)
         else:
             launchPdf = pez_from_interceptions.uniform_pdf_from_interception_points(
                 points,
@@ -1427,7 +1448,7 @@ def run_monte_carlo_simulation(
             expected_launch_pos, Z = expected_position_from_pdf(
                 points, launchPdf, dArea
             )
-            print("expected launch position:", expected_launch_pos, "Z=", Z)
+            start = time.time()
             spline = optimize_spline_path_minimize_area(
                 sacraficialLaunchPosition,
                 expected_launch_pos,
@@ -1447,6 +1468,7 @@ def run_monte_carlo_simulation(
                 launchPdf,
                 sacraficialAgentRange=sacraficialRange,
             )
+            print("time for agent", agentIdx, "optimization:", time.time() - start)
         isIntercepted, idx, interceptPoint, D = sample_intercept_from_spline(
             spline,
             truePursuerPos,
@@ -1456,6 +1478,7 @@ def run_monte_carlo_simulation(
             D_min=0.5 * pursuerRange,
             rng=rng,
         )
+        interceptionHistory.append(isIntercepted)
         if isIntercepted:
             print(f"Agent {agentIdx} intercepted at point {interceptPoint} (D={D})")
             interceptionPositions.append(np.array(interceptPoint))
@@ -1570,13 +1593,32 @@ def run_monte_carlo_simulation(
             "interceptionRadii": np.array(interceptionRadii),
             "potentialPursuerRegionAreas": np.array(potentialPursuerRegionAreas),
             "highPriorityPathTimes": np.array(highPriorityPathTimes),
+            "interceptionHistory": np.array(interceptionHistory),
         }
         filename = dataDir + f"{randomSeed}.npz"
         np.savez_compressed(filename, **data)
         print(f"Saved simulation data to {filename}")
 
 
+def median_iqr_plot(data, ax=None, label=None):
+    if ax is None:
+        fig, ax = plt.subplots()
+    # average intersection areas over all runs
+    numAgents = len(data[0]) - 1
+    data = np.array(data)
+
+    ax.plot(np.arange(numAgents + 1), np.percentile(data, 50, axis=0), marker="o")
+    # fill in IQR
+    first_quartile = np.percentile(data, 25, axis=0)
+    third_quartile = np.percentile(data, 75, axis=0)
+    ax.fill_between(np.arange(numAgents + 1), first_quartile, third_quartile, alpha=0.2)
+    ax.set_xticks(np.arange(numAgents + 1))
+
+
 def parse_data(dataDir):
+    allIntersectionAreas = []
+    allPathTimes = []
+    allInterceptionHistories = []
     for filename in os.listdir(dataDir):
         if filename.endswith(".npz"):
             data = np.load(os.path.join(dataDir, filename))
@@ -1588,11 +1630,37 @@ def parse_data(dataDir):
                 "Potential Pursuer Region Areas:", data["potentialPursuerRegionAreas"]
             )
             print("highPriorityPathTimes:", data["highPriorityPathTimes"])
+            print("interceptionHistory:", data["interceptionHistory"])
+            intersectionAreas = data["potentialPursuerRegionAreas"]
+            pathTimes = data["highPriorityPathTimes"]
+            allIntersectionAreas.append(intersectionAreas)
+            allPathTimes.append(pathTimes)
+            allInterceptionHistories.append(data["interceptionHistory"])
+    allIntersectionAreas = np.array(allIntersectionAreas)
+    # count true per agent interceptions
+    print(
+        "Interception statistics per agent:",
+        np.sum(np.array(allInterceptionHistories), axis=0),
+    )
+    # median_iqr_plot(allIntersectionAreas)
+    # median_iqr_plot(allPathTimes)
+
+    plt.show()
 
 
 if __name__ == "__main__":
-    run_monte_carlo_simulation(20, 2)
-    parse_data(dataDir="GEOMETRIC_BEZ/data/")
+    # main()
+    # first argument is random seed from command line
+    if len(sys.argv) != 2:
+        parse_data(dataDir="GEOMETRIC_BEZ/data/test/")
+    else:
+        seed = int(sys.argv[1])
+        print("running monte carlo simulation with seed", seed)
+        numAgents = 3
+        runName = "test"
+        run_monte_carlo_simulation(
+            seed, 3, saveData=True, dataDir="GEOMETRIC_BEZ/data/", runName=runName
+        )
     # main_planner()
     # main_planner_box()
     # plot_area_objective_function()
