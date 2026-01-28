@@ -69,13 +69,14 @@ def run_monte_carlo_simulation(
         "sacrificialRange": 25.0,
         "highPriorityGoal": [5.0, 5.0],
         "highPrioritySpeed": 1.0,
-        "num_cont_points": 14,
+        "num_cont_points": 16,
         "spline_order": 3,
         "R_min": 0.5,
         "alpha": 8.0,
         "beta": 2.0,
         "D_min_frac": 0.5,
         "p_min": 0.95,
+        "pez_levels": [],
     }
     cfg["D_min"] = cfg["D_min_frac"] * cfg["pursuerRange"]
 
@@ -143,11 +144,13 @@ def run_monte_carlo_simulation(
         float((max_box[0] - min_box[0]) * (max_box[1] - min_box[1]))
     ]
     highPriorityPathTimes = []
+    highPriorityPathTimesPEZ = []
 
     # -----------------------------
     # Initial HP plan
     # -----------------------------
     splineHP = None
+    splinesHP_pez = []
     if cfg["planHighPriorityPaths"]:
         splineHP, tfHP = (
             sacraficial_planner.rectangle_bez_path_planner.plan_path_box_BEZ(
@@ -168,6 +171,31 @@ def run_monte_carlo_simulation(
             )
         )
         highPriorityPathTimes.append(tfHP)
+        timesTemp = []
+        for pez_limit in cfg["pez_levels"]:
+            splineHP_pez, tf_pez = (
+                sacraficial_planner.rectangle_pez_path_planner.plan_path_box_PEZ(
+                    min_box,
+                    max_box,
+                    cfg["pursuerRange"],
+                    cfg["pursuerCaptureRadius"],
+                    cfg["pursuerSpeed"],
+                    highPriorityStart,
+                    highPriorityGoal,
+                    initialHighPriorityVel,
+                    cfg["highPrioritySpeed"],
+                    cfg["num_cont_points"],
+                    cfg["spline_order"],
+                    velocity_constraints,
+                    turn_rate_constraints,
+                    curvature_constraints,
+                    10,
+                    pez_limit,
+                )
+            )
+            timesTemp.append(tf_pez)
+            splinesHP_pez.append(splineHP_pez)
+        highPriorityPathTimesPEZ.append(np.array(timesTemp))
 
     # -----------------------------
     # Main loop
@@ -197,8 +225,7 @@ def run_monte_carlo_simulation(
             launchPdf = sacraficial_planner.pez_from_interceptions.uniform_pdf_from_interception_points(
                 points,
                 np.array(interceptionPositions),
-                cfg["pursuerRange"],
-                cfg["pursuerCaptureRadius"],
+                np.array(interceptionRadii),
                 dArea,
             )
 
@@ -269,6 +296,36 @@ def run_monte_carlo_simulation(
                 )
             )
             highPriorityPathTimes.append(tf)
+            splinesHP_pez = []
+            timesTemp = []
+            for pez_limit in cfg["pez_levels"]:
+                splineHP_pez, tf_pez = (
+                    sacraficial_planner.pez_from_interceptions_path_planner.plan_path_PEZ_from_interceptions(
+                        cfg["pursuerRange"],
+                        cfg["pursuerCaptureRadius"],
+                        cfg["pursuerSpeed"],
+                        interceptionPositions,
+                        interceptionRadii,
+                        cfg["x_range"],
+                        cfg["y_range"],
+                        50,
+                        highPriorityStart,
+                        highPriorityGoal,
+                        initialHighPriorityVel,
+                        cfg["highPrioritySpeed"],
+                        cfg["num_cont_points"],
+                        cfg["spline_order"],
+                        velocity_constraints,
+                        turn_rate_constraints,
+                        curvature_constraints,
+                        10,
+                        pez_limit,
+                    )
+                )
+                splinesHP_pez.append(splineHP_pez)
+                timesTemp.append(tf_pez)
+            highPriorityPathTimesPEZ.append(np.array(timesTemp))
+
         if cfg["plot"]:
             fig, ax = plt.subplots()
             t0 = spline.t[spline.k]
@@ -284,6 +341,18 @@ def run_monte_carlo_simulation(
 
             posHP = splineHP(t)
             ax.plot(posHP[:, 0], posHP[:, 1], label="High-Priority Agent Path")
+
+            for k, tmpSpline in enumerate(splinesHP_pez):
+                t0 = tmpSpline.t[tmpSpline.k]
+                tf = tmpSpline.t[-1 - tmpSpline.k]
+                t = np.linspace(t0, tf, 1000, endpoint=True)
+                posHP_pez = tmpSpline(t)
+                ax.plot(
+                    posHP_pez[:, 0],
+                    posHP_pez[:, 1],
+                    linestyle="--",
+                    label=f"HP Path PEZ {cfg['pez_levels'][k]}",
+                )
 
             ax.set_aspect("equal")
 
@@ -347,6 +416,7 @@ def run_monte_carlo_simulation(
                         label=f"Past Interception {i}",
                         marker="x",
                     )
+            plt.legend()
             plt.show()
 
         if cfg["saveData"]:

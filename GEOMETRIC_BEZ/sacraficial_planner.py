@@ -37,7 +37,9 @@ import GEOMETRIC_BEZ.pez_from_interceptions as pez_from_interceptions
 import GEOMETRIC_BEZ.rectangle_pez as rectangle_pez
 import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
 from GEOMETRIC_BEZ import rectangle_bez_path_planner
+from GEOMETRIC_BEZ import rectangle_pez_path_planner
 from GEOMETRIC_BEZ import bez_from_interceptions_path_planner
+from GEOMETRIC_BEZ import pez_from_interceptions_path_planner
 
 
 import bspline.spline_opt_tools as spline_opt_tools

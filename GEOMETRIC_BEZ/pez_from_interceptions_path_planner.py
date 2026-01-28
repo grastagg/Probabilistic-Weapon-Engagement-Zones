@@ -19,6 +19,7 @@ matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
 from GEOMETRIC_BEZ import pez_from_interceptions
+from GEOMETRIC_BEZ import bez_from_interceptions_path_planner
 import bspline.spline_opt_tools as spline_opt_tools
 
 numSamplesPerInterval = 15
@@ -422,7 +423,7 @@ def optimize_spline_path_PEZ_from_interceptions(
 
     opt = OPT("ipopt")
     opt.options["print_level"] = 5
-    opt.options["max_iter"] = 1000
+    opt.options["max_iter"] = 150
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
@@ -432,7 +433,7 @@ def optimize_spline_path_PEZ_from_interceptions(
     # opt.options["warm_start_init_point"] = "yes"
     # opt.options["mu_init"] = 1e-1
     # opt.options["nlp_scaling_method"] = "gradient-based"
-    opt.options["tol"] = 1e-8
+    opt.options["tol"] = 1e-6
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
@@ -487,6 +488,23 @@ def plan_path_PEZ_from_interceptions(
         radii,
         dArea,
     )
+    splineHP, arcs, tf = (
+        bez_from_interceptions_path_planner.plan_path_from_interception_points(
+            interceptionPositions,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            initialEvaderPosition,
+            finalEvaderPosition,
+            initialEvaderVelocity,
+            evaderSpeed,
+            num_cont_points,
+            spline_order,
+            velocity_constraints,
+            turn_rate_constraints,
+            curvature_constraints,
+        )
+    )
     splineLeft, tfLeft = optimize_spline_path_PEZ_from_interceptions(
         initialEvaderPosition,
         finalEvaderPosition,
@@ -505,30 +523,31 @@ def plan_path_PEZ_from_interceptions(
         integrationPoints,
         dArea,
         right=False,
-        previous_spline=None,
+        previous_spline=splineHP,
         pez_limit=pez_limit,
     )
-    (splineRight, tfRight) = optimize_spline_path_PEZ_from_interceptions(
-        initialEvaderPosition,
-        finalEvaderPosition,
-        initialEvaderVelocity,
-        num_cont_points,
-        spline_order,
-        velocity_constraints,
-        turn_rate_constraints,
-        curvature_constraints,
-        num_constraint_samples,
-        evaderSpeed,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-        launch_pdf,
-        integrationPoints,
-        dArea,
-        right=True,
-        previous_spline=None,
-        pez_limit=pez_limit,
-    )
+    return splineLeft, tfLeft
+    # (splineRight, tfRight) = optimize_spline_path_PEZ_from_interceptions(
+    #     initialEvaderPosition,
+    #     finalEvaderPosition,
+    #     initialEvaderVelocity,
+    #     num_cont_points,
+    #     spline_order,
+    #     velocity_constraints,
+    #     turn_rate_constraints,
+    #     curvature_constraints,
+    #     num_constraint_samples,
+    #     evaderSpeed,
+    #     pursuerRange,
+    #     pursuerCaptureRadius,
+    #     pursuerSpeed,
+    #     launch_pdf,
+    #     integrationPoints,
+    #     dArea,
+    #     right=True,
+    #     previous_spline=None,
+    #     pez_limit=pez_limit,
+    # )
     print("Right path time", tfRight)
     print("Left path time", tfLeft)
     if tfRight < tfLeft:
@@ -538,7 +557,7 @@ def plan_path_PEZ_from_interceptions(
         spline = splineLeft
         tf = tfLeft
     print("path time", tf)
-    return spline
+    return spline, tf
 
 
 def main_pez_from_interceptions():
@@ -556,7 +575,7 @@ def main_pez_from_interceptions():
     turn_rate_constraints = (-1.0, 1.0)
     num_constraint_samples = 50
     pez_limit = 0.01
-    numPoints = 50
+    numPoints = 70
     xlim = (-4, 4)
     ylim = (-4, 4)
 
@@ -571,7 +590,7 @@ def main_pez_from_interceptions():
     radii = pursuerPathDistances + pursuerCaptureRadius
     radii = (pursuerRange + pursuerCaptureRadius) * np.ones(len(interceptionPositions))
 
-    spline = plan_path_PEZ_from_interceptions(
+    spline, tf = plan_path_PEZ_from_interceptions(
         pursuerRange,
         pursuerCaptureRadius,
         pursuerSpeed,

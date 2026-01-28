@@ -555,7 +555,7 @@ def plan_path_box_PEZ(
         spline = splineLeft
         tf = tfLeft
     print("path time", tf)
-    return spline
+    return spline, tf
 
 
 def main_box():
