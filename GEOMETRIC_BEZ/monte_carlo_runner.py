@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 
 from GEOMETRIC_BEZ import sacraficial_planner
 
@@ -265,6 +266,85 @@ def run_monte_carlo_simulation(
                 )
             )
             highPriorityPathTimes.append(tf)
+        if cfg["plot"]:
+            fig, ax = plt.subplots()
+            t0 = spline.t[spline.k]
+            tf = spline.t[-1 - spline.k]
+            t = np.linspace(t0, tf, 1000, endpoint=True)
+            idx = -1
+            pos = spline(t)[0:idx]
+            ax.plot(pos[:, 0], pos[:, 1], label=f"Sacraficial Agent {agentIdx} Path")
+
+            t0 = splineHP.t[splineHP.k]
+            tf = splineHP.t[-1 - splineHP.k]
+            t = np.linspace(t0, tf, 1000, endpoint=True)
+
+            posHP = splineHP(t)
+            ax.plot(posHP[:, 0], posHP[:, 1], label="High-Priority Agent Path")
+
+            ax.set_aspect("equal")
+
+            if len(interceptionPositions) > 0:
+                arcs = sacraficial_planner.bez_from_interceptions.compute_potential_pursuer_region_from_interception_position(
+                    # np.array(interceptionPositions[0:-1]),
+                    np.array(interceptionPositions),
+                    cfg["pursuerRange"],
+                    cfg["pursuerCaptureRadius"],
+                )
+
+                ax.set_aspect("equal")
+                sacraficial_planner.bez_from_interceptions.plot_potential_pursuer_reachable_region(
+                    arcs,
+                    cfg["pursuerRange"],
+                    cfg["pursuerCaptureRadius"],
+                    xlim=cfg["x_range"],
+                    ylim=cfg["y_range"],
+                    ax=ax,
+                )
+                sacraficial_planner.bez_from_interceptions.plot_circle_intersection_arcs(
+                    arcs, ax=ax
+                )
+            else:
+                sacraficial_planner.rectangle_bez.plot_box_pursuer_reachable_region(
+                    min_box,
+                    max_box,
+                    cfg["pursuerRange"],
+                    cfg["pursuerCaptureRadius"],
+                    ax=ax,
+                )
+            ax.scatter(
+                *truePursuerPos,
+                color="red",
+                s=50,
+                label="True Pursuer Position",
+                marker="o",
+            )
+            if isIntercepted:
+                ax.scatter(
+                    *interceptPoint,
+                    color="blue",
+                    s=50,
+                    label="Intercept Point",
+                    marker="x",
+                )
+                for i, pos in enumerate(interceptionPositions[0:-1]):
+                    ax.scatter(
+                        *pos,
+                        color="red",
+                        s=50,
+                        label=f"Past Interception {i}",
+                        marker="x",
+                    )
+            else:
+                for i, pos in enumerate(interceptionPositions):
+                    ax.scatter(
+                        *pos,
+                        color="red",
+                        s=50,
+                        label=f"Past Interception {i}",
+                        marker="x",
+                    )
+            plt.show()
 
         if cfg["saveData"]:
             if interceptionPositions:
@@ -310,4 +390,5 @@ if __name__ == "__main__":
             saveData=True,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
+            plot=True,
         )
