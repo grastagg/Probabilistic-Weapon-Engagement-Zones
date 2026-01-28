@@ -153,40 +153,78 @@ def pez_from_launch_region_pdf(
     )
 
 
+# def uniform_pdf_from_interception_points(
+#     points,  # (N,2)
+#     interceptionPositions,  # (M,2)
+#     pursuerRange,
+#     pursuerCaptureRadius,
+#     dA,  # integration area element
+# ):
+#     """
+#     Compute a uniform PDF over the intersection of M discs centered at
+#     the interception positions, with radius (pursuerRange + pursuerCaptureRadius).
+#
+#     points: (N,2) evaluation/integration grid
+#     interceptionPositions: (M,2) centers of discs
+#     pursuerRange, pursuerCaptureRadius: scalars
+#     dA: area element for numerical integration
+#
+#     Returns:
+#         pdf: (N,) array, uniform over the intersection region
+#     """
+#
+#     R_eff = pursuerRange + pursuerCaptureRadius  # effective radius
+#
+#     # distances: (N, M)
+#     diff = points[:, None, :] - interceptionPositions[None, :, :]
+#     dists = jnp.linalg.norm(diff, axis=-1)
+#
+#     # inside intersection if inside ALL discs
+#     inside_all = jnp.all(dists <= R_eff, axis=1)  # (N,)
+#
+#     # numeric area of intersection region
+#     area = jnp.sum(inside_all) * dA
+#
+#     # uniform pdf: 1/area inside, 0 outside
+#     pdf = jnp.where(inside_all, 1.0 / area, 0.0)
+#
+#     return pdf
 def uniform_pdf_from_interception_points(
     points,  # (N,2)
     interceptionPositions,  # (M,2)
-    pursuerRange,
-    pursuerCaptureRadius,
-    dA,  # integration area element
+    radii,  # (M,)  unique radius per interception disc
+    dA,  # scalar integration area element
+    eps=1e-12,  # avoid divide-by-zero if intersection is empty
 ):
     """
-    Compute a uniform PDF over the intersection of M discs centered at
-    the interception positions, with radius (pursuerRange + pursuerCaptureRadius).
+    Uniform PDF over the intersection of M discs centered at interceptionPositions
+    with per-disc radii given by 'radii'.
 
     points: (N,2) evaluation/integration grid
     interceptionPositions: (M,2) centers of discs
-    pursuerRange, pursuerCaptureRadius: scalars
+    radii: (M,) radius for each disc (same units as points)
     dA: area element for numerical integration
 
     Returns:
         pdf: (N,) array, uniform over the intersection region
     """
-
-    R_eff = pursuerRange + pursuerCaptureRadius  # effective radius
+    points = jnp.asarray(points)
+    interceptionPositions = jnp.asarray(interceptionPositions)
+    radii = jnp.asarray(radii)
 
     # distances: (N, M)
     diff = points[:, None, :] - interceptionPositions[None, :, :]
     dists = jnp.linalg.norm(diff, axis=-1)
 
-    # inside intersection if inside ALL discs
-    inside_all = jnp.all(dists <= R_eff, axis=1)  # (N,)
+    # inside intersection if inside ALL discs (broadcast radii to (1,M))
+    inside_all = jnp.all(dists <= radii[None, :], axis=1)  # (N,)
 
     # numeric area of intersection region
     area = jnp.sum(inside_all) * dA
 
     # uniform pdf: 1/area inside, 0 outside
-    pdf = jnp.where(inside_all, 1.0 / area, 0.0)
+    inv_area = 1.0 / jnp.maximum(area, eps)
+    pdf = jnp.where(inside_all, inv_area, 0.0)
 
     return pdf
 
@@ -202,6 +240,9 @@ def prob_reach_numerical(eval_points, integration_points, pdf_vals, R_eff, dA):
     diff = integration_points[None, :, :] - eval_points[:, None, :]
     dists = jnp.linalg.norm(diff, axis=-1)  # (K, M)
     inRange = dists <= R_eff  # (K, M)
+    # tau = 0.1
+    # inRange = jax.nn.sigmoid((R_eff - dists) / tau)  # (K,M)
+
     # broadcast pdf_vals: (M,) -> (K, M)
     weighted = inRange * pdf_vals[None, :]
     return jnp.sum(weighted, axis=1) * dA  # (K,)
@@ -225,6 +266,34 @@ def prob_reach_numerical_soft(
 
     weighted = in_range_soft * pdf_vals[None, :]
     return jnp.sum(weighted, axis=1) * dA  # (K,)
+
+
+@jax.jit
+def pez_numerical_soft(
+    evaderPosition,
+    evaderHeading,
+    evaderSpeed,
+    pursuerSpeed,
+    integration_points,
+    pdf_vals,
+    pursuerRange,
+    pursuerCaptureRadius,
+    dA,
+):
+    futureEvaderPositions = (
+        evaderPosition
+        + (evaderSpeed / pursuerSpeed)
+        * pursuerRange
+        * jnp.vstack([jnp.cos(evaderHeading), jnp.sin(evaderHeading)]).T
+    )
+    return prob_reach_numerical_soft(
+        futureEvaderPositions,
+        integration_points,
+        pdf_vals,
+        pursuerRange + pursuerCaptureRadius,
+        dA,
+        tau=0.01,
+    )
 
 
 @jax.jit
@@ -462,13 +531,57 @@ def plot_potential_pursuer_launch_with_range_uncertainty():
     plt.show()
 
 
+def plot_prob_reachable(
+    interceptionPositions,
+    radii,
+    pursuerRange,
+    pursuerCaptureRadius,
+    numPoints,
+    xlim,
+    ylim,
+    ax,
+    levels,
+):
+    points, X, Y = bez_from_interceptions.get_meshgrid_points(xlim, ylim, numPoints)
+
+    dArea = (
+        (xlim[1] - xlim[0]) / (numPoints - 1) * (ylim[1] - ylim[0]) / (numPoints - 1)
+    )
+
+    launch_pdf = uniform_pdf_from_interception_points(
+        points, interceptionPositions, radii, dArea
+    )
+    # numerically integrate to check pdf
+    integral = jnp.sum(launch_pdf) * dArea
+    print("Launch PDF integral check:", integral)
+    probReachable = prob_reach_numerical(
+        points, points, launch_pdf, pursuerRange + pursuerCaptureRadius, dArea
+    )
+    c = ax.contour(
+        X.reshape((numPoints, numPoints)),
+        Y.reshape((numPoints, numPoints)),
+        probReachable.reshape((numPoints, numPoints)),
+        levels=levels,
+    )
+
+
 def plot_pez_from_interception():
     pursuerSpeed = 2.0
     pursuerRange = 1.5
-    pursuerCaptureRadius = 0.0
+    pursuerCaptureRadius = 0.1
     evaderHeading = np.pi / 4
     evaderSpeed = 1.0
+    pursuerPosition = np.array([0.0, 0.0])
     interceptionPositions = np.array([[0.4, 0.5], [-0.8, -0.8], [-0.7, 0.9]])
+
+    dists = np.linalg.norm(pursuerPosition - interceptionPositions, axis=1)
+    launchTimes = dists / pursuerSpeed * np.random.uniform(1, 1.1, size=dists.shape)
+    pursuerPathDistances = launchTimes * pursuerSpeed
+    if np.any(pursuerPathDistances > pursuerRange):
+        print("Warning: launch times too long")
+
+    radii = pursuerPathDistances + pursuerCaptureRadius
+    radii = (pursuerRange + pursuerCaptureRadius) * np.ones(len(interceptionPositions))
 
     numPoints = 160
     xlim = (-4, 4)
@@ -480,7 +593,7 @@ def plot_pez_from_interception():
     )
 
     launch_pdf = uniform_pdf_from_interception_points(
-        points, interceptionPositions, pursuerRange, pursuerCaptureRadius, dArea
+        points, interceptionPositions, radii, dArea
     )
     # numerically integrate to check pdf
     integral = jnp.sum(launch_pdf) * dArea
@@ -499,10 +612,9 @@ def plot_pez_from_interception():
         pursuerCaptureRadius,
         dArea,
     )
-    arcs = bez_from_interceptions.compute_potential_pursuer_region_from_interception_position(
+    arcs = bez_from_interceptions.compute_potential_pursuer_region_from_interception_position_and_radii(
         interceptionPositions,
-        pursuerRange,
-        pursuerCaptureRadius,
+        radii,
     )
     fig = plt.figure(figsize=(6.5, 6.8))
 
@@ -595,7 +707,7 @@ def plot_pez_from_interception():
 
     bez_from_interceptions.plot_interception_points(
         interceptionPositions,
-        np.ones(len(interceptionPositions)) * pursuerRange,
+        radii,
         ax_pdf,
     )
     ax_pdf.set_title(r"$f_{\boldsymbol{x}_P}(\boldsymbol{x})$")

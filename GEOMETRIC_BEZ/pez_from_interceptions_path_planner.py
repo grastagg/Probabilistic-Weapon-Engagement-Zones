@@ -18,9 +18,8 @@ import jax
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 
-from GEOMETRIC_BEZ import pez_from_interceptions, rectangle_bez
+from GEOMETRIC_BEZ import pez_from_interceptions
 import bspline.spline_opt_tools as spline_opt_tools
-import GEOMETRIC_BEZ.rectangle_pez as rectangle_pez
 
 numSamplesPerInterval = 15
 
@@ -108,15 +107,16 @@ def rect_bottom_and_right(lower_left, upper_right, n_points_total):
 
 
 @jax.jit
-def box_PEZ_along_spline(
+def PEZ_from_interceptions_along_spline(
     controlPoints,
     tf,
     evaderSpeed,
-    min_box,
-    max_box,
     pursuerRange,
     pursuerCaptureRadius,
     pursuerSpeed,
+    launch_pdf,
+    integrationPoints,
+    dArea,
 ):
     numControlPoints = int(len(controlPoints) / 2)
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
@@ -137,29 +137,32 @@ def box_PEZ_along_spline(
     #     max_box,
     # )
 
-    ez = rectangle_pez.prob_engagment_zone_uniform_box(
+    pez = pez_from_interceptions.pez_numerical_soft(
         pos,
         evaderHeadings,
         evaderSpeed,
+        pursuerSpeed,
+        integrationPoints,
+        launch_pdf,
         pursuerRange,
         pursuerCaptureRadius,
-        pursuerSpeed,
-        min_box,
-        max_box,
+        dArea,
     )
-    return ez
+
+    return pez
 
 
 @jax.jit
-def compute_spline_constraints_for_box_PEZ(
+def compute_spline_constraints_for_PEZ_from_interceptions(
     controlPoints,
     knotPoints,
     evaderSpeed,
-    min_box,
-    max_box,
     pursuerRange,
     pursuerCaptureRadius,
     pursuerSpeed,
+    launch_pdf,
+    integrationPoints,
+    dArea,
 ):
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
@@ -173,32 +176,26 @@ def compute_spline_constraints_for_box_PEZ(
 
     curvature = turn_rate / velocity
 
-    # ez = rectangle_pez.prob_reachable_uniform_box(
-    #     pos,
-    #     pursuerRange,
-    #     pursuerCaptureRadius,
-    #     min_box,
-    #     max_box,
-    # )
-    ez = rectangle_pez.prob_engagment_zone_uniform_box(
+    pez = pez_from_interceptions.pez_numerical_soft(
         pos,
         evaderHeadings,
         evaderSpeed,
+        pursuerSpeed,
+        integrationPoints,
+        launch_pdf,
         pursuerRange,
         pursuerCaptureRadius,
-        pursuerSpeed,
-        min_box,
-        max_box,
+        dArea,
     )
 
-    return velocity, turn_rate, curvature, ez, pos, evaderHeadings
+    return velocity, turn_rate, curvature, pez, pos, evaderHeadings
 
 
-dBoxPEZDControlPoints = jax.jit(jax.jacfwd(box_PEZ_along_spline, argnums=0))
-dBoxPEZDtf = jax.jit(jax.jacfwd(box_PEZ_along_spline, argnums=1))
+dPEZDControlPoints = jax.jit(jax.jacfwd(PEZ_from_interceptions_along_spline, argnums=0))
+dPEZDtf = jax.jit(jax.jacfwd(PEZ_from_interceptions_along_spline, argnums=1))
 
 
-def optimize_spline_path_box_PEZ(
+def optimize_spline_path_PEZ_from_interceptions(
     p0,
     pf,
     v0,
@@ -209,11 +206,12 @@ def optimize_spline_path_box_PEZ(
     curvature_constraints,
     num_constraint_samples,
     evaderSpeed,
-    min_box,
-    max_box,
     pursuerRange,
     pursuerCaptureRadius,
     pursuerSpeed,
+    launch_pdf,
+    integrationPoints,
+    dArea,
     right=True,
     previous_spline=None,
     pez_limit=0.1,
@@ -232,15 +230,16 @@ def optimize_spline_path_box_PEZ(
         controlPoints = controlPoints.reshape((num_cont_points, 2))
 
         velocity, turn_rate, curvature, ez, pos, evaderHeading = (
-            compute_spline_constraints_for_box_PEZ(
+            compute_spline_constraints_for_PEZ_from_interceptions(
                 controlPoints,
                 knotPoints,
                 evaderSpeed,
-                min_box,
-                max_box,
                 pursuerRange,
                 pursuerCaptureRadius,
                 pursuerSpeed,
+                launch_pdf,
+                integrationPoints,
+                dArea,
             )
         )
 
@@ -270,31 +269,33 @@ def optimize_spline_path_box_PEZ(
             controlPoints
         )
 
-        dEZDControlPoints = dBoxPEZDControlPoints(
+        dEZDControlPoints = dPEZDControlPoints(
             controlPoints,
             tf,
             evaderSpeed,
-            min_box,
-            max_box,
             pursuerRange,
             pursuerCaptureRadius,
             pursuerSpeed,
+            launch_pdf,
+            integrationPoints,
+            dArea,
         )
-        dEZDtf = dBoxPEZDtf(
+        dEZDtf = dPEZDtf(
             controlPoints,
             tf,
             evaderSpeed,
-            min_box,
-            max_box,
             pursuerRange,
             pursuerCaptureRadius,
             pursuerSpeed,
+            launch_pdf,
+            integrationPoints,
+            dArea,
         )
         # replace nans with zeros
-        dEZDtf = np.array(dEZDtf, copy=True)
-        dEZDtf[np.isnan(dEZDtf)] = 0.0
-        dEZDControlPoints = np.array(dEZDControlPoints, copy=True)
-        dEZDControlPoints[np.isnan(dEZDControlPoints)] = 0.0
+        # dEZDtf = np.array(dEZDtf, copy=True)
+        # dEZDtf[np.isnan(dEZDtf)] = 0.0
+        # dEZDControlPoints = np.array(dEZDControlPoints, copy=True)
+        # dEZDControlPoints[np.isnan(dEZDControlPoints)] = 0.0
         dVelocityDControlPointsVal = spline_opt_tools.dVelocityDControlPoints(
             controlPoints, tf, 3, numSamplesPerInterval
         )
@@ -380,45 +381,6 @@ def optimize_spline_path_box_PEZ(
             velocity_constraints,
             numSamplesPerInterval,
         )
-    # test grad
-    testGrad = False
-    if testGrad:
-        dEZDControlPoints = dBoxPEZDControlPoints(
-            x0,
-            tf,
-            evaderSpeed,
-            min_box,
-            max_box,
-            pursuerRange,
-            pursuerCaptureRadius,
-            pursuerSpeed,
-        )
-        dEZDtf = dBoxPEZDtf(
-            x0,
-            tf,
-            evaderSpeed,
-            min_box,
-            max_box,
-            pursuerRange,
-            pursuerCaptureRadius,
-            pursuerSpeed,
-        )
-        numControlPoints = int(len(x0) / 2)
-        knotPoints = spline_opt_tools.create_unclamped_knot_points(
-            0, tf, numControlPoints, 3
-        )
-        evaderHeadings = spline_opt_tools.get_spline_heading(
-            x0, tf, 3, numSamplesPerInterval
-        )
-        controlPoints = x0.reshape((numControlPoints, 2))
-        pos = spline_opt_tools.evaluate_spline(
-            controlPoints, knotPoints, numSamplesPerInterval
-        )
-        print("dEZdtf", dEZDtf)
-        print("pos at nan", pos[jnp.isnan(dEZDtf).flatten()])
-        print("evaderHeadings at nan", evaderHeadings[jnp.isnan(dEZDtf).flatten()])
-
-    ###end test grad
 
     tempVelocityContstraints = spline_opt_tools.get_spline_velocity(
         x0, 1, 3, numSamplesPerInterval
@@ -459,14 +421,14 @@ def optimize_spline_path_box_PEZ(
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 0
+    opt.options["print_level"] = 5
     opt.options["max_iter"] = 1000
     username = getpass.getuser()
     opt.options["hsllib"] = (
         "/home/" + username + "/packages/ThirdParty-HSL/.libs/libcoinhsl.so"
     )
     opt.options["linear_solver"] = "ma97"
-    # opt.options["derivative_test"] = "first-order"
+    opt.options["derivative_test"] = "first-order"
     # opt.options["warm_start_init_point"] = "yes"
     # opt.options["mu_init"] = 1e-1
     # opt.options["nlp_scaling_method"] = "gradient-based"
@@ -488,12 +450,15 @@ def optimize_spline_path_box_PEZ(
     )
 
 
-def plan_path_box_PEZ(
-    min_box,
-    max_box,
+def plan_path_PEZ_from_interceptions(
     pursuerRange,
     pursuerCaptureRadius,
     pursuerSpeed,
+    interceptionPositions,
+    radii,
+    xlim,
+    ylim,
+    numPoints,
     initialEvaderPosition,
     finalEvaderPosition,
     initialEvaderVelocity,
@@ -506,42 +471,60 @@ def plan_path_box_PEZ(
     num_constraint_samples,
     pez_limit,
 ):
-    splineLeft, tfLeft = optimize_spline_path_box_PEZ(
+    integrationPoints, X, Y = (
+        pez_from_interceptions.bez_from_interceptions.get_meshgrid_points(
+            xlim, ylim, numPoints
+        )
+    )
+
+    dArea = (
+        (xlim[1] - xlim[0]) / (numPoints - 1) * (ylim[1] - ylim[0]) / (numPoints - 1)
+    )
+
+    launch_pdf = pez_from_interceptions.uniform_pdf_from_interception_points(
+        integrationPoints,
+        interceptionPositions,
+        radii,
+        dArea,
+    )
+    splineLeft, tfLeft = optimize_spline_path_PEZ_from_interceptions(
         initialEvaderPosition,
         finalEvaderPosition,
         initialEvaderVelocity,
-        num_cont_points=num_cont_points,
-        spline_order=spline_order,
-        velocity_constraints=velocity_constraints,
-        turn_rate_constraints=turn_rate_constraints,
-        curvature_constraints=curvature_constraints,
-        num_constraint_samples=num_constraint_samples,
-        evaderSpeed=evaderSpeed,
-        min_box=min_box,
-        max_box=max_box,
-        pursuerRange=pursuerRange,
-        pursuerCaptureRadius=pursuerCaptureRadius,
-        pursuerSpeed=pursuerSpeed,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        evaderSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        launch_pdf,
+        integrationPoints,
+        dArea,
         right=False,
         previous_spline=None,
         pez_limit=pez_limit,
     )
-    (splineRight, tfRight) = optimize_spline_path_box_PEZ(
+    (splineRight, tfRight) = optimize_spline_path_PEZ_from_interceptions(
         initialEvaderPosition,
         finalEvaderPosition,
         initialEvaderVelocity,
-        num_cont_points=num_cont_points,
-        spline_order=spline_order,
-        velocity_constraints=velocity_constraints,
-        turn_rate_constraints=turn_rate_constraints,
-        curvature_constraints=curvature_constraints,
-        num_constraint_samples=num_constraint_samples,
-        evaderSpeed=evaderSpeed,
-        min_box=min_box,
-        max_box=max_box,
-        pursuerRange=pursuerRange,
-        pursuerCaptureRadius=pursuerCaptureRadius,
-        pursuerSpeed=pursuerSpeed,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        evaderSpeed,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        launch_pdf,
+        integrationPoints,
+        dArea,
         right=True,
         previous_spline=None,
         pez_limit=pez_limit,
@@ -558,7 +541,7 @@ def plan_path_box_PEZ(
     return spline
 
 
-def main_box():
+def main_pez_from_interceptions():
     initialEvaderPosition = np.array([-5.0, -5.0])
     finalEvaderPosition = np.array([5.0, 5.0])
     initialEvaderVelocity = np.array([1.0, 0.0])
@@ -566,47 +549,37 @@ def main_box():
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.0
     evaderSpeed = 1.5
-    min_box = np.array([-3.0, -3.0])
-    max_box = np.array([3.0, 3.0])
     num_cont_points = 20
     spline_order = 3
     velocity_constraints = (0.9, 1.1)
     curvature_constraints = (-0.5, 0.5)
     turn_rate_constraints = (-1.0, 1.0)
     num_constraint_samples = 50
-    pez_limit = 0.25
+    pez_limit = 0.01
+    numPoints = 50
+    xlim = (-4, 4)
+    ylim = (-4, 4)
 
-    gradPoint = np.array([1.0, -5.0])
-    gradHeading = 0.0
-    grads = rectangle_pez.dPEZdPos(
-        gradPoint,
-        gradHeading,
-        evaderSpeed,
-        pursuerSpeed,
-        pursuerRange,
-        pursuerCaptureRadius,
-        min_box,
-        max_box,
-    )
-    headings_grad = rectangle_pez.dPEZdHeading(
-        gradPoint,
-        gradHeading,
-        evaderSpeed,
-        pursuerSpeed,
-        pursuerRange,
-        pursuerCaptureRadius,
-        min_box,
-        max_box,
-    )
-    print("position grad", grads)
-    print("heading grad", headings_grad)
+    pursuerPosition = np.array([0.0, 0.0])
+    interceptionPositions = np.array([[0.4, 0.5], [-0.8, -0.8], [-0.7, 0.9]])
+    dists = np.linalg.norm(pursuerPosition - interceptionPositions, axis=1)
+    launchTimes = dists / pursuerSpeed * np.random.uniform(1, 1.1, size=dists.shape)
+    pursuerPathDistances = launchTimes * pursuerSpeed
+    if np.any(pursuerPathDistances > pursuerRange):
+        print("Warning: launch times too long")
 
-    spline = plan_path_box_PEZ(
-        min_box,
-        max_box,
+    radii = pursuerPathDistances + pursuerCaptureRadius
+    radii = (pursuerRange + pursuerCaptureRadius) * np.ones(len(interceptionPositions))
+
+    spline = plan_path_PEZ_from_interceptions(
         pursuerRange,
         pursuerCaptureRadius,
         pursuerSpeed,
+        interceptionPositions,
+        radii,
+        xlim,
+        ylim,
+        numPoints,
         initialEvaderPosition,
         finalEvaderPosition,
         initialEvaderVelocity,
@@ -628,26 +601,43 @@ def main_box():
     ax.set_aspect("equal")
     ax.set_xlim(-6, 6)
     ax.set_ylim(-6, 6)
-    rectangle_pez.plot_rectangle_prr(
+    arcs = pez_from_interceptions.bez_from_interceptions.compute_potential_pursuer_region_from_interception_position_and_radii(
+        interceptionPositions,
+        radii,
+    )
+    pez_from_interceptions.bez_from_interceptions.plot_potential_pursuer_reachable_region(
+        arcs,
         pursuerRange,
         pursuerCaptureRadius,
-        min_box,
-        max_box,
-        xlim=(-4, 4),
-        ylim=(-4, 4),
+        xlim,
+        ylim,
+        numPoints=200,
         ax=ax,
     )
-    rectangle_bez.plot_box_pursuer_reachable_region(
-        min_box,
-        max_box,
+    pez_from_interceptions.plot_prob_reachable(
+        interceptionPositions,
+        radii,
         pursuerRange,
         pursuerCaptureRadius,
-        ax=ax,
+        numPoints,
+        xlim,
+        ylim,
+        ax,
+        levels=[0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
     )
+    # rectangle_pez.plot_rectangle_prr(
+    #     pursuerRange,
+    #     pursuerCaptureRadius,
+    #     min_box,
+    #     max_box,
+    #     xlim=(-4, 4),
+    #     ylim=(-4, 4),
+    #     ax=ax,
+    # )
 
     plt.legend()
 
 
 if __name__ == "__main__":
-    main_box()
+    main_pez_from_interceptions()
     plt.show()

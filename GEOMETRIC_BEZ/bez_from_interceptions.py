@@ -181,6 +181,13 @@ def compute_potential_pursuer_region_from_interception_position_and_launch_time(
     return arcs
 
 
+def compute_potential_pursuer_region_from_interception_position_and_radii(
+    interceptionPositions, radii
+):
+    arcs = intersection_arcs(interceptionPositions, radii)
+    return arcs
+
+
 def is_between_angles_radians(start_angle, stop_angle, angle):
     """
     Checks if a third angle lies between a start and stop angle counter-clockwise (radians).

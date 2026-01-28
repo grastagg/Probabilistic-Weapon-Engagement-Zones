@@ -182,12 +182,6 @@ def plot_rectangle_prr(
     ax,
     numPoints=120,
 ):
-    print("pursuerRange:", pursuerRange)
-    print("pursuerCaptureRadius:", pursuerCaptureRadius)
-    print("min_box:", min_box)
-    print("max_box:", max_box)
-    print("xlim:", xlim)
-    print("ylim:", ylim)
     points, X, Y = bez_from_interceptions.get_meshgrid_points(xlim, ylim, numPoints)
     probReachable = prob_reachable_uniform_box(
         points, pursuerRange, pursuerCaptureRadius, min_box, max_box
