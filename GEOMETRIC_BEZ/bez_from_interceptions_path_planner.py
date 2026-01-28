@@ -477,7 +477,8 @@ def plan_path_from_interception_points(
     num_constraint_samples=None,
 ):
     arcs = bez_from_interceptions.intersection_arcs(
-        interceptionPositions, [pursuerRange] * np.ones(len(interceptionPositions))
+        interceptionPositions,
+        [pursuerRange + pursuerCaptureRadius] * np.ones(len(interceptionPositions)),
     )
     centers, radii, theta_start, theta_end = bez_from_interceptions.arcs_to_arrays(arcs)
 
