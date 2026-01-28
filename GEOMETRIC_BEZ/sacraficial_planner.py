@@ -916,7 +916,7 @@ def expected_position_from_pdf(integrationPoints, launchPdf, dArea, eps=1e-12):
     return mu, Z
 
 
-def sample_intercept(traj_xy, x_p, R, alpha, beta, D_min=0.0, rng=None):
+def sample_intercept(traj_xy, x_p, R, r, alpha, beta, D_min=0.0, rng=None):
     traj = np.asarray(traj_xy, float)
     x_p = np.asarray(x_p, float)
 
@@ -925,7 +925,7 @@ def sample_intercept(traj_xy, x_p, R, alpha, beta, D_min=0.0, rng=None):
 
     # Sample D in [D_min, R]
     U = rng.beta(alpha, beta)
-    D = D_min + (R - D_min) * U
+    D = D_min + ((R + r) - D_min) * U
     print("commitmet distance D =", D)
 
     dists = np.linalg.norm(traj - x_p, axis=1)
@@ -942,14 +942,28 @@ def sample_intercept(traj_xy, x_p, R, alpha, beta, D_min=0.0, rng=None):
 
 
 def sample_intercept_from_spline(
-    spline, truePursuerPos, pursuerRange, alpha=2.0, beta=2.0, D_min=0.0, rng=None
+    spline,
+    truePursuerPos,
+    pursuerRange,
+    pursuerCaptureRadius,
+    alpha=2.0,
+    beta=2.0,
+    D_min=0.0,
+    rng=None,
 ):
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
     pos = spline(t)
     isIntercepted, idx, interceptPoint, D = sample_intercept(
-        pos, truePursuerPos, pursuerRange, alpha, beta, D_min, rng=rng
+        pos,
+        truePursuerPos,
+        pursuerRange,
+        pursuerCaptureRadius,
+        alpha,
+        beta,
+        D_min,
+        rng=rng,
     )
     return isIntercepted, idx, interceptPoint, D
 

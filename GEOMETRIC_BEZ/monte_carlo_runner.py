@@ -197,8 +197,7 @@ def run_monte_carlo_simulation(
             launchPdf = sacraficial_planner.pez_from_interceptions.uniform_pdf_from_interception_points(
                 points,
                 np.array(interceptionPositions),
-                cfg["pursuerRange"],
-                cfg["pursuerCaptureRadius"],
+                np.array(interceptionRadii),
                 dArea,
             )
 
@@ -234,6 +233,7 @@ def run_monte_carlo_simulation(
                 spline,
                 truePursuerPos,
                 cfg["pursuerRange"],
+                cfg["pursuerCaptureRadius"],
                 cfg["alpha"],
                 cfg["beta"],
                 D_min=cfg["D_min"],
@@ -386,12 +386,12 @@ if __name__ == "__main__":
         seed = int(sys.argv[1])
         print("running monte carlo simulation with seed", seed)
         numAgents = 5
-        runName = "test"
+        runName = "test2"
         run_monte_carlo_simulation(
             seed,
             numAgents,
             saveData=True,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=True,
+            plot=False,
         )
