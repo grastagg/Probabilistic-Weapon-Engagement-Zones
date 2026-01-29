@@ -1643,8 +1643,8 @@ def parse_data(dataDir):
         "Interception statistics per agent:",
         np.sum(np.array(allInterceptionHistories), axis=0),
     )
-    # median_iqr_plot(allIntersectionAreas)
-    # median_iqr_plot(allPathTimes)
+    median_iqr_plot(allIntersectionAreas)
+    median_iqr_plot(allPathTimes)
 
     plt.show()
 
