@@ -55,6 +55,7 @@ def run_monte_carlo_simulation(
         "dataDir": str(dataDir),
         "runName": str(runName),
         "plot": bool(plot),
+        "animate": False,
         "planHighPriorityPaths": bool(planHighPriorityPaths),
         "x_range": [-6.0, 6.0],
         "y_range": [-6.0, 6.0],
