@@ -1,5 +1,6 @@
 from __future__ import annotations
 import sys
+import os
 
 import json
 import time
@@ -36,6 +37,192 @@ def _write_json(path: Path, obj: dict):
         json.dump(_jsonable(obj), f, indent=2, sort_keys=True)
 
 
+def animate_true_pursuer(pursuerPosition, pursuerRange, pursuerCaptureRadius, ax):
+    ax.scatter(
+        *pursuerPosition, color="red", s=50, label="True Pursuer Position", marker="o"
+    )
+    # plot reachable region
+    circle = plt.Circle(
+        pursuerPosition, pursuerRange + pursuerCaptureRadius, color="red", alpha=0.2
+    )
+    ax.add_artist(circle)
+
+
+def _triangle_vertices(xy, heading, size):
+    """
+    Return 3x2 vertices for a triangle centered at xy, pointing along heading.
+    Triangle shape: one tip forward, two rear corners.
+    """
+    c, s = np.cos(heading), np.sin(heading)
+    R = np.array([[c, -s], [s, c]])
+
+    # local (body) coordinates: tip, rear-left, rear-right
+    # (tweak these ratios if you want a "longer" or "wider" triangle)
+    tri_local = (
+        np.array(
+            [
+                [1.2, 0.0],
+                [-1.0, 0.6],
+                [-1.0, -0.6],
+            ]
+        )
+        * size
+    )
+
+    return xy + tri_local @ R.T
+
+
+def animate_sacraficial_trajectory_frames(
+    spline,
+    isIntercepted,
+    interceptPoint,
+    interceptedTime,
+    frameNum,
+    frameRate,  # frames per second
+    cfg,
+    interceptHeading=None,  # radians; if None, use spline heading at intercept time
+    out_dir="video",
+    triangle_size=None,  # if None, auto from plot scale
+    dpi=150,
+    stop_at_intercept=True,  # True: stop frames at intercept; False: continue along spline
+    hold_frames=0,  # if stop_at_intercept, optionally hold N extra frames
+):
+    """
+    Writes frames: out_dir/{frameNum:06d}.png, returns updated frameNum.
+
+    spline: scipy.interpolate.BSpline or compatible callable with:
+      - spline(t) -> (2,) for scalar t, or (N,2) for array t
+      - spline.derivative(1)(t) available (recommended)
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    # BSpline "valid" time range
+    t0 = spline.t[spline.k]
+    tf = spline.t[-1 - spline.k]
+
+    # frame times
+    dt = 1.0 / float(frameRate)
+    t_vals = np.arange(t0, tf + 1e-12, dt)
+
+    # precompute full path for background
+    path = spline(t_vals)  # (N,2)
+
+    # precompute heading from derivative if available, else finite-diff
+    try:
+        dspline = spline.derivative(1)
+        vel = dspline(t_vals)  # (N,2)
+    except Exception:
+        vel = np.gradient(path, dt, axis=0)
+
+    headings = np.arctan2(vel[:, 1], vel[:, 0])
+
+    # default triangle size from plot scale
+    if triangle_size is None:
+        xr = cfg["x_range"][1] - cfg["x_range"][0]
+        yr = cfg["y_range"][1] - cfg["y_range"][0]
+        triangle_size = 0.02 * min(xr, yr)
+
+    # if interceptHeading not provided, use spline heading at intercept time
+    if interceptHeading is None and isIntercepted:
+        # clamp to valid range
+        t_int = float(np.clip(interceptedTime, t0, tf))
+        try:
+            v_int = dspline(t_int)
+        except Exception:
+            # finite diff around t_int
+            eps = 1e-3 * (tf - t0)
+            p1 = spline(max(t0, t_int - eps))
+            p2 = spline(min(tf, t_int + eps))
+            v_int = (p2 - p1) / (2 * eps)
+        interceptHeading = float(np.arctan2(v_int[1], v_int[0]))
+
+    # set up one figure we reuse for speed
+    fig, ax = plt.subplots()
+
+    # optional: if you want consistent styling across frames
+    ax.set_aspect("equal")
+    ax.set_xlim(cfg["x_range"])
+    ax.set_ylim(cfg["y_range"])
+
+    # figure out the intercept frame index (if any)
+    if isIntercepted:
+        intercept_idx = int(np.searchsorted(t_vals, interceptedTime, side="left"))
+        intercept_idx = int(np.clip(intercept_idx, 0, len(t_vals) - 1))
+    else:
+        intercept_idx = None
+
+    last_idx = len(t_vals) - 1
+    end_idx = last_idx
+
+    if isIntercepted and stop_at_intercept:
+        end_idx = intercept_idx
+
+    for i in range(0, end_idx + 1):
+        ax.cla()
+
+        # background: full path (always)
+        ax.plot(path[:, 0], path[:, 1], label="Sacrificial Agent Path")
+
+        # history up to now (optional, looks nice)
+        ax.plot(path[: i + 1, 0], path[: i + 1, 1], linewidth=2)
+
+        # current pose
+        if isIntercepted and (i >= intercept_idx):
+            cur_xy = np.asarray(interceptPoint, dtype=float)
+            cur_heading = float(interceptHeading)
+        else:
+            cur_xy = path[i]
+            cur_heading = float(headings[i])
+
+        tri = _triangle_vertices(cur_xy, cur_heading, triangle_size)
+        ax.fill(tri[:, 0], tri[:, 1], alpha=0.9, label="Agent")
+
+        # intercept marker (draw it once it happens, or always if you prefer)
+        if isIntercepted:
+            ax.scatter(
+                interceptPoint[0],
+                interceptPoint[1],
+                s=60,
+                marker="x",
+                label="Intercept Point",
+            )
+
+        ax.set_aspect("equal")
+        ax.set_xlim(cfg["x_range"])
+        ax.set_ylim(cfg["y_range"])
+        ax.legend(loc="upper right")
+
+        fig.savefig(os.path.join(out_dir, f"{frameNum:06d}.png"), dpi=dpi)
+        frameNum += 1
+
+    # optionally hold on the intercept pose for a few extra frames
+    if isIntercepted and stop_at_intercept and hold_frames > 0:
+        ax.cla()
+        ax.plot(path[:, 0], path[:, 1], label="Sacrificial Agent Path")
+        cur_xy = np.asarray(interceptPoint, dtype=float)
+        cur_heading = float(interceptHeading)
+        tri = _triangle_vertices(cur_xy, cur_heading, triangle_size)
+        ax.fill(tri[:, 0], tri[:, 1], alpha=0.9, label="Agent")
+        ax.scatter(
+            interceptPoint[0],
+            interceptPoint[1],
+            s=60,
+            marker="x",
+            label="Intercept Point",
+        )
+        ax.set_aspect("equal")
+        ax.set_xlim(cfg["x_range"])
+        ax.set_ylim(cfg["y_range"])
+        ax.legend(loc="upper right")
+
+        for _ in range(int(hold_frames)):
+            fig.savefig(os.path.join(out_dir, f"{frameNum:06d}.png"), dpi=dpi)
+            frameNum += 1
+
+    plt.close(fig)
+    return frameNum
+
+
 def run_monte_carlo_simulation(
     randomSeed=0,
     numAgents=5,
@@ -55,7 +242,7 @@ def run_monte_carlo_simulation(
         "dataDir": str(dataDir),
         "runName": str(runName),
         "plot": bool(plot),
-        "animate": False,
+        "animate": True,
         "planHighPriorityPaths": bool(planHighPriorityPaths),
         "x_range": [-6.0, 6.0],
         "y_range": [-6.0, 6.0],
@@ -170,6 +357,31 @@ def run_monte_carlo_simulation(
         )
         highPriorityPathTimes.append(tfHP)
 
+    if cfg["animate"]:
+        frameNum = 0
+        numFramesForHp = 10
+        frameRate = 0.1  # seconds per frame
+
+        fig, ax = plt.subplots()
+        animate_true_pursuer(
+            truePursuerPos, cfg["pursuerRange"], cfg["pursuerCaptureRadius"], ax
+        )
+        ax.set_aspect("equal")
+        ax.set_xlim(cfg["x_range"])
+        ax.set_ylim(cfg["y_range"])
+        sacraficial_planner.rectangle_bez.plot_box_pursuer_reachable_region(
+            np.array(cfg["min_box"]),
+            np.array(cfg["max_box"]),
+            cfg["pursuerRange"],
+            cfg["pursuerCaptureRadius"],
+            ax=ax,
+        )
+        sacraficial_planner.plot_spline(splineHP, ax)
+
+        for i in range(numFramesForHp):
+            fig.savefig(f"video/{frameNum}.png")
+            frameNum += 1
+
     # -----------------------------
     # Main loop
     # -----------------------------
@@ -229,7 +441,7 @@ def run_monte_carlo_simulation(
             )
             print(f"time for agent {agentIdx} optimization: {time.time() - t0:.3f}s")
 
-        isIntercepted, idx, interceptPoint, D = (
+        isIntercepted, interceptedTime, interceptPoint, D = (
             sacraficial_planner.sample_intercept_from_spline(
                 spline,
                 truePursuerPos,
@@ -241,6 +453,10 @@ def run_monte_carlo_simulation(
                 rng=rng,
             )
         )
+        # if cfg["animate"]:
+        #     animate_sacraficial_trajectory(
+        #         spline, isIntercepted, interceptPoint, frameNum, frameRate
+        #     )
 
         interceptionHistory.append(bool(isIntercepted))
 
@@ -275,7 +491,8 @@ def run_monte_carlo_simulation(
             t0 = spline.t[spline.k]
             tf = spline.t[-1 - spline.k]
             t = np.linspace(t0, tf, 1000, endpoint=True)
-            idx = -1
+            # idx = -1
+            idx = np.where(t <= interceptedTime)[0][-1] + 1 if isIntercepted else -1
             pos = spline(t)[0:idx]
             ax.plot(pos[:, 0], pos[:, 1], label=f"Sacraficial Agent {agentIdx} Path")
 
@@ -394,5 +611,5 @@ if __name__ == "__main__":
             saveData=True,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=False,
+            plot=True,
         )

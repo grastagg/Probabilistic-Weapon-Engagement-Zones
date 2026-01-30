@@ -965,7 +965,8 @@ def sample_intercept_from_spline(
         D_min,
         rng=rng,
     )
-    return isIntercepted, idx, interceptPoint, D
+    interceptedTime = idx / 1000.0 * (tf - t0) + t0 if isIntercepted else None
+    return isIntercepted, interceptedTime, interceptPoint, D
 
 
 def plot_area_reduction_field(
