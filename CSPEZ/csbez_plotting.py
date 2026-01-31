@@ -231,7 +231,7 @@ def plot_dubins_reachable_set(
     # contour_proxy = plt.plot(
     #     [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
     # )
-    # contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label="RR")
+    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label="RR")
     ax.set_aspect("equal", "box")
     return ax
 
@@ -518,7 +518,7 @@ def main_EZ():
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 1
     evaderPosition = np.array([-1.14, 2.46])
-    evaderPosition = np.array([-1.6, 2.66])
+    # evaderPosition = np.array([-1.6, 2.66])
     startTime = time.time()
 
     # length, tangentPoint = find_dubins_path_length_right_strait(
@@ -533,7 +533,7 @@ def main_EZ():
     #     tangentPoint,
     # )
     #
-    fig, ax = plt.subplots(figsize=(6, 5), layout="constrained")
+    fig, ax = plt.subplots(figsize=(3.5, 3.5), layout="constrained")
 
     plot_dubins_reachable_set(
         pursuerPosition,
@@ -541,7 +541,7 @@ def main_EZ():
         pursuerRange,
         minimumTurnRadius,
         ax,
-        colors=["black"],
+        colors=["magenta"],
     )
     plot_dubins_EZ(
         pursuerPosition,
@@ -593,7 +593,7 @@ def main_EZ():
     # set tick fonhtsize
     ax.tick_params(axis="both", which="major")
     # put legend outside the plot
-    ax.legend(loc="upper left", bbox_to_anchor=(1, 1))
+    ax.legend(loc="lower left")
     ax.scatter(*F, c="r", s=100, zorder=2000)
     plt.show()
 

@@ -47,7 +47,7 @@ NUM_SAMPLES_PER_INTERVAL = 5
 numSamplesPerInterval = NUM_SAMPLES_PER_INTERVAL
 
 
-def plot_spline(spline, ax, width=1):
+def plot_spline(spline, ax, width=1, color="blue"):
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
@@ -59,7 +59,7 @@ def plot_spline(spline, ax, width=1):
     pos = spline(t)
     x = pos[:, 0]
     y = pos[:, 1]
-    ax.plot(x, y, linewidth=width)
+    ax.plot(x, y, linewidth=width, color=color)
 
     ax.set_aspect(1)
 
@@ -1382,6 +1382,7 @@ def run_monte_carlo_simulation(
     truePursuerPos = np.array(
         [rng.uniform(min_box[0], max_box[0]), rng.uniform(min_box[1], max_box[1])]
     )
+    truePursuerPos = np.array([0.6, 0.6])
 
     interceptionPositions = []
     interceptionRadii = []

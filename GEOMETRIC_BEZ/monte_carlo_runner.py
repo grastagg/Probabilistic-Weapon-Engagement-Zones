@@ -47,6 +47,9 @@ def animate_true_pursuer(pursuerPosition, pursuerRange, pursuerCaptureRadius, ax
     )
     ax.add_artist(circle)
 
+    ax.set_xticks([])
+    ax.set_yticks([])
+
 
 def _triangle_vertices(xy, heading, size):
     """
@@ -73,6 +76,7 @@ def _triangle_vertices(xy, heading, size):
 
 
 def animate_sacraficial_trajectory_frames(
+    truePursuerPos,
     spline,
     isIntercepted,
     interceptPoint,
@@ -80,12 +84,13 @@ def animate_sacraficial_trajectory_frames(
     frameNum,
     frameRate,  # frames per second
     cfg,
+    interceptionPositions,
+    interceptionRadii,
     interceptHeading=None,  # radians; if None, use spline heading at intercept time
     out_dir="video",
     triangle_size=None,  # if None, auto from plot scale
-    dpi=150,
     stop_at_intercept=True,  # True: stop frames at intercept; False: continue along spline
-    hold_frames=0,  # if stop_at_intercept, optionally hold N extra frames
+    hold_frames=10,  # if stop_at_intercept, optionally hold N extra frames
 ):
     """
     Writes frames: out_dir/{frameNum:06d}.png, returns updated frameNum.
@@ -143,6 +148,7 @@ def animate_sacraficial_trajectory_frames(
     ax.set_aspect("equal")
     ax.set_xlim(cfg["x_range"])
     ax.set_ylim(cfg["y_range"])
+    # turn off axis labels
 
     # figure out the intercept frame index (if any)
     if isIntercepted:
@@ -159,6 +165,40 @@ def animate_sacraficial_trajectory_frames(
 
     for i in range(0, end_idx + 1):
         ax.cla()
+        animate_true_pursuer(
+            truePursuerPos, cfg["pursuerRange"], cfg["pursuerCaptureRadius"], ax
+        )
+        if len(interceptionPositions) > 0:
+            arcs = sacraficial_planner.bez_from_interceptions.compute_potential_pursuer_region_from_interception_position(
+                # np.array(interceptionPositions[0:-1]),
+                np.array(interceptionPositions),
+                cfg["pursuerRange"],
+                cfg["pursuerCaptureRadius"],
+            )
+
+            ax.set_aspect("equal")
+            sacraficial_planner.bez_from_interceptions.plot_potential_pursuer_reachable_region(
+                arcs,
+                cfg["pursuerRange"],
+                cfg["pursuerCaptureRadius"],
+                xlim=cfg["x_range"],
+                ylim=cfg["y_range"],
+                ax=ax,
+            )
+            sacraficial_planner.bez_from_interceptions.plot_circle_intersection_arcs(
+                arcs, ax=ax
+            )
+            sacraficial_planner.bez_from_interceptions.plot_interception_points(
+                np.array(interceptionPositions), np.array(interceptionRadii), ax=ax
+            )
+        else:
+            sacraficial_planner.rectangle_bez.plot_box_pursuer_reachable_region(
+                np.array(cfg["min_box"]),
+                np.array(cfg["max_box"]),
+                cfg["pursuerRange"],
+                cfg["pursuerCaptureRadius"],
+                ax=ax,
+            )
 
         # background: full path (always)
         ax.plot(path[:, 0], path[:, 1], label="Sacrificial Agent Path")
@@ -178,7 +218,7 @@ def animate_sacraficial_trajectory_frames(
         ax.fill(tri[:, 0], tri[:, 1], alpha=0.9, label="Agent")
 
         # intercept marker (draw it once it happens, or always if you prefer)
-        if isIntercepted:
+        if isIntercepted and i >= intercept_idx:
             ax.scatter(
                 interceptPoint[0],
                 interceptPoint[1],
@@ -190,36 +230,112 @@ def animate_sacraficial_trajectory_frames(
         ax.set_aspect("equal")
         ax.set_xlim(cfg["x_range"])
         ax.set_ylim(cfg["y_range"])
-        ax.legend(loc="upper right")
 
-        fig.savefig(os.path.join(out_dir, f"{frameNum:06d}.png"), dpi=dpi)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title(f"Sacrificial Agent {1 + len(interceptionPositions)}")
+        fig.savefig(os.path.join(out_dir, f"{frameNum}.png"))
         frameNum += 1
 
     # optionally hold on the intercept pose for a few extra frames
-    if isIntercepted and stop_at_intercept and hold_frames > 0:
-        ax.cla()
-        ax.plot(path[:, 0], path[:, 1], label="Sacrificial Agent Path")
-        cur_xy = np.asarray(interceptPoint, dtype=float)
-        cur_heading = float(interceptHeading)
-        tri = _triangle_vertices(cur_xy, cur_heading, triangle_size)
-        ax.fill(tri[:, 0], tri[:, 1], alpha=0.9, label="Agent")
-        ax.scatter(
-            interceptPoint[0],
-            interceptPoint[1],
-            s=60,
-            marker="x",
-            label="Intercept Point",
-        )
-        ax.set_aspect("equal")
-        ax.set_xlim(cfg["x_range"])
-        ax.set_ylim(cfg["y_range"])
-        ax.legend(loc="upper right")
-
-        for _ in range(int(hold_frames)):
-            fig.savefig(os.path.join(out_dir, f"{frameNum:06d}.png"), dpi=dpi)
-            frameNum += 1
+    # if isIntercepted and stop_at_intercept and hold_frames > 0:
+    #     ax.cla()
+    #     ax.plot(
+    #         path[:intercept_idx, 0],
+    #         path[:intercept_idx, 1],
+    #         label="Sacrificial Agent Path",
+    #     )
+    #     cur_xy = np.asarray(interceptPoint, dtype=float)
+    #     cur_heading = float(interceptHeading)
+    #     tri = _triangle_vertices(cur_xy, cur_heading, triangle_size)
+    #     ax.fill(tri[:, 0], tri[:, 1], alpha=0.9, label="Agent")
+    #     ax.scatter(
+    #         interceptPoint[0],
+    #         interceptPoint[1],
+    #         s=60,
+    #         marker="x",
+    #         label="Intercept Point",
+    #     )
+    #     ax.set_aspect("equal")
+    #     ax.set_xlim(cfg["x_range"])
+    #     ax.set_ylim(cfg["y_range"])
+    #
+    #     for _ in range(int(hold_frames)):
+    #         ax.set_xticks([])
+    #         ax.set_yticks([])
+    #         fig.savefig(os.path.join(out_dir, f"{frameNum}.png"))
+    #         frameNum += 1
 
     plt.close(fig)
+    return frameNum
+
+
+def animate_hp_path(
+    truePursuerPos,
+    splineHP,
+    interceptionPositions,
+    interceptionRadii,
+    frameNum,
+    numFramesForHp,
+    cfg,
+):
+    fig, ax = plt.subplots()
+    animate_true_pursuer(
+        truePursuerPos, cfg["pursuerRange"], cfg["pursuerCaptureRadius"], ax
+    )
+    ax.set_aspect("equal")
+    ax.set_xlim(cfg["x_range"])
+    ax.set_ylim(cfg["y_range"])
+    if len(interceptionPositions) > 0:
+        arcs = sacraficial_planner.bez_from_interceptions.compute_potential_pursuer_region_from_interception_position(
+            # np.array(interceptionPositions[0:-1]),
+            np.array(interceptionPositions),
+            cfg["pursuerRange"],
+            cfg["pursuerCaptureRadius"],
+        )
+
+        ax.set_aspect("equal")
+        sacraficial_planner.bez_from_interceptions.plot_potential_pursuer_reachable_region(
+            arcs,
+            cfg["pursuerRange"],
+            cfg["pursuerCaptureRadius"],
+            xlim=cfg["x_range"],
+            ylim=cfg["y_range"],
+            ax=ax,
+        )
+        sacraficial_planner.bez_from_interceptions.plot_circle_intersection_arcs(
+            arcs, ax=ax
+        )
+        sacraficial_planner.bez_from_interceptions.plot_interception_points(
+            np.array(interceptionPositions), np.array(interceptionRadii), ax=ax
+        )
+    else:
+        sacraficial_planner.rectangle_bez.plot_box_pursuer_reachable_region(
+            np.array(cfg["min_box"]),
+            np.array(cfg["max_box"]),
+            cfg["pursuerRange"],
+            cfg["pursuerCaptureRadius"],
+            ax=ax,
+        )
+    # remove x and y label
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_ylabel("")
+    ax.set_xlabel("")
+
+    for i in range(numFramesForHp):
+        fig.savefig(f"video/{frameNum}.png")
+        frameNum += 1
+
+    sacraficial_planner.plot_spline(splineHP, ax, width=2, color="green")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_ylabel("")
+    ax.set_xlabel("")
+    ax.set_title(f"Safe Path")
+    for i in range(numFramesForHp):
+        fig.savefig(f"video/{frameNum}.png")
+        frameNum += 1
     return frameNum
 
 
@@ -247,11 +363,11 @@ def run_monte_carlo_simulation(
         "x_range": [-6.0, 6.0],
         "y_range": [-6.0, 6.0],
         "num_pts": 50,
-        "pursuerRange": 1.0,
+        "pursuerRange": 1.5,
         "pursuerCaptureRadius": 0.2,
         "pursuerSpeed": 1.5,
-        "min_box": [-2.0, -2.0],
-        "max_box": [2.0, 2.0],
+        "min_box": [-3.0, -3.0],
+        "max_box": [3.0, 3.0],
         "sacrificialLaunchPosition": [-5.0, -5.0],
         "sacrificialSpeed": 1.0,
         "sacrificialRange": 25.0,
@@ -318,6 +434,7 @@ def run_monte_carlo_simulation(
     truePursuerPos = np.array(
         [rng.uniform(min_box[0], max_box[0]), rng.uniform(min_box[1], max_box[1])]
     )
+    truePursuerPos = np.array([0.8, 0.8])
     print(f"True pursuer position: {truePursuerPos}")
 
     # -----------------------------
@@ -359,28 +476,17 @@ def run_monte_carlo_simulation(
 
     if cfg["animate"]:
         frameNum = 0
-        numFramesForHp = 10
-        frameRate = 0.1  # seconds per frame
-
-        fig, ax = plt.subplots()
-        animate_true_pursuer(
-            truePursuerPos, cfg["pursuerRange"], cfg["pursuerCaptureRadius"], ax
+        numFramesForHp = 20
+        frameRate = 5
+        frameNum = animate_hp_path(
+            truePursuerPos,
+            splineHP,
+            interceptionPositions,
+            interceptionRadii,
+            frameNum,
+            numFramesForHp,
+            cfg,
         )
-        ax.set_aspect("equal")
-        ax.set_xlim(cfg["x_range"])
-        ax.set_ylim(cfg["y_range"])
-        sacraficial_planner.rectangle_bez.plot_box_pursuer_reachable_region(
-            np.array(cfg["min_box"]),
-            np.array(cfg["max_box"]),
-            cfg["pursuerRange"],
-            cfg["pursuerCaptureRadius"],
-            ax=ax,
-        )
-        sacraficial_planner.plot_spline(splineHP, ax)
-
-        for i in range(numFramesForHp):
-            fig.savefig(f"video/{frameNum}.png")
-            frameNum += 1
 
     # -----------------------------
     # Main loop
@@ -453,10 +559,22 @@ def run_monte_carlo_simulation(
                 rng=rng,
             )
         )
-        # if cfg["animate"]:
-        #     animate_sacraficial_trajectory(
-        #         spline, isIntercepted, interceptPoint, frameNum, frameRate
-        #     )
+        if cfg["animate"]:
+            frameNum = animate_sacraficial_trajectory_frames(
+                truePursuerPos,
+                spline,
+                isIntercepted,
+                interceptPoint,
+                interceptedTime,
+                frameNum,
+                frameRate,
+                cfg,
+                interceptionPositions,
+                interceptionRadii,
+                out_dir="video",
+                stop_at_intercept=True,
+                hold_frames=10,
+            )
 
         interceptionHistory.append(bool(isIntercepted))
 
@@ -486,6 +604,18 @@ def run_monte_carlo_simulation(
                 )
             )
             highPriorityPathTimes.append(tf)
+            if cfg["animate"]:
+                frameNum = animate_hp_path(
+                    truePursuerPos,
+                    splineHP,
+                    interceptionPositions,
+                    interceptionRadii,
+                    frameNum,
+                    numFramesForHp,
+                    cfg,
+                )
+            #     frameNum = animate_hp_path()
+
         if cfg["plot"]:
             fig, ax = plt.subplots()
             t0 = spline.t[spline.k]
@@ -603,7 +733,7 @@ if __name__ == "__main__":
     else:
         seed = int(sys.argv[1])
         print("running monte carlo simulation with seed", seed)
-        numAgents = 5
+        numAgents = 3
         runName = "test2"
         run_monte_carlo_simulation(
             seed,
@@ -611,5 +741,5 @@ if __name__ == "__main__":
             saveData=True,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=True,
+            plot=False,
         )

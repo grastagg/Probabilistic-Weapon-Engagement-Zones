@@ -54,11 +54,11 @@ jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax.config.update("jax_platform_name", "gpu")")
 #
 
-positionAndHeadingOnly = False
+positionAndHeadingOnly = True
 knownSpeed = True
-interceptionOnBoundary = False
+interceptionOnBoundary = True
 randomPath = False
-noisyMeasurementsFlag = False
+noisyMeasurementsFlag = True
 saveResults = False
 plotAllFlag = True
 planHPPath = False
@@ -4741,6 +4741,8 @@ def run_simulation_with_random_pursuer(
 ):
     rng = np.random.default_rng(seed)
     trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
+    # set heading to 0
+    trueParams[2] = 0.0
     # plan_path_around_all_true_ez(trueParams, seed)
 
     pursuerPosition = np.array([trueParams[0], trueParams[1]])
