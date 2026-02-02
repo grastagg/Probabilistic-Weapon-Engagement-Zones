@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 # set maplotlib to faster backend
-matplotlib.use("Agg")
+# matplotlib.use("Agg")
 
 
 # get rid of type 3 fonts
@@ -58,7 +58,7 @@ positionAndHeadingOnly = True
 knownSpeed = True
 interceptionOnBoundary = True
 randomPath = False
-noisyMeasurementsFlag = True
+noisyMeasurementsFlag = False
 saveResults = False
 plotAllFlag = True
 planHPPath = False
@@ -4282,7 +4282,7 @@ def plot_pursuer_parameters_spread(
                 ax.scatter(
                     xData[mask],
                     pursuerParameter_history[:, i, lidx][mask],
-                    c=c,
+                    c="black",
                     s=10,
                     vmin=0.0,
                     vmax=keepLossThreshold,
@@ -4308,14 +4308,18 @@ def plot_pursuer_parameters_spread(
             mean = pursuerParameterMean_history[:, lidx]
             std = jnp.sqrt(pursuerParameterVariance_history[:, lidx])
             ax.plot(xData, mean, "b-", label="Mean")
-            ax.fill_between(
-                xData,
-                mean - beta * std,
-                mean + beta * std,
-                color="b",
-                alpha=0.2,
-                label="±3σ",
-            )
+            # if title == "Pursuer Heading":
+            #     ax.set_ylabel("Angle (radians)")
+            # elif title in ["Pursuer X Position", "Pursuer Y Position"]:
+            #     ax.set_ylabel("Position (units)")
+            # ax.fill_between(
+            #     xData,
+            #     mean - beta * std,
+            #     mean + beta * std,
+            #     color="b",
+            #     alpha=0.2,
+            #     label="±3σ",
+            # )
 
             for i in range(numOptimizerStarts):
                 mask = lossList_history[:, i] <= keepLossThreshold
@@ -4411,6 +4415,16 @@ def find_learning_loss_flatten_amount(cov, beta):
 def wrap_to_pi(angle):
     """Wrap angle to [-π, π)."""
     return (angle + np.pi) % (2 * np.pi) - np.pi
+
+
+def lift_angles_near(mu_unwrapped, theta_wrapped):
+    """
+    Choose the 2π-branch of theta_wrapped that is closest to mu_unwrapped.
+    Both inputs are 1D arrays of same length (numpy arrays).
+    """
+    return theta_wrapped + 2 * np.pi * np.round(
+        (mu_unwrapped - theta_wrapped) / (2 * np.pi)
+    )
 
 
 def fit_von_mises_with_variance(angles):
