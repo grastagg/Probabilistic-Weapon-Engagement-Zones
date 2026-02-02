@@ -538,7 +538,7 @@ def plan_path_PEZ_from_interceptions(
         spline = splineLeft
         tf = tfLeft
     print("path time", tf)
-    return spline
+    return spline, tf
 
 
 def main_pez_from_interceptions():

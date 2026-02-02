@@ -420,7 +420,7 @@ def main():
     v_e = 1.0  # evader speed
 
     t_breaks = jnp.array([0.0, 0.5, 1.0])  # (S+1,)
-    v_p = jnp.array([3.5, 1.5])  # (S,)
+    v_p = jnp.array([3.5, 0.5])  # (S,)
     # find average pursuer speed
     dt = jnp.diff(t_breaks)
     v_avg = jnp.sum(v_p * dt) / jnp.sum(dt)
