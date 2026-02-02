@@ -347,6 +347,7 @@ def run_monte_carlo_simulation(
     runName="test",
     plot=False,
     planHighPriorityPaths=True,
+    animate=False,
 ):
     # -----------------------------
     # Config (everything saved)
@@ -358,7 +359,7 @@ def run_monte_carlo_simulation(
         "dataDir": str(dataDir),
         "runName": str(runName),
         "plot": bool(plot),
-        "animate": True,
+        "animate": bool(animate),
         "planHighPriorityPaths": bool(planHighPriorityPaths),
         "x_range": [-6.0, 6.0],
         "y_range": [-6.0, 6.0],
@@ -547,18 +548,21 @@ def run_monte_carlo_simulation(
             )
             print(f"time for agent {agentIdx} optimization: {time.time() - t0:.3f}s")
 
-        isIntercepted, interceptedTime, interceptPoint, D = (
+        isIntercepted, interceptedTime, interceptPoint, D, tavelTime = (
             sacraficial_planner.sample_intercept_from_spline(
                 spline,
                 truePursuerPos,
                 cfg["pursuerRange"],
                 cfg["pursuerCaptureRadius"],
-                cfg["alpha"],
-                cfg["beta"],
+                cfg["pursuerSpeed"],
+                inefficacyRatio=1.01,
+                alpha=cfg["alpha"],
+                beta=cfg["beta"],
                 D_min=cfg["D_min"],
                 rng=rng,
             )
         )
+        print("travel time:", tavelTime)
         if cfg["animate"]:
             frameNum = animate_sacraficial_trajectory_frames(
                 truePursuerPos,
@@ -583,7 +587,12 @@ def run_monte_carlo_simulation(
                 f"Agent {agentIdx} intercepted at {interceptPoint} (D={float(D):.3f})"
             )
             interceptionPositions.append(np.array(interceptPoint))
-            interceptionRadii.append(cfg["pursuerRange"] + cfg["pursuerCaptureRadius"])
+
+            radius = tavelTime * cfg["pursuerSpeed"] + cfg["pursuerCaptureRadius"]
+            print("radius:", radius)
+            print("test radius:", cfg["pursuerRange"] + cfg["pursuerCaptureRadius"])
+            interceptionRadii.append(radius)
+            # interceptionRadii.append(cfg["pursuerRange"] + cfg["pursuerCaptureRadius"])
 
         if cfg["planHighPriorityPaths"]:
             splineHP, arcs, tf = (
@@ -741,5 +750,6 @@ if __name__ == "__main__":
             saveData=True,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=False,
+            plot=True,
+            animate=False,
         )

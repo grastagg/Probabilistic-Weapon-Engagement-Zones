@@ -925,13 +925,13 @@ def sample_intercept(traj_xy, x_p, R, r, alpha, beta, D_min=0.0, rng=None):
 
     # Sample D in [D_min, R]
     U = rng.beta(alpha, beta)
-    D = D_min + ((R + r) - D_min) * U
+    D = D_min + (R - D_min) * U
     print("commitmet distance D =", D)
 
     dists = np.linalg.norm(traj - x_p, axis=1)
     print("minimum distance to pursuer along traj:", dists.min())
 
-    inside = dists <= D
+    inside = dists <= (D + r)
     crossings = np.where((~inside[:-1]) & inside[1:])[0]
 
     if len(crossings) == 0:
@@ -946,6 +946,8 @@ def sample_intercept_from_spline(
     truePursuerPos,
     pursuerRange,
     pursuerCaptureRadius,
+    pursuerSpeed,
+    inefficacyRatio=1.01,
     alpha=2.0,
     beta=2.0,
     D_min=0.0,
@@ -965,8 +967,13 @@ def sample_intercept_from_spline(
         D_min,
         rng=rng,
     )
+    travelDistance = (
+        np.linalg.norm(truePursuerPos - interceptPoint) - pursuerCaptureRadius
+    )
+    travelTime = (travelDistance / pursuerSpeed) * inefficacyRatio
+
     interceptedTime = idx / 1000.0 * (tf - t0) + t0 if isIntercepted else None
-    return isIntercepted, interceptedTime, interceptPoint, D
+    return isIntercepted, interceptedTime, interceptPoint, D, travelTime
 
 
 def plot_area_reduction_field(
