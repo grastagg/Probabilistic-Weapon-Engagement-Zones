@@ -371,8 +371,8 @@ def run_monte_carlo_simulation(
         "pursuerRange": 1.0,
         "pursuerCaptureRadius": 0.2,
         "pursuerSpeed": 1.5,
-        "min_box": [-3.0, -3.0],
-        "max_box": [3.0, 3.0],
+        "min_box": [-2.0, -2.0],
+        "max_box": [2.0, 2.0],
         "sacrificialLaunchPosition": [-5.0, -5.0],
         "sacrificialSpeed": 1.0,
         "sacrificialRange": 25.0,
@@ -783,7 +783,7 @@ if __name__ == "__main__":
         measure_launch_time = bool(int(sys.argv[2]))
         straight_line_sacrificial = bool(int(sys.argv[3]))
         print("running monte carlo simulation with seed", seed)
-        numAgents = 2
+        numAgents = 3
         runName = "newTest"
         run_monte_carlo_simulation(
             seed,
@@ -791,7 +791,7 @@ if __name__ == "__main__":
             saveData=True,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=False,
+            plot=True,
             animate=False,
             measureLaunchTime=measure_launch_time,
             straightLineSacrificial=straight_line_sacrificial,
