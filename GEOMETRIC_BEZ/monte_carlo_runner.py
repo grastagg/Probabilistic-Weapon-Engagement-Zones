@@ -348,6 +348,8 @@ def run_monte_carlo_simulation(
     plot=False,
     planHighPriorityPaths=True,
     animate=False,
+    measureLaunchTime=False,
+    straightLineSacrificial=False,
 ):
     # -----------------------------
     # Config (everything saved)
@@ -361,10 +363,12 @@ def run_monte_carlo_simulation(
         "plot": bool(plot),
         "animate": bool(animate),
         "planHighPriorityPaths": bool(planHighPriorityPaths),
+        "measureLaunchTime": bool(measureLaunchTime),
+        "straightLineSacrificial": bool(straightLineSacrificial),
         "x_range": [-6.0, 6.0],
         "y_range": [-6.0, 6.0],
         "num_pts": 50,
-        "pursuerRange": 1.5,
+        "pursuerRange": 1.0,
         "pursuerCaptureRadius": 0.2,
         "pursuerSpeed": 1.5,
         "min_box": [-3.0, -3.0],
@@ -380,11 +384,20 @@ def run_monte_carlo_simulation(
         "alpha": 8.0,
         "beta": 2.0,
         "D_min_frac": 0.5,
-        "p_min": 0.95,
+        "p_min": 0.0,
     }
     cfg["D_min"] = cfg["D_min_frac"] * cfg["pursuerRange"]
 
-    run_dir = Path(cfg["dataDir"]) / cfg["runName"]
+    if cfg["measureLaunchTime"]:
+        tmpRunName = "launchTime"
+    else:
+        tmpRunName = "noLaunchTime"
+    if cfg["straightLineSacrificial"]:
+        tmpRunName2 = "straightLine/"
+    else:
+        tmpRunName2 = "splinePath/"
+    run_dir = Path(cfg["dataDir"]) / cfg["runName"] / tmpRunName / tmpRunName2
+
     run_dir.mkdir(parents=True, exist_ok=True)
 
     _write_json(
@@ -435,7 +448,6 @@ def run_monte_carlo_simulation(
     truePursuerPos = np.array(
         [rng.uniform(min_box[0], max_box[0]), rng.uniform(min_box[1], max_box[1])]
     )
-    truePursuerPos = np.array([0.8, 0.8])
     print(f"True pursuer position: {truePursuerPos}")
 
     # -----------------------------
@@ -520,33 +532,55 @@ def run_monte_carlo_simulation(
                 np.array(interceptionRadii),
                 dArea,
             )
+            print("launch pdf sum:", jnp.sum(launchPdf) * dArea)
 
             expected_launch_pos, _ = sacraficial_planner.expected_position_from_pdf(
                 points, launchPdf, dArea
             )
+            print("expected launch pos:", expected_launch_pos)
+            aspectAngle = np.arctan2(
+                cfg["sacrificialLaunchPosition"][1] - expected_launch_pos[1],
+                cfg["sacrificialLaunchPosition"][0] - expected_launch_pos[0],
+            )
+            endPointInitialGuess = (
+                expected_launch_pos
+                - np.array([np.cos(aspectAngle), np.sin(aspectAngle)])
+                * sacrificialSpeed
+                * 1.0
+            )
 
             t0 = time.time()
-            spline = sacraficial_planner.optimize_spline_path_minimize_area(
-                sacrificialLaunchPosition,
-                np.array(expected_launch_pos),
-                initialSacrificialVelocity,
-                cfg["num_cont_points"],
-                cfg["spline_order"],
-                velocity_constraints,
-                turn_rate_constraints,
-                curvature_constraints,
-                sacrificialSpeed,
-                cfg["pursuerRange"],
-                cfg["pursuerCaptureRadius"],
-                np.array(interceptionPositions),
-                np.array(interceptionRadii),
-                dArea,
-                points,
-                launchPdf,
-                sacraficialAgentRange=cfg["sacrificialRange"],
-                pmin=cfg["p_min"],
-            )
-            print(f"time for agent {agentIdx} optimization: {time.time() - t0:.3f}s")
+            if cfg["straightLineSacrificial"]:
+                spline = sacraficial_planner.straight_line_spline(
+                    cfg["sacrificialLaunchPosition"], endPointInitialGuess
+                )
+            else:
+                spline = sacraficial_planner.optimize_spline_path_minimize_area(
+                    sacrificialLaunchPosition,
+                    endPointInitialGuess,
+                    initialSacrificialVelocity,
+                    cfg["num_cont_points"],
+                    cfg["spline_order"],
+                    velocity_constraints,
+                    turn_rate_constraints,
+                    curvature_constraints,
+                    sacrificialSpeed,
+                    cfg["pursuerRange"],
+                    cfg["pursuerCaptureRadius"],
+                    np.array(interceptionPositions),
+                    np.array(interceptionRadii),
+                    dArea,
+                    points,
+                    launchPdf,
+                    sacraficialAgentRange=cfg["sacrificialRange"],
+                    pmin=cfg["p_min"],
+                    pursuerSpeed=cfg["pursuerSpeed"],
+                    expectedPursuerPos=expected_launch_pos,
+                    measureLaunchTime=cfg["measureLaunchTime"],
+                )
+                print(
+                    f"time for agent {agentIdx} optimization: {time.time() - t0:.3f}s"
+                )
 
         isIntercepted, interceptedTime, interceptPoint, D, tavelTime = (
             sacraficial_planner.sample_intercept_from_spline(
@@ -555,7 +589,7 @@ def run_monte_carlo_simulation(
                 cfg["pursuerRange"],
                 cfg["pursuerCaptureRadius"],
                 cfg["pursuerSpeed"],
-                inefficacyRatio=1.01,
+                inefficacyRatio=1.05,
                 alpha=cfg["alpha"],
                 beta=cfg["beta"],
                 D_min=cfg["D_min"],
@@ -588,7 +622,10 @@ def run_monte_carlo_simulation(
             )
             interceptionPositions.append(np.array(interceptPoint))
 
-            radius = tavelTime * cfg["pursuerSpeed"] + cfg["pursuerCaptureRadius"]
+            if cfg["measureLaunchTime"]:
+                radius = tavelTime * cfg["pursuerSpeed"] + cfg["pursuerCaptureRadius"]
+            else:
+                radius = cfg["pursuerRange"] + cfg["pursuerCaptureRadius"]
             print("radius:", radius)
             print("test radius:", cfg["pursuerRange"] + cfg["pursuerCaptureRadius"])
             interceptionRadii.append(radius)
@@ -630,8 +667,8 @@ def run_monte_carlo_simulation(
             t0 = spline.t[spline.k]
             tf = spline.t[-1 - spline.k]
             t = np.linspace(t0, tf, 1000, endpoint=True)
-            # idx = -1
-            idx = np.where(t <= interceptedTime)[0][-1] + 1 if isIntercepted else -1
+            idx = -1
+            # idx = np.where(t <= interceptedTime)[0][-1] + 1 if isIntercepted else -1
             pos = spline(t)[0:idx]
             ax.plot(pos[:, 0], pos[:, 1], label=f"Sacraficial Agent {agentIdx} Path")
 
@@ -737,19 +774,25 @@ def run_monte_carlo_simulation(
 if __name__ == "__main__":
     # main()
     # first argument is random seed from command line
-    if len(sys.argv) != 2:
-        print("usage: python monte_carlo_runner.py <random_seed>")
+    if len(sys.argv) != 4:
+        print(
+            "usage: python monte_carlo_runner.py <random_seed> <measure_launch_time> <straight_line_sacrificial>"
+        )
     else:
         seed = int(sys.argv[1])
+        measure_launch_time = bool(int(sys.argv[2]))
+        straight_line_sacrificial = bool(int(sys.argv[3]))
         print("running monte carlo simulation with seed", seed)
         numAgents = 3
-        runName = "test2"
+        runName = "newTest"
         run_monte_carlo_simulation(
             seed,
             numAgents,
             saveData=True,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=True,
+            plot=False,
             animate=False,
+            measureLaunchTime=measure_launch_time,
+            straightLineSacrificial=straight_line_sacrificial,
         )
