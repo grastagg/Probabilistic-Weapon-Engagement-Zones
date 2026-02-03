@@ -1846,7 +1846,12 @@ def median_iqr_plot(data, ax=None, label=None):
     numAgents = len(data[0]) - 1
     data = np.array(data)
 
-    ax.plot(np.arange(numAgents + 1), np.percentile(data, 50, axis=0), marker="o")
+    ax.plot(
+        np.arange(numAgents + 1),
+        np.percentile(data, 50, axis=0),
+        marker="o",
+        label=label,
+    )
     # fill in IQR
     first_quartile = np.percentile(data, 25, axis=0)
     third_quartile = np.percentile(data, 75, axis=0)
@@ -1881,9 +1886,27 @@ def parse_data(dataDir):
         "Interception statistics per agent:",
         np.sum(np.array(allInterceptionHistories), axis=0),
     )
-    median_iqr_plot(allIntersectionAreas)
-    median_iqr_plot(allPathTimes)
+    return allIntersectionAreas, allPathTimes, allInterceptionHistories
 
+
+def plot_all_data(dataDir):
+    allIntersectionAreasNoTimeStraight, allPathTimesNoTimeStraight, _ = parse_data(
+        dataDir + "/noLaunchTime/straightLine"
+    )
+    allIntersectionAreasNoTimeOpt, allPathTimesNoTimeOpt, _ = parse_data(
+        dataDir + "/noLaunchTime/splinePath"
+    )
+    allIntersectionAreasTimeOpt, allPathTimesTimeOpt, _ = parse_data(
+        dataDir + "/launchTime/splinePath"
+    )
+    allIntersectionAreasTimeStraight, allPathTimesTimeStraight, _ = parse_data(
+        dataDir + "/launchTime/straightLine"
+    )
+    fig, ax = plt.subplots()
+    ax.set_title("Pursuer Potential Region Area vs Number of Sacrificial Agents")
+    median_iqr_plot(allIntersectionAreasNoTimeStraight, ax=ax, label="Straight")
+    median_iqr_plot(allIntersectionAreasNoTimeOpt, ax=ax, label="Spline")
+    plt.legend()
     plt.show()
 
 
@@ -1891,7 +1914,8 @@ if __name__ == "__main__":
     # main()
     # first argument is random seed from command line
     if len(sys.argv) != 2:
-        parse_data(dataDir="GEOMETRIC_BEZ/data/test/")
+        # parse_data(dataDir="GEOMETRIC_BEZ/data/newTest/")
+        plot_all_data(dataDir="GEOMETRIC_BEZ/data/newTest/")
     else:
         seed = int(sys.argv[1])
         print("running monte carlo simulation with seed", seed)
