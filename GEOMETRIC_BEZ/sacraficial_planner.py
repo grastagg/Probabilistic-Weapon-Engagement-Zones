@@ -1925,7 +1925,7 @@ if __name__ == "__main__":
     # first argument is random seed from command line
     if len(sys.argv) != 2:
         # parse_data(dataDir="GEOMETRIC_BEZ/data/newTest/")
-        plot_all_data(dataDir="GEOMETRIC_BEZ/data/newTest/")
+        plot_all_data(dataDir="GEOMETRIC_BEZ/data/beta82")
     else:
         seed = int(sys.argv[1])
         print("running monte carlo simulation with seed", seed)
