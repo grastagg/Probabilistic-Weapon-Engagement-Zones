@@ -507,23 +507,33 @@ def run_monte_carlo_simulation(
     for agentIdx in range(cfg["numAgents"]):
         if not interceptionPositions:
             t0 = time.time()
-            spline = sacraficial_planner.optimize_spline_path_get_intercepted(
-                sacrificialLaunchPosition,
-                np.array([0.0, 0.0]),
-                initialSacrificialVelocity,
-                cfg["num_cont_points"],
-                cfg["spline_order"],
-                velocity_constraints,
-                turn_rate_constraints,
-                curvature_constraints,
-                sacrificialSpeed,
-                cfg["pursuerRange"],
-                cfg["pursuerCaptureRadius"],
-                min_box,
-                max_box,
-                dArea,
-                sacraficialAgentRange=cfg["sacrificialRange"],
-            )
+            if cfg["straightLineSacrificial"]:
+                targetPoint = np.array([max_box[0], max_box[1]])
+                if agentIdx == 1:
+                    targetPoint = np.array([(min_box[0] + max_box[0]) / 2, max_box[1]])
+                if agentIdx == 2:
+                    targetPoint = np.array([max_box[0], (min_box[1] + max_box[1]) / 2])
+                spline = sacraficial_planner.straight_line_spline(
+                    cfg["sacrificialLaunchPosition"], targetPoint
+                )
+            else:
+                spline = sacraficial_planner.optimize_spline_path_get_intercepted(
+                    sacrificialLaunchPosition,
+                    np.array([0.0, 0.0]),
+                    initialSacrificialVelocity,
+                    cfg["num_cont_points"],
+                    cfg["spline_order"],
+                    velocity_constraints,
+                    turn_rate_constraints,
+                    curvature_constraints,
+                    sacrificialSpeed,
+                    cfg["pursuerRange"],
+                    cfg["pursuerCaptureRadius"],
+                    min_box,
+                    max_box,
+                    dArea,
+                    sacraficialAgentRange=cfg["sacrificialRange"],
+                )
             print(f"First agent optimization time: {time.time() - t0:.3f}s")
         else:
             launchPdf = sacraficial_planner.pez_from_interceptions.uniform_pdf_from_interception_points(
@@ -632,23 +642,43 @@ def run_monte_carlo_simulation(
             # interceptionRadii.append(cfg["pursuerRange"] + cfg["pursuerCaptureRadius"])
 
         if cfg["planHighPriorityPaths"]:
-            splineHP, arcs, tf = (
-                sacraficial_planner.bez_from_interceptions_path_planner.plan_path_from_interception_points(
-                    interceptionPositions,
-                    cfg["pursuerRange"],
-                    cfg["pursuerCaptureRadius"],
-                    cfg["pursuerSpeed"],
-                    highPriorityStart,
-                    highPriorityGoal,
-                    initialHighPriorityVel,
-                    cfg["highPrioritySpeed"],
-                    cfg["num_cont_points"],
-                    cfg["spline_order"],
-                    velocity_constraints,
-                    turn_rate_constraints,
-                    curvature_constraints,
+            if len(interceptionPositions) == 0:
+                splineHP, tf = (
+                    sacraficial_planner.rectangle_bez_path_planner.plan_path_box_BEZ(
+                        min_box,
+                        max_box,
+                        cfg["pursuerRange"],
+                        cfg["pursuerCaptureRadius"],
+                        cfg["pursuerSpeed"],
+                        highPriorityStart,
+                        highPriorityGoal,
+                        initialHighPriorityVel,
+                        cfg["highPrioritySpeed"],
+                        cfg["num_cont_points"],
+                        cfg["spline_order"],
+                        velocity_constraints,
+                        turn_rate_constraints,
+                        curvature_constraints,
+                    )
                 )
-            )
+            else:
+                splineHP, arcs, tf = (
+                    sacraficial_planner.bez_from_interceptions_path_planner.plan_path_from_interception_points(
+                        interceptionPositions,
+                        cfg["pursuerRange"],
+                        cfg["pursuerCaptureRadius"],
+                        cfg["pursuerSpeed"],
+                        highPriorityStart,
+                        highPriorityGoal,
+                        initialHighPriorityVel,
+                        cfg["highPrioritySpeed"],
+                        cfg["num_cont_points"],
+                        cfg["spline_order"],
+                        velocity_constraints,
+                        turn_rate_constraints,
+                        curvature_constraints,
+                    )
+                )
             highPriorityPathTimes.append(tf)
             if cfg["animate"]:
                 frameNum = animate_hp_path(
@@ -783,7 +813,7 @@ if __name__ == "__main__":
         measure_launch_time = bool(int(sys.argv[2]))
         straight_line_sacrificial = bool(int(sys.argv[3]))
         print("running monte carlo simulation with seed", seed)
-        numAgents = 5
+        numAgents = 3
         runName = "beta82"
         run_monte_carlo_simulation(
             seed,
@@ -791,7 +821,7 @@ if __name__ == "__main__":
             saveData=True,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=False,
+            plot=True,
             animate=False,
             measureLaunchTime=measure_launch_time,
             straightLineSacrificial=straight_line_sacrificial,
