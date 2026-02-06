@@ -813,7 +813,7 @@ if __name__ == "__main__":
         measure_launch_time = bool(int(sys.argv[2]))
         straight_line_sacrificial = bool(int(sys.argv[3]))
         print("running monte carlo simulation with seed", seed)
-        numAgents = 3
+        numAgents = 5
         runName = "beta82"
         run_monte_carlo_simulation(
             seed,
