@@ -11,7 +11,6 @@ import os
 import time
 
 import jax
-import jax.numpy as jnp
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -43,6 +42,8 @@ from GEOMETRIC_BEZ import bez_from_interceptions_path_planner
 
 import bspline.spline_opt_tools as spline_opt_tools
 
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
 
 NUM_SAMPLES_PER_INTERVAL = 5
 numSamplesPerInterval = NUM_SAMPLES_PER_INTERVAL
@@ -772,7 +773,7 @@ def optimize_spline_path_minimize_area(
     )
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
     print("interval for intercepted:", pmin)
-    optProb.addConGroup("intercepted", 1, lower=pmin, upper=None)
+    # optProb.addConGroup("intercepted", 1, lower=pmin, upper=None)
 
     optProb.addObj("obj")
 
@@ -780,7 +781,7 @@ def optimize_spline_path_minimize_area(
     opt.options["print_level"] = 5
 
     opt.options["max_iter"] = 1000
-    # opt.options["derivative_test"] = "first-order"
+    opt.options["derivative_test"] = "first-order"
     # opt.options["hessian_approximation"] = "limited-memory"
     # opt.options["nlp_scaling_method"] = "gradient-based"
     # opt.options["mu_strategy"] = "adaptive"

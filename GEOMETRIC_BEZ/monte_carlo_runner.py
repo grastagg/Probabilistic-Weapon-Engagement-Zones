@@ -664,7 +664,8 @@ def run_monte_carlo_simulation(
             else:
                 splineHP, arcs, tf = (
                     sacraficial_planner.bez_from_interceptions_path_planner.plan_path_from_interception_points(
-                        interceptionPositions,
+                        np.array(interceptionPositions),
+                        np.array(interceptionRadii),
                         cfg["pursuerRange"],
                         cfg["pursuerCaptureRadius"],
                         cfg["pursuerSpeed"],
@@ -712,11 +713,10 @@ def run_monte_carlo_simulation(
             ax.set_aspect("equal")
 
             if len(interceptionPositions) > 0:
-                arcs = sacraficial_planner.bez_from_interceptions.compute_potential_pursuer_region_from_interception_position(
+                arcs = sacraficial_planner.bez_from_interceptions.intersection_arcs(
                     # np.array(interceptionPositions[0:-1]),
                     np.array(interceptionPositions),
-                    cfg["pursuerRange"],
-                    cfg["pursuerCaptureRadius"],
+                    np.array(interceptionRadii),
                 )
 
                 ax.set_aspect("equal")
@@ -813,7 +813,7 @@ if __name__ == "__main__":
         measure_launch_time = bool(int(sys.argv[2]))
         straight_line_sacrificial = bool(int(sys.argv[3]))
         print("running monte carlo simulation with seed", seed)
-        numAgents = 5
+        numAgents = 3
         runName = "beta28"
         run_monte_carlo_simulation(
             seed,
@@ -821,7 +821,7 @@ if __name__ == "__main__":
             saveData=True,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=False,
+            plot=True,
             animate=False,
             measureLaunchTime=measure_launch_time,
             straightLineSacrificial=straight_line_sacrificial,

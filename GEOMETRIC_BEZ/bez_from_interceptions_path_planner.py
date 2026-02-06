@@ -462,6 +462,7 @@ def optimize_spline_path_potential_BEZ(
 
 def plan_path_from_interception_points(
     interceptionPositions,
+    interceptionRadii,
     pursuerRange,
     pursuerCaptureRadius,
     pursuerSpeed,
@@ -478,7 +479,7 @@ def plan_path_from_interception_points(
 ):
     arcs = bez_from_interceptions.intersection_arcs(
         interceptionPositions,
-        [pursuerRange + pursuerCaptureRadius] * np.ones(len(interceptionPositions)),
+        interceptionRadii,
     )
     centers, radii, theta_start, theta_end = bez_from_interceptions.arcs_to_arrays(arcs)
 
