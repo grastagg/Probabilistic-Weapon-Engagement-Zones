@@ -1846,17 +1846,22 @@ def median_iqr_plot(data, ax=None, label=None):
     numAgents = len(data[0]) - 1
     data = np.array(data)
 
-    ax.plot(
-        np.arange(numAgents + 1),
-        np.percentile(data, 50, axis=0),
-        marker="o",
-        label=label,
-    )
+    # ax.plot(
+    #     np.arange(numAgents + 1),
+    #     np.percentile(data, 50, axis=0),
+    #     marker="o",
+    #     label=label,
+    # )
     # fill in IQR
     first_quartile = np.percentile(data, 25, axis=0)
     third_quartile = np.percentile(data, 75, axis=0)
-    ax.fill_between(np.arange(numAgents + 1), first_quartile, third_quartile, alpha=0.2)
-    ax.set_xticks(np.arange(numAgents + 1))
+    mean = np.mean(data, axis=0)
+    std = np.std(data, axis=0)
+    ax.plot(np.arange(numAgents + 1), mean, marker="x", label=label)
+    ax.fill_between(np.arange(numAgents + 1), mean - 3 * std, mean + 3 * std, alpha=0.1)
+    # ax.fill_between(np.arange(numAgents + 1), first_quartile, third_quartile, alpha=0.2)
+    # ax.set_xticks(np.arange(numAgents + 1))
+    #
 
 
 def parse_data(dataDir):
@@ -1925,7 +1930,7 @@ if __name__ == "__main__":
     # first argument is random seed from command line
     if len(sys.argv) != 2:
         # parse_data(dataDir="GEOMETRIC_BEZ/data/newTest/")
-        plot_all_data(dataDir="GEOMETRIC_BEZ/data/beta82")
+        plot_all_data(dataDir="GEOMETRIC_BEZ/data/beta28")
     else:
         seed = int(sys.argv[1])
         print("running monte carlo simulation with seed", seed)
