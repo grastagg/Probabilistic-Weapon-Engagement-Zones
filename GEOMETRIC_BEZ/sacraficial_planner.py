@@ -21,6 +21,8 @@ import scipy
 
 import os
 
+from scipy.sparse import lil_array
+
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = (
     "0.30"  # try 0.30; adjust if you run 2–3 workers
@@ -31,6 +33,8 @@ os.environ.setdefault("MPLBACKEND", "Agg")  # avoid X11 ("Invalid MIT-MAGIC-COOK
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
+# non interactive backend (for saving figures without X11)
+matplotlib.use("Agg")
 
 from GEOMETRIC_BEZ import bez_from_interceptions
 import GEOMETRIC_BEZ.pez_from_interceptions as pez_from_interceptions
@@ -1461,7 +1465,6 @@ def main_planner():
         arcs, pursuerRange, pursuerCaptureRadius, xlim=(-4, 4), ylim=(-4, 4), ax=ax
     )
     ax.scatter(*interceptPoint, color="red", s=50, label="Intercept Point", marker="x")
-    plt.show()
 
 
 def main_planner_box():
@@ -1561,7 +1564,6 @@ def main_planner_box():
     ax.scatter(
         *truePursuerPos, color="red", s=50, label="True Pursuer Position", marker="o"
     )
-    plt.show()
 
 
 # simulation for monte carlo runs, sample single pursuer position, send agents sequentially
@@ -1825,7 +1827,6 @@ def run_monte_carlo_simulation(
                         label=f"Past Interception {i}",
                         marker="x",
                     )
-            plt.show()
     if saveData:
         data = {
             "truePursuerPos": truePursuerPos,
@@ -1840,7 +1841,9 @@ def run_monte_carlo_simulation(
         print(f"Saved simulation data to {filename}")
 
 
-def median_iqr_plot(data, ax=None, label=None):
+def median_iqr_plot(
+    data, ax=None, label=None, marker="o", color="green", linestyle="-", linewidth=2
+):
     if ax is None:
         fig, ax = plt.subplots()
     # average intersection areas over all runs
@@ -1858,11 +1861,61 @@ def median_iqr_plot(data, ax=None, label=None):
     third_quartile = np.percentile(data, 75, axis=0)
     mean = np.mean(data, axis=0)
     std = np.std(data, axis=0)
-    ax.plot(np.arange(numAgents + 1), mean, marker="x", label=label)
-    ax.fill_between(np.arange(numAgents + 1), mean - 3 * std, mean + 3 * std, alpha=0.1)
-    # ax.fill_between(np.arange(numAgents + 1), first_quartile, third_quartile, alpha=0.2)
+    median = np.percentile(data, 50, axis=0)
+
+    ax.plot(
+        np.arange(numAgents + 1),
+        mean,
+        marker=marker,
+        label=label,
+        linewidth=linewidth,
+        linestyle=linestyle,
+        color=color,
+    )
+    # ax.fill_between(np.arange(numAgents + 1), mean - 3 * std, mean + 3 * std, alpha=0.1)
+    # ax.fill_between(
+    #     np.arange(numAgents + 1), first_quartile, third_quartile, alpha=0.1, color=color
+    # )
     # ax.set_xticks(np.arange(numAgents + 1))
     #
+
+
+def interception_metrics(intercept: np.ndarray):
+    """
+    intercept: (R, Nmax) boolean
+      intercept[r, n] == True means agent n+1 intercepted in trial r.
+
+    Returns
+    -------
+    p_by_N : (Nmax+1,) float
+        p_by_N[N] = P(at least one interception among first N agents).
+        Includes N=0 with p_by_N[0]=0.
+    q_first_at_N : (Nmax+1,) float
+        q_first_at_N[N] = P(first interception occurs at agent N).
+        Includes N=0 with q_first_at_N[0]=P(no interception in any of Nmax agents).
+    """
+    intercept = np.asarray(intercept, dtype=bool)
+    R, Nmax = intercept.shape
+
+    # p_by_N for N=1..Nmax (cumulative OR)
+    any_by_n = np.cumsum(intercept, axis=1) > 0  # (R, Nmax) whether any so far
+    p_by_N_1_to_Nmax = any_by_n.mean(axis=0)  # (Nmax,)
+    p_by_N = np.concatenate([[0.0], p_by_N_1_to_Nmax])  # include N=0
+
+    # q_first_at_N (first interception time distribution)
+    # first_idx[r] = first column index of True, or Nmax if none
+    has_any = intercept.any(axis=1)
+    first_idx = np.where(has_any, intercept.argmax(axis=1), Nmax)  # (R,)
+
+    # q_first_at_N[1..Nmax] correspond to first_idx == 0..Nmax-1
+    q_first_at_N = np.zeros(Nmax + 1, dtype=float)
+    for k in range(Nmax):
+        q_first_at_N[k + 1] = np.mean(first_idx == k)
+    q_first_at_N[0] = np.mean(first_idx == Nmax)  # "no interception at all" mass
+    print("p by N:", p_by_N)
+    print("q first at N:", q_first_at_N)
+
+    return p_by_N, q_first_at_N
 
 
 def parse_data(dataDir):
@@ -1873,57 +1926,286 @@ def parse_data(dataDir):
         if filename.endswith(".npz"):
             data = np.load(os.path.join(dataDir, filename))
             # process data as needed
-            print(f"Loaded data from {filename}:")
-            print("True Pursuer Position:", data["truePursuerPos"])
-            print("Interception Positions:", data["interceptionPositions"])
-            print(
-                "Potential Pursuer Region Areas:", data["potentialPursuerRegionAreas"]
-            )
-            print("highPriorityPathTimes:", data["highPriorityPathTimes"])
-            print("interceptionHistory:", data["interceptionHistory"])
+
             intersectionAreas = data["potentialPursuerRegionAreas"]
             pathTimes = data["highPriorityPathTimes"]
             allIntersectionAreas.append(intersectionAreas)
             allPathTimes.append(pathTimes)
             allInterceptionHistories.append(data["interceptionHistory"])
     allIntersectionAreas = np.array(allIntersectionAreas)
+    allInterceptionHistories = np.array(allInterceptionHistories)
+    allPathTimes = np.array(allPathTimes)
+
     # count true per agent interceptions
-    print(
-        "Interception statistics per agent:",
-        np.sum(np.array(allInterceptionHistories), axis=0),
-    )
-    return allIntersectionAreas, allPathTimes, allInterceptionHistories
+    p_by_N, _ = interception_metrics(allInterceptionHistories)
+
+    return allIntersectionAreas, allPathTimes, p_by_N
 
 
-def plot_all_data(dataDir):
-    allIntersectionAreasNoTimeStraight, allPathTimesNoTimeStraight, _ = parse_data(
-        dataDir + "/noLaunchTime/straightLine"
+def plot_interception_probability(p_dict, ax, labelXAxis=False, labelYAxis=False):
+    """
+    p_dict: dictionary mapping label -> p_by_N array
+
+    Example:
+    p_dict = {
+        "Straight — no launch time": p_straight_no,
+        "Straight — launch time": p_straight_time,
+        "Spline — no launch time": p_spline_no,
+        "Spline — launch time": p_spline_time,
+    }
+    """
+
+    # Style choices that pair well with technical papers
+    style_map = {
+        "Straight — no launch time": dict(
+            color="darkblue", linestyle="-", marker="s", linewidth=2.5
+        ),
+        "Straight — launch time": dict(
+            color="darkblue", linestyle="--", marker="o", linewidth=3.5
+        ),
+        "Spline — no launch time": dict(
+            color="olivedrab", linestyle="-", marker="s", linewidth=2.5
+        ),
+        "Spline — launch time": dict(
+            color="olivedrab", linestyle="--", marker="o", linewidth=3.5
+        ),
+    }
+
+    for label, p in p_dict.items():
+        N = np.arange(len(p))
+
+        ax.plot(
+            N,
+            p,
+            markersize=5,
+            label=label,
+            **style_map[label],
+        )
+
+    # Axes
+    if labelXAxis:
+        ax.set_xlabel("Number of Sacrificial Agents")
+    if labelYAxis:
+        ax.set_ylabel("Probability of at Least One Interception")
+
+    # ax.set_xlim(left=1)  # optional: skip meaningless N=0
+    # ax.set_ylim(0, 1.05)
+
+    # Light grid — helps reviewers read values quickly
+    ax.grid(True)
+
+
+def plot_all_median(
+    datadict,
+    ax,
+    fig,
+    showLegend=False,
+    labelXAxis=False,
+    labelYAxis=False,
+    yRange=(-1, 17),
+):
+    # Style choices that pair well with technical papers
+    style_map = {
+        "Straight — no launch time": dict(
+            color="darkblue", linestyle="-", marker="s", linewidth=2.5
+        ),
+        "Straight — launch time": dict(
+            color="darkblue", linestyle="--", marker="o", linewidth=3.5
+        ),
+        "Spline — no launch time": dict(
+            color="olivedrab", linestyle="-", marker="s", linewidth=2.5
+        ),
+        "Spline — launch time": dict(
+            color="olivedrab", linestyle="--", marker="o", linewidth=3.5
+        ),
+    }
+    ax.set_ylim(yRange)
+    ax.grid(True)
+    ax.set_xticks(
+        np.arange(len(next(iter(datadict.values()))[0]))
+    )  # set x-ticks to number of agents
+    if labelXAxis:
+        ax.set_xlabel("Number of Sacrificial Agents")
+    if labelYAxis:
+        ax.set_ylabel("Mean Feasible Launch Region Area")
+
+    for label, p in datadict.items():
+        N = np.arange(len(p))
+
+        median_iqr_plot(
+            p,
+            ax=ax,
+            label=label,
+            linestyle=style_map[label]["linestyle"],
+            color=style_map[label]["color"],
+            marker=style_map[label]["marker"],
+            linewidth=style_map[label]["linewidth"],
+        )
+    if showLegend:
+        leg = fig.legend(loc="outside lower center", ncol=2)
+        leg.set_in_layout(True)
+
+
+def get_data_dicts(dataDir):
+    allIntersectionAreasNoTimeStraight, allPathTimesNoTimeStraight, p_straight_no = (
+        parse_data(dataDir + "/noLaunchTime/straightLine")
     )
-    allIntersectionAreasNoTimeOpt, allPathTimesNoTimeOpt, _ = parse_data(
+    allIntersectionAreasTimeStraight, allPathTimesTimeStraight, p_straight_time = (
+        parse_data(dataDir + "/launchTime/straightLine")
+    )
+    allIntersectionAreasNoTimeOpt, allPathTimesNoTimeOpt, p_spline_no = parse_data(
         dataDir + "/noLaunchTime/splinePath"
     )
-    allIntersectionAreasTimeOpt, allPathTimesTimeOpt, _ = parse_data(
+    allIntersectionAreasTimeOpt, allPathTimesTimeOpt, p_spline_time = parse_data(
         dataDir + "/launchTime/splinePath"
     )
-    allIntersectionAreasTimeStraight, allPathTimesTimeStraight, _ = parse_data(
-        dataDir + "/launchTime/straightLine"
-    )
-    fig, ax = plt.subplots()
-    ax.set_title("Pursuer Potential Region Area vs Number of Sacrificial Agents")
-    median_iqr_plot(allIntersectionAreasNoTimeStraight, ax=ax, label="Straight No Time")
-    median_iqr_plot(allIntersectionAreasNoTimeOpt, ax=ax, label="Spline No Time")
-    median_iqr_plot(allIntersectionAreasTimeOpt, ax=ax, label="Spline With Time")
-    median_iqr_plot(allIntersectionAreasTimeStraight, ax=ax, label="Straight With Time")
-    plt.legend()
 
-    fig, ax = plt.subplots()
-    ax.set_title("High-Priority Agent Path Time vs Number of Sacrificial Agents")
-    median_iqr_plot(allPathTimesNoTimeStraight, ax=ax, label="Straight No Time")
-    median_iqr_plot(allPathTimesNoTimeOpt, ax=ax, label="Spline No Time")
-    median_iqr_plot(allPathTimesTimeOpt, ax=ax, label="Spline With Time")
-    median_iqr_plot(allPathTimesTimeStraight, ax=ax, label="Straight With Time")
-    plt.legend()
-    plt.show()
+    p_dict = {
+        "Straight — no launch time": p_straight_no,
+        "Straight — launch time": p_straight_time,
+        "Spline — no launch time": p_spline_no,
+        "Spline — launch time": p_spline_time,
+    }
+    intersectionDict = {
+        "Straight — no launch time": allIntersectionAreasNoTimeStraight,
+        "Straight — launch time": allIntersectionAreasTimeStraight,
+        "Spline — no launch time": allIntersectionAreasNoTimeOpt,
+        "Spline — launch time": allIntersectionAreasTimeOpt,
+    }
+    pathTimeDict = {
+        "Straight — no launch time": allPathTimesNoTimeStraight,
+        "Straight — launch time": allPathTimesTimeStraight,
+        "Spline — no launch time": allPathTimesNoTimeOpt,
+        "Spline — launch time": allPathTimesTimeOpt,
+    }
+    return p_dict, intersectionDict, pathTimeDict
+
+
+def plot_all_data(dataDir1, dataDir2, dataDir3):
+    p_dict1, intersectionDict1, pathTimeDict1 = get_data_dicts(dataDir1)
+    p_dict2, intersectionDict2, pathTimeDict2 = get_data_dicts(dataDir2)
+    p_dict3, intersectionDict3, pathTimeDict3 = get_data_dicts(dataDir3)
+    fig, axes = plt.subplots(3, 2, figsize=(8, 8), layout="constrained")
+    plot_all_median(intersectionDict1, ax=axes[0][0], fig=fig, showLegend=True)
+    plot_all_median(intersectionDict2, ax=axes[1][0], fig=fig, labelYAxis=True)
+    plot_all_median(intersectionDict3, ax=axes[2][0], fig=fig, labelXAxis=True)
+
+    plot_interception_probability(p_dict1, ax=axes[0][1])
+    plot_interception_probability(p_dict2, ax=axes[1][1], labelYAxis=True)
+    plot_interception_probability(p_dict3, ax=axes[2][1], labelXAxis=True)
+
+    xloc = 0.5
+    yloc = 0.81
+    txtColor = "darkred"
+
+    axes[0][0].text(
+        xloc,
+        yloc,
+        r"Passive pursuer",
+        fontsize=14,
+        fontweight="bold",
+        transform=axes[0][0].transAxes,
+        ha="center",
+        color=txtColor,
+        bbox=dict(facecolor="white", alpha=0.8, edgecolor="none"),
+    )
+
+    axes[1][0].text(
+        xloc,
+        yloc,
+        r"Nominal pursuer",
+        fontsize=14,
+        fontweight="bold",
+        transform=axes[1][0].transAxes,
+        ha="center",
+        color=txtColor,
+        bbox=dict(facecolor="white", alpha=0.8, edgecolor="none"),
+    )
+
+    axes[2][0].text(
+        xloc,
+        yloc,
+        r"Aggressive pursuer",
+        fontsize=14,  # <- you forgot this before
+        fontweight="bold",
+        transform=axes[2][0].transAxes,
+        ha="center",
+        color=txtColor,
+        bbox=dict(facecolor="white", alpha=0.8, edgecolor="none"),
+    )
+    fig.savefig(
+        "/home/ggs24/Desktop/geometric_bez/area-reductioncomb.pdf",
+        bbox_inches="tight",
+    )
+
+    fig, axes = plt.subplots(1, 3, figsize=(8, 8 / 3), layout="constrained")
+    plot_all_median(
+        pathTimeDict1,
+        ax=axes[0],
+        fig=fig,
+        labelYAxis=True,
+        showLegend=True,
+        labelXAxis=True,
+        yRange=(14, 17),
+    )
+    plot_all_median(
+        pathTimeDict2, ax=axes[1], fig=fig, labelXAxis=True, yRange=(14, 17)
+    )
+    plot_all_median(
+        pathTimeDict3, ax=axes[2], fig=fig, labelXAxis=True, yRange=(14, 17)
+    )
+    xloc = 0.5
+    yloc = 0.81
+    txtColor = "darkred"
+
+    axes[0].text(
+        xloc,
+        yloc,
+        r"Passive pursuer",
+        fontsize=12,
+        fontweight="bold",
+        transform=axes[0].transAxes,
+        ha="center",
+        color=txtColor,
+        bbox=dict(facecolor="white", alpha=0.8, edgecolor="none"),
+    )
+
+    axes[1].text(
+        xloc,
+        yloc,
+        r"Nominal pursuer",
+        fontsize=12,
+        fontweight="bold",
+        transform=axes[1].transAxes,
+        ha="center",
+        color=txtColor,
+        bbox=dict(facecolor="white", alpha=0.8, edgecolor="none"),
+    )
+
+    axes[2].text(
+        xloc,
+        yloc,
+        r"Aggressive pursuer",
+        fontsize=12,  # <- you forgot this before
+        fontweight="bold",
+        transform=axes[2].transAxes,
+        ha="center",
+        color=txtColor,
+        bbox=dict(facecolor="white", alpha=0.8, edgecolor="none"),
+    )
+    fig.savefig(
+        "/home/ggs24/Desktop/geometric_bez/pathtimecomb.pdf",
+        bbox_inches="tight",
+    )
+
+    #
+    # fig, ax = plt.subplots()
+    # ax.set_title("High-Priority Agent Path Time vs Number of Sacrificial Agents")
+    # median_iqr_plot(allPathTimesNoTimeStraight, ax=ax, label="Straight No Time")
+    # median_iqr_plot(allPathTimesNoTimeOpt, ax=ax, label="Spline No Time")
+    # median_iqr_plot(allPathTimesTimeOpt, ax=ax, label="Spline With Time")
+    # median_iqr_plot(allPathTimesTimeStraight, ax=ax, label="Straight With Time")
+    # plt.legend()
 
 
 if __name__ == "__main__":
@@ -1931,7 +2213,11 @@ if __name__ == "__main__":
     # first argument is random seed from command line
     if len(sys.argv) != 2:
         # parse_data(dataDir="GEOMETRIC_BEZ/data/newTest/")
-        plot_all_data(dataDir="GEOMETRIC_BEZ/data/beta28")
+        plot_all_data(
+            dataDir1="GEOMETRIC_BEZ/data/beta28",
+            dataDir2="GEOMETRIC_BEZ/data/beta22",
+            dataDir3="GEOMETRIC_BEZ/data/beta82",
+        )
     else:
         seed = int(sys.argv[1])
         print("running monte carlo simulation with seed", seed)

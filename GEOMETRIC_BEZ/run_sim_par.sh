@@ -1,7 +1,5 @@
 #!/bin/bash
 
-SEEDS=(24 12 37 1 48 16 39)
-
 commandIndex=0
 commandList=()
 for SEED in {0..1000}; do

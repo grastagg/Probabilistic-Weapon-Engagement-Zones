@@ -382,7 +382,7 @@ def run_monte_carlo_simulation(
         "spline_order": 3,
         "R_min": 0.5,
         "alpha": 2.0,
-        "beta": 8.0,
+        "beta": 2.0,
         "D_min_frac": 0.5,
         "p_min": 0.0,
     }
@@ -633,7 +633,10 @@ def run_monte_carlo_simulation(
             interceptionPositions.append(np.array(interceptPoint))
 
             if cfg["measureLaunchTime"]:
-                radius = tavelTime * cfg["pursuerSpeed"] + cfg["pursuerCaptureRadius"]
+                radius = min(
+                    tavelTime * cfg["pursuerSpeed"] + cfg["pursuerCaptureRadius"],
+                    cfg["pursuerRange"] + cfg["pursuerCaptureRadius"],
+                )
             else:
                 radius = cfg["pursuerRange"] + cfg["pursuerCaptureRadius"]
             print("radius:", radius)
@@ -813,15 +816,15 @@ if __name__ == "__main__":
         measure_launch_time = bool(int(sys.argv[2]))
         straight_line_sacrificial = bool(int(sys.argv[3]))
         print("running monte carlo simulation with seed", seed)
-        numAgents = 3
-        runName = "beta28"
+        numAgents = 5
+        runName = "beta22"
         run_monte_carlo_simulation(
             seed,
             numAgents,
             saveData=True,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=True,
+            plot=False,
             animate=False,
             measureLaunchTime=measure_launch_time,
             straightLineSacrificial=straight_line_sacrificial,
