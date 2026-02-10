@@ -349,21 +349,7 @@ def plot_test_grad(
     testEvaderYValues = -np.ones_like(testEvaderXVales) * 0.2
     # testEvaderStart = np.array([-0.4, 0.1])
     ax.axis("equal")
-    for i, x in enumerate(testEvaderXVales):
-        testEvaderStart = np.array([x, testEvaderYValues[i]])
 
-        inEz, goalPosition = in_dubins_engagement_zone_left_right_single(
-            pursuerPosition,
-            pursuerHeading,
-            minimumTurnRadius,
-            captureRadius,
-            pursuerRange,
-            pursuerSpeed,
-            testEvaderStart,
-            evaderHeading,
-            evaderSpeed,
-            ax,
-        )
     plot_turn_radius_circles(pursuerPosition, pursuerHeading, minimumTurnRadius, ax)
     fig.colorbar(c, ax=ax)
     pursuerTime = pursuerRange / pursuerSpeed

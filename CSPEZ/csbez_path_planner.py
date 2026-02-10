@@ -573,7 +573,7 @@ def animate_spline_path():
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
 
     velocity_constraints = (agentSpeed - 0.001, agentSpeed + 0.001)
-    # velocity_constraints = (0.0, agentSpeed + 0.001)
+    velocity_constraints = (0.0, agentSpeed + 0.001)
     spline = optimize_spline_path(
         startingLocation,
         endingLocation,

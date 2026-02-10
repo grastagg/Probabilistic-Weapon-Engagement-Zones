@@ -453,6 +453,32 @@ dDubinsPEZDControlPoints_quadratic = jax.jit(
 dDubinsPEZDtf_quadratic = jax.jit(jacfwd(dubins_PEZ_along_spline_quadratic, argnums=1))
 
 
+def rect_left_and_top(lower_left, upper_right, n_points_total):
+    x1, y1 = lower_left
+    x2, y2 = upper_right
+
+    # Compute edge lengths
+    left_len = y2 - y1
+    top_len = x2 - x1
+    total_len = left_len + top_len
+
+    # Split points proportionally to edge lengths
+    n_left = max(2, int(round(n_points_total * (left_len / total_len))))
+    n_top = max(
+        2, n_points_total - n_left + 1
+    )  # +1 to avoid losing one point at the corner
+
+    # Left edge: (x = x1, y1 → y2)
+    left = np.column_stack((np.full(n_left, x1), np.linspace(y1, y2, n_left)))
+
+    # Top edge: (x1 → x2, y = y2)
+    top = np.column_stack((np.linspace(x1, x2, n_top), np.full(n_top, y2)))
+
+    # Concatenate, skipping the repeated corner (x1, y2)
+    pts = np.vstack((left, top[1:]))
+    return pts
+
+
 def optimize_spline_path(
     p0,
     pf,
@@ -639,29 +665,30 @@ def optimize_spline_path(
 
     optProb = Optimization("path optimization", objfunc)
 
-    # tf_initial = 1.0
-    # knotPoints = spline_opt_tools.create_unclamped_knot_points(
-    #     0, tf_initial, num_cont_points, 3
-    # )
-    # #
+    tf_initial = 1.0
+    knotPoints = spline_opt_tools.create_unclamped_knot_points(
+        0, tf_initial, num_cont_points, 3
+    )
+    #
     # x0 = np.linspace(p0, pf, num_cont_points).flatten()
-    # x0 = spline_opt_tools.move_first_control_point_so_spline_passes_through_start(
-    #     x0, knotPoints, p0, v0
-    # )
-    # x0 = x0.flatten()
-    # x0 = spline_opt_tools.move_last_control_point_so_spline_passes_through_end(
-    #     x0, knotPoints, pf, v0
-    # )
-    # x0 = x0.flatten()
+    x0 = rect_left_and_top(p0, pf, num_cont_points).flatten()
+    x0 = spline_opt_tools.move_first_control_point_so_spline_passes_through_start(
+        x0, knotPoints, p0, v0
+    )
+    x0 = x0.flatten()
+    x0 = spline_opt_tools.move_last_control_point_so_spline_passes_through_end(
+        x0, knotPoints, pf, v0
+    )
+    x0 = x0.flatten()
 
-    # tf = spline_opt_tools.assure_velocity_constraint(
-    #     x0,
-    #     knotPoints,
-    #     num_cont_points,
-    #     agentSpeed,
-    #     velocity_constraints,
-    #     numSamplesPerInterval,
-    # )
+    tf = spline_opt_tools.assure_velocity_constraint(
+        x0,
+        knotPoints,
+        num_cont_points,
+        agentSpeed,
+        velocity_constraints,
+        numSamplesPerInterval,
+    )
 
     tempVelocityContstraints = spline_opt_tools.get_spline_velocity(
         x0, 1, 3, numSamplesPerInterval
@@ -680,20 +707,20 @@ def optimize_spline_path(
         upper=velocity_constraints[1],
         scale=1.0 / velocity_constraints[1],
     )
-    optProb.addConGroup(
-        "turn_rate",
-        num_constraint_samples,
-        lower=turn_rate_constraints[0],
-        upper=turn_rate_constraints[1],
-        scale=1.0 / turn_rate_constraints[1],
-    )
-    optProb.addConGroup(
-        "curvature",
-        num_constraint_samples,
-        lower=curvature_constraints[0],
-        upper=curvature_constraints[1],
-        scale=1.0 / curvature_constraints[1],
-    )
+    # optProb.addConGroup(
+    #     "turn_rate",
+    #     num_constraint_samples,
+    #     lower=turn_rate_constraints[0],
+    #     upper=turn_rate_constraints[1],
+    #     scale=1.0 / turn_rate_constraints[1],
+    # )
+    # optProb.addConGroup(
+    #     "curvature",
+    #     num_constraint_samples,
+    #     lower=curvature_constraints[0],
+    #     upper=curvature_constraints[1],
+    #     scale=1.0 / curvature_constraints[1],
+    # )
     optProb.addConGroup("pez", num_constraint_samples, lower=None, upper=pez_limit)
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
     optProb.addConGroup("end", 2, lower=pf, upper=pf)
@@ -701,7 +728,7 @@ def optimize_spline_path(
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 0
+    opt.options["print_level"] = 5
     opt.options["max_iter"] = 200
     username = getpass.getuser()
     opt.options["hsllib"] = (
@@ -1040,7 +1067,7 @@ def animate_spline_path():
     initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
     initialVelocity = endingLocation - startingLocation
 
-    numControlPoints = 14
+    numControlPoints = 20
     splineOrder = 3
     turn_rate_constraints = (-1.0, 1.0)
     curvature_constraints = (-0.2, 0.2)
@@ -1056,31 +1083,13 @@ def animate_spline_path():
     pursuerTurnRadius = 0.2
     pursuerTurnRadiusVar = 0.005
     agentSpeed = 1
-    pez_limit = 0.25
+    pez_limit = 0.05
 
     initialVelocity = initialVelocity / np.linalg.norm(initialVelocity) * agentSpeed
 
     velocity_constraints = (agentSpeed - 0.001, agentSpeed + 0.001)
-    spline = csbez_path_planner.optimize_spline_path(
-        startingLocation,
-        endingLocation,
-        initialVelocity,
-        numControlPoints,
-        splineOrder,
-        velocity_constraints,
-        turn_rate_constraints,
-        curvature_constraints,
-        num_constraint_samples,
-        0.0,
-        pursuerPosition,
-        pursuerHeading,
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-        pursuerTurnRadius,
-        agentSpeed,
-    )
-    # spline = optimize_spline_path(
+    velocity_constraints = (0.0, agentSpeed + 0.001)
+    # detSpline = csbez_path_planner.optimize_spline_path(
     #     startingLocation,
     #     endingLocation,
     #     initialVelocity,
@@ -1090,28 +1099,49 @@ def animate_spline_path():
     #     turn_rate_constraints,
     #     curvature_constraints,
     #     num_constraint_samples,
-    #     pez_limit,
+    #     0.0,
     #     pursuerPosition,
-    #     pursuerPositionCov,
     #     pursuerHeading,
-    #     pursuerHeadingVar,
     #     pursuerRange,
-    #     pursuerRangeVar,
     #     pursuerCaptureRadius,
     #     pursuerSpeed,
-    #     pursuerSpeedVar,
     #     pursuerTurnRadius,
-    #     pursuerTurnRadiusVar,
     #     agentSpeed,
-    #     detSpline.c.flatten(),
-    #     detSpline.t[-detSpline.k - 1],
-    #     linearPez=False,
-    #     quadraticPez=False,
-    #     neuralNetworkPez=True,
     # )
-    #
+    spline = optimize_spline_path(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        pez_limit,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerHeading,
+        pursuerHeadingVar,
+        pursuerRange,
+        pursuerRangeVar,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        pursuerTurnRadius,
+        pursuerTurnRadiusVar,
+        agentSpeed,
+        # detSpline.c.flatten(),
+        # detSpline.t[-detSpline.k - 1],
+        None,
+        None,
+        linearPez=False,
+        quadraticPez=False,
+        neuralNetworkPez=True,
+    )
+
     currentTime = 0
-    dt = 0.1
+    dt = 0.05
     finalTime = spline.t[-1 - spline.k]
     ind = 0
     while currentTime < finalTime:

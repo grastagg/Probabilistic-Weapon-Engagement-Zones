@@ -245,7 +245,7 @@ def plot_dubins_PEZ(
         ZTrue,
         levels=levels,
     )
-    inLine = True
+    inLine = False
     if inLine:
         ax.clabel(c, inline=True)
     else:
@@ -612,20 +612,6 @@ def plot_normal(mean, var, ax, label):
     ax.plot(x, y, label=label)
 
 
-in_ez_right = jax.jit(
-    jax.vmap(
-        csbez.in_dubins_engagement_zone_right_single,
-        in_axes=(None, 0, None, None, None, None, None, None, None),
-    )
-)
-in_ez_left = jax.jit(
-    jax.vmap(
-        csbez.in_dubins_engagement_zone_left_single,
-        in_axes=(None, 0, None, None, None, None, None, None, None),
-    )
-)
-
-
 def compare_distribution(
     evaderPosition,
     evaderHeading,
@@ -889,28 +875,6 @@ def compare_distribution(
     sortIndex = np.argsort(pursuerHeadingSamples.flatten())
     ez = ez.flatten()[sortIndex]
     pursuerHeadingSamples = pursuerHeadingSamples.flatten()[sortIndex]
-    rightEZ = in_ez_right(
-        pursuerPosition.flatten(),
-        pursuerHeadingSamples.flatten(),
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPosition.flatten(),
-        evaderHeading[0],
-        evaderSpeed,
-    )
-    leftEZ = in_ez_left(
-        pursuerPosition.flatten(),
-        pursuerHeadingSamples.flatten(),
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPosition.flatten(),
-        evaderHeading[0],
-        evaderSpeed,
-    )
 
     fig1, ax1 = plt.subplots()
     ax1.scatter(pursuerHeadingSamples, ez, label="Monte Carlo")
