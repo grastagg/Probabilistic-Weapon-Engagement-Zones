@@ -12,6 +12,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 
 from GEOMETRIC_BEZ import sacraficial_planner
+from PEZ import pez_path_planner
 
 
 def _jsonable(x):
@@ -365,6 +366,7 @@ def run_monte_carlo_simulation(
         "planHighPriorityPaths": bool(planHighPriorityPaths),
         "measureLaunchTime": bool(measureLaunchTime),
         "straightLineSacrificial": bool(straightLineSacrificial),
+        "planTrueHpPath": True,
         "x_range": [-6.0, 6.0],
         "y_range": [-6.0, 6.0],
         "num_pts": 50,
@@ -388,14 +390,18 @@ def run_monte_carlo_simulation(
     }
     cfg["D_min"] = cfg["D_min_frac"] * cfg["pursuerRange"]
 
-    if cfg["measureLaunchTime"]:
-        tmpRunName = "launchTime"
+    if cfg["planTrueHpPath"]:
+        tmpRunName = "trueHpPath/"
+        tmpRunName2 = ""
     else:
-        tmpRunName = "noLaunchTime"
-    if cfg["straightLineSacrificial"]:
-        tmpRunName2 = "straightLine/"
-    else:
-        tmpRunName2 = "splinePath/"
+        if cfg["measureLaunchTime"]:
+            tmpRunName = "launchTime"
+        else:
+            tmpRunName = "noLaunchTime"
+        if cfg["straightLineSacrificial"]:
+            tmpRunName2 = "straightLine/"
+        else:
+            tmpRunName2 = "splinePath/"
     run_dir = Path(cfg["dataDir"]) / cfg["runName"] / tmpRunName / tmpRunName2
 
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -461,6 +467,31 @@ def run_monte_carlo_simulation(
         float((max_box[0] - min_box[0]) * (max_box[1] - min_box[1]))
     ]
     highPriorityPathTimes = []
+
+    if cfg["planTrueHpPath"]:
+        trueSpline, trueTF = pez_path_planner.bez_pspline_path(
+            highPriorityStart,
+            highPriorityGoal,
+            initialHighPriorityVel,
+            cfg["num_cont_points"],
+            cfg["spline_order"],
+            velocity_constraints,
+            turn_rate_constraints,
+            curvature_constraints,
+            15,
+            truePursuerPos,
+            cfg["pursuerRange"],
+            cfg["pursuerCaptureRadius"],
+            cfg["pursuerSpeed"],
+            velocity_constraints[1],
+        )
+        print("trueTF", trueTF)
+        # save to file with
+        np.savetxt(
+            run_dir / f"{cfg['randomSeed']}.txt",
+            np.array([trueTF]),
+        )
+        return
 
     # -----------------------------
     # Initial HP plan
@@ -817,7 +848,7 @@ if __name__ == "__main__":
         straight_line_sacrificial = bool(int(sys.argv[3]))
         print("running monte carlo simulation with seed", seed)
         numAgents = 5
-        runName = "beta22"
+        runName = "trueHpPath"
         run_monte_carlo_simulation(
             seed,
             numAgents,

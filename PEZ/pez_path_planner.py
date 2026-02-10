@@ -312,6 +312,7 @@ def optimize_spline_path(
     pursuerSpeedVar,
     agentSpeed,
     useProbabalistic,
+    left=True,
 ):
     # Compute Jacobian of engagement zone function
 
@@ -449,8 +450,10 @@ def optimize_spline_path(
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf_initial, num_cont_points, 3
     )
-    x0 = rect_bottom_and_right(p0, pf, num_cont_points).flatten()
-    x0 = rect_left_and_top(p0, pf, num_cont_points).flatten()
+    if not left:
+        x0 = rect_bottom_and_right(p0, pf, num_cont_points).flatten()
+    else:
+        x0 = rect_left_and_top(p0, pf, num_cont_points).flatten()
 
     print("velocity constraints", velocity_constraints)
     tf = spline_opt_tools.assure_velocity_constraint(
@@ -540,7 +543,7 @@ def optimize_spline_path(
     )
     # print("knot points", knotPoints)
     controlPoints = sol.xStar["control_points"].reshape((num_cont_points, 2))
-    return create_spline(knotPoints, controlPoints, spline_order)
+    return create_spline(knotPoints, controlPoints, spline_order), sol.xStar["tf"][0]
 
 
 def mc_spline_evaluation(
@@ -594,6 +597,86 @@ def mc_spline_evaluation(
     return num_bez_violations / num_mc_runs
 
 
+def bez_pspline_path(
+    startingLocation,
+    endingLocation,
+    initialVelocity,
+    numControlPoints,
+    splineOrder,
+    velocity_constraints,
+    turn_rate_constraints,
+    curvature_constraints,
+    num_constraint_samples,
+    pursuerPosition,
+    pursuerRange,
+    pursuerCaptureRange,
+    pursuerSpeed,
+    agentSpeed,
+):
+    pez_constraint_limit = 0.5
+    agentPositionCov = np.array([[0.0, 0], [0, 0.0]])
+    agentHeadingVar = 0.0
+    pursuerPositionCov = np.array([[0.05, -0.06], [-0.06, 0.25]])
+    pursuerRangeVar = 0.1
+    pursuerCaptureRangeVar = 0.1
+    pursuerSpeedVar = 0.1
+    useProbabalistic = False
+    leftSpline, leftTf = optimize_spline_path(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        pez_constraint_limit,
+        agentPositionCov,
+        agentHeadingVar,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerRange,
+        pursuerRangeVar,
+        pursuerCaptureRange,
+        pursuerCaptureRangeVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        agentSpeed,
+        useProbabalistic,
+        left=True,
+    )
+    rightSpline, rightTf = optimize_spline_path(
+        startingLocation,
+        endingLocation,
+        initialVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        pez_constraint_limit,
+        agentPositionCov,
+        agentHeadingVar,
+        pursuerPosition,
+        pursuerPositionCov,
+        pursuerRange,
+        pursuerRangeVar,
+        pursuerCaptureRange,
+        pursuerCaptureRangeVar,
+        pursuerSpeed,
+        pursuerSpeedVar,
+        agentSpeed,
+        useProbabalistic,
+        left=True,
+    )
+    if rightTf < leftTf:
+        return rightSpline, rightTf
+    else:
+        return leftSpline, leftTf
+
+
 def main():
     agentPositionCov = np.array([[0.0, 0], [0, 0.0]])
     agentHeadingVar = 0.0
@@ -611,7 +694,7 @@ def main():
     # pez_constraint_limit_list = [.1,.2,.3,.4]
     # pez_constraint_limit_list = [.01,0.05,.1,.2,.3,.4,.5]
     pez_constraint_limit_list = [0.01, 0.05, 0.25, 0.5]
-    pez_constraint_limit_list = [0.01]
+    pez_constraint_limit_list = [0.5]
 
     pursuerPositionCov = np.array([[0.05, -0.06], [-0.06, 0.25]])
     # pursuerPositionCov = np.array([[0.1, 0], [0, 0.1]])
@@ -625,8 +708,7 @@ def main():
     # pursuerSpeedVar = 0.2
     pursuerSpeedVar = 0.0
     agentSpeed = 0.5
-    # velocity_constraints = (0,1.0)
-    velocity_constraints = (agentSpeed - 0.01, agentSpeed + 0.01)
+    velocity_constraints = (0, agentSpeed + 0.01)
 
     num_mc_runs = 10000
 
