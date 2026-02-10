@@ -90,7 +90,6 @@ def animate_sacraficial_trajectory_frames(
     out_dir="video",
     triangle_size=None,  # if None, auto from plot scale
     stop_at_intercept=True,  # True: stop frames at intercept; False: continue along spline
-    hold_frames=10,  # if stop_at_intercept, optionally hold N extra frames
 ):
     """
     Writes frames: out_dir/{frameNum:06d}.png, returns updated frameNum.
@@ -368,17 +367,17 @@ def run_monte_carlo_simulation(
         "x_range": [-6.0, 6.0],
         "y_range": [-6.0, 6.0],
         "num_pts": 50,
-        "pursuerRange": 1.0,
+        "pursuerRange": 1.5,
         "pursuerCaptureRadius": 0.2,
         "pursuerSpeed": 1.5,
-        "min_box": [-2.0, -2.0],
-        "max_box": [2.0, 2.0],
+        "min_box": [-3.0, -3.0],
+        "max_box": [3.0, 3.0],
         "sacrificialLaunchPosition": [-5.0, -5.0],
         "sacrificialSpeed": 1.0,
         "sacrificialRange": 25.0,
         "highPriorityGoal": [5.0, 5.0],
         "highPrioritySpeed": 1.0,
-        "num_cont_points": 14,
+        "num_cont_points": 16,
         "spline_order": 3,
         "R_min": 0.5,
         "alpha": 2.0,
@@ -448,6 +447,7 @@ def run_monte_carlo_simulation(
     truePursuerPos = np.array(
         [rng.uniform(min_box[0], max_box[0]), rng.uniform(min_box[1], max_box[1])]
     )
+    truePursuerPos = np.array([1.0, 1.0])
     print(f"True pursuer position: {truePursuerPos}")
 
     # -----------------------------
@@ -489,8 +489,8 @@ def run_monte_carlo_simulation(
 
     if cfg["animate"]:
         frameNum = 0
-        numFramesForHp = 20
-        frameRate = 5
+        numFramesForHp = 80
+        frameRate = 15
         frameNum = animate_hp_path(
             truePursuerPos,
             splineHP,
@@ -500,6 +500,8 @@ def run_monte_carlo_simulation(
             numFramesForHp,
             cfg,
         )
+    if cfg["plot"]:
+        fig, axes = plt.subplots(2, 2)
 
     # -----------------------------
     # Main loop
@@ -519,7 +521,7 @@ def run_monte_carlo_simulation(
             else:
                 spline = sacraficial_planner.optimize_spline_path_get_intercepted(
                     sacrificialLaunchPosition,
-                    np.array([0.0, 0.0]),
+                    np.array([max_box[0], max_box[1]]),
                     initialSacrificialVelocity,
                     cfg["num_cont_points"],
                     cfg["spline_order"],
@@ -592,6 +594,78 @@ def run_monte_carlo_simulation(
                     f"time for agent {agentIdx} optimization: {time.time() - t0:.3f}s"
                 )
 
+        if cfg["plot"]:
+            ax = axes[agentIdx // 2, agentIdx % 2]
+            t0 = spline.t[spline.k]
+            tf = spline.t[-1 - spline.k]
+            t = np.linspace(t0, tf, 1000, endpoint=True)
+            idx = -1
+            # idx = np.where(t <= interceptedTime)[0][-1] + 1 if isIntercepted else -1
+            pos = spline(t)[0:idx]
+            ax.plot(pos[:, 0], pos[:, 1], label=f"Sacraficial Agent {agentIdx} Path")
+
+            t0 = splineHP.t[splineHP.k]
+            tf = splineHP.t[-1 - splineHP.k]
+            t = np.linspace(t0, tf, 1000, endpoint=True)
+
+            posHP = splineHP(t)
+            ax.plot(posHP[:, 0], posHP[:, 1], label="High-Priority Agent Path")
+
+            ax.set_aspect("equal")
+
+            if len(interceptionPositions) > 0:
+                arcs = sacraficial_planner.bez_from_interceptions.intersection_arcs(
+                    # np.array(interceptionPositions[0:-1]),
+                    np.array(interceptionPositions),
+                    np.array(interceptionRadii),
+                )
+
+                ax.set_aspect("equal")
+                sacraficial_planner.bez_from_interceptions.plot_potential_pursuer_reachable_region(
+                    arcs,
+                    cfg["pursuerRange"],
+                    cfg["pursuerCaptureRadius"],
+                    xlim=cfg["x_range"],
+                    ylim=cfg["y_range"],
+                    ax=ax,
+                )
+                sacraficial_planner.bez_from_interceptions.plot_circle_intersection_arcs(
+                    arcs, ax=ax
+                )
+            else:
+                sacraficial_planner.rectangle_bez.plot_box_pursuer_reachable_region(
+                    min_box,
+                    max_box,
+                    cfg["pursuerRange"],
+                    cfg["pursuerCaptureRadius"],
+                    ax=ax,
+                )
+            ax.scatter(
+                *truePursuerPos,
+                color="red",
+                s=50,
+                label="True Pursuer Position",
+                marker="o",
+            )
+
+            for i, pos in enumerate(interceptionPositions[0:-1]):
+                ax.scatter(
+                    *pos,
+                    color="red",
+                    s=50,
+                    label=f"Past Interception {i}",
+                    marker="x",
+                )
+            else:
+                for i, pos in enumerate(interceptionPositions):
+                    ax.scatter(
+                        *pos,
+                        color="red",
+                        s=50,
+                        label=f"Past Interception {i}",
+                        marker="x",
+                    )
+
         isIntercepted, interceptedTime, interceptPoint, D, tavelTime = (
             sacraficial_planner.sample_intercept_from_spline(
                 spline,
@@ -621,7 +695,6 @@ def run_monte_carlo_simulation(
                 interceptionRadii,
                 out_dir="video",
                 stop_at_intercept=True,
-                hold_frames=10,
             )
 
         interceptionHistory.append(bool(isIntercepted))
@@ -696,86 +769,6 @@ def run_monte_carlo_simulation(
                 )
             #     frameNum = animate_hp_path()
 
-        if cfg["plot"]:
-            fig, ax = plt.subplots()
-            t0 = spline.t[spline.k]
-            tf = spline.t[-1 - spline.k]
-            t = np.linspace(t0, tf, 1000, endpoint=True)
-            idx = -1
-            # idx = np.where(t <= interceptedTime)[0][-1] + 1 if isIntercepted else -1
-            pos = spline(t)[0:idx]
-            ax.plot(pos[:, 0], pos[:, 1], label=f"Sacraficial Agent {agentIdx} Path")
-
-            t0 = splineHP.t[splineHP.k]
-            tf = splineHP.t[-1 - splineHP.k]
-            t = np.linspace(t0, tf, 1000, endpoint=True)
-
-            posHP = splineHP(t)
-            ax.plot(posHP[:, 0], posHP[:, 1], label="High-Priority Agent Path")
-
-            ax.set_aspect("equal")
-
-            if len(interceptionPositions) > 0:
-                arcs = sacraficial_planner.bez_from_interceptions.intersection_arcs(
-                    # np.array(interceptionPositions[0:-1]),
-                    np.array(interceptionPositions),
-                    np.array(interceptionRadii),
-                )
-
-                ax.set_aspect("equal")
-                sacraficial_planner.bez_from_interceptions.plot_potential_pursuer_reachable_region(
-                    arcs,
-                    cfg["pursuerRange"],
-                    cfg["pursuerCaptureRadius"],
-                    xlim=cfg["x_range"],
-                    ylim=cfg["y_range"],
-                    ax=ax,
-                )
-                sacraficial_planner.bez_from_interceptions.plot_circle_intersection_arcs(
-                    arcs, ax=ax
-                )
-            else:
-                sacraficial_planner.rectangle_bez.plot_box_pursuer_reachable_region(
-                    min_box,
-                    max_box,
-                    cfg["pursuerRange"],
-                    cfg["pursuerCaptureRadius"],
-                    ax=ax,
-                )
-            ax.scatter(
-                *truePursuerPos,
-                color="red",
-                s=50,
-                label="True Pursuer Position",
-                marker="o",
-            )
-            if isIntercepted:
-                ax.scatter(
-                    *interceptPoint,
-                    color="blue",
-                    s=50,
-                    label="Intercept Point",
-                    marker="x",
-                )
-                for i, pos in enumerate(interceptionPositions[0:-1]):
-                    ax.scatter(
-                        *pos,
-                        color="red",
-                        s=50,
-                        label=f"Past Interception {i}",
-                        marker="x",
-                    )
-            else:
-                for i, pos in enumerate(interceptionPositions):
-                    ax.scatter(
-                        *pos,
-                        color="red",
-                        s=50,
-                        label=f"Past Interception {i}",
-                        marker="x",
-                    )
-            plt.show()
-
         if cfg["saveData"]:
             if interceptionPositions:
                 intersectionArea = sacraficial_planner.circle_intersection_area(
@@ -802,6 +795,38 @@ def run_monte_carlo_simulation(
         filename = run_dir / f"{cfg['randomSeed']}.npz"
         np.savez_compressed(str(filename), **data)
         print(f"Saved simulation data to {filename}")
+    # plot last scene
+    if cfg["plot"]:
+        ax = axes[1, 1]
+
+        t0 = splineHP.t[splineHP.k]
+        tf = splineHP.t[-1 - splineHP.k]
+        t = np.linspace(t0, tf, 1000, endpoint=True)
+
+        posHP = splineHP(t)
+        ax.plot(posHP[:, 0], posHP[:, 1], label="High-Priority Agent Path")
+
+        ax.set_aspect("equal")
+
+        if len(interceptionPositions) > 0:
+            arcs = sacraficial_planner.bez_from_interceptions.intersection_arcs(
+                # np.array(interceptionPositions[0:-1]),
+                np.array(interceptionPositions),
+                np.array(interceptionRadii),
+            )
+
+            ax.set_aspect("equal")
+            sacraficial_planner.bez_from_interceptions.plot_potential_pursuer_reachable_region(
+                arcs,
+                cfg["pursuerRange"],
+                cfg["pursuerCaptureRadius"],
+                xlim=cfg["x_range"],
+                ylim=cfg["y_range"],
+                ax=ax,
+            )
+            sacraficial_planner.bez_from_interceptions.plot_circle_intersection_arcs(
+                arcs, ax=ax
+            )
 
 
 if __name__ == "__main__":
@@ -816,16 +841,17 @@ if __name__ == "__main__":
         measure_launch_time = bool(int(sys.argv[2]))
         straight_line_sacrificial = bool(int(sys.argv[3]))
         print("running monte carlo simulation with seed", seed)
-        numAgents = 5
+        numAgents = 3
         runName = "beta22"
         run_monte_carlo_simulation(
             seed,
             numAgents,
-            saveData=True,
+            saveData=False,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
             plot=False,
-            animate=False,
+            animate=True,
             measureLaunchTime=measure_launch_time,
             straightLineSacrificial=straight_line_sacrificial,
         )
+        plt.show()

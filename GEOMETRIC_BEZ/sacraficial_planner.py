@@ -29,12 +29,12 @@ os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = (
 )
 os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-os.environ.setdefault("MPLBACKEND", "Agg")  # avoid X11 ("Invalid MIT-MAGIC-COOKIE-1")
+# os.environ.setdefault("MPLBACKEND", "Agg")  # avoid X11 ("Invalid MIT-MAGIC-COOKIE-1")
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
 # non interactive backend (for saving figures without X11)
-matplotlib.use("Agg")
+# matplotlib.use("Agg")
 
 from GEOMETRIC_BEZ import bez_from_interceptions
 import GEOMETRIC_BEZ.pez_from_interceptions as pez_from_interceptions
@@ -776,7 +776,6 @@ def optimize_spline_path_minimize_area(
         scale=1.0 / curvature_constraints[1],
     )
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
-    print("interval for intercepted:", pmin)
     # optProb.addConGroup("intercepted", 1, lower=pmin, upper=None)
 
     optProb.addObj("obj")
@@ -804,7 +803,6 @@ def optimize_spline_path_minimize_area(
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
-    print(sol)
 
     controlPoints = sol.xStar["control_points"].reshape((num_cont_points, 2))
 
@@ -936,15 +934,8 @@ def optimize_spline_path_get_intercepted(
     tf = sacraficialAgentRange / sacraficialAgentSpeed
 
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
-        0, tf, num_cont_points, 3
+        0, tf, num_cont_points, spline_order
     )
-
-    if velocity_constraints[0] <= 0.0:
-        v_floor = max(1e-3, 0.05 * float(velocity_constraints[1]))
-        velocity_constraints = (v_floor, float(velocity_constraints[1]))
-
-    eval_counter = {"n": 0}
-    debug_every = int(os.environ.get("SACRIFICIAL_DEBUG_EVERY", "20"))
 
     def objfunc(xDict):
         control_points_flat = xDict["control_points"]
@@ -971,26 +962,7 @@ def optimize_spline_path_get_intercepted(
         funcs["velocity"] = np.asarray(velocity)
         funcs["curvature"] = np.asarray(curvature)
 
-        if debug:
-            eval_counter["n"] += 1
-            if eval_counter["n"] % max(1, debug_every) == 0:
-                v = funcs["velocity"]
-                tr = funcs["turn_rate"]
-                k = funcs["curvature"]
-                print(
-                    f"[eval {eval_counter['n']}] obj={funcs['obj']:.6e} "
-                    f"v[min,max]=({v.min():.3e},{v.max():.3e}) "
-                    f"tr[min,max]=({tr.min():.3e},{tr.max():.3e}) "
-                    f"k[min,max]=({k.min():.3e},{k.max():.3e})"
-                )
-
-        fail = (
-            (not np.isfinite(funcs["obj"]))
-            or (not np.all(np.isfinite(funcs["turn_rate"])))
-            or (not np.all(np.isfinite(funcs["velocity"])))
-            or (not np.all(np.isfinite(funcs["curvature"])))
-        )
-        return funcs, fail
+        return funcs, False
 
     def sens(xDict, funcs):
         funcsSens = {}
@@ -1019,10 +991,10 @@ def optimize_spline_path_get_intercepted(
             max_box,
         )
 
-        dObj = np.asarray(dObjDControlPointsVal)
-        dVel = np.asarray(dVelocityDControlPointsVal)
-        dTr = np.asarray(dTurnRateDControlPointsVal)
-        dCurv = np.asarray(dCurvatureDControlPointsVal)
+        dObj = dObjDControlPointsVal
+        dVel = dVelocityDControlPointsVal
+        dTr = dTurnRateDControlPointsVal
+        dCurv = dCurvatureDControlPointsVal
 
         funcsSens["obj"] = {"control_points": dObj}
         funcsSens["start"] = {
@@ -1032,13 +1004,7 @@ def optimize_spline_path_get_intercepted(
         funcsSens["turn_rate"] = {"control_points": dTr}
         funcsSens["curvature"] = {"control_points": dCurv}
 
-        fail = (
-            (not np.all(np.isfinite(dObj)))
-            or (not np.all(np.isfinite(dVel)))
-            or (not np.all(np.isfinite(dTr)))
-            or (not np.all(np.isfinite(dCurv)))
-        )
-        return funcsSens, fail
+        return funcsSens, False
 
     # num_constraint_samples = numSamplesPerInterval*(num_cont_points-2)-2
 
@@ -1088,7 +1054,7 @@ def optimize_spline_path_get_intercepted(
     opt.options["print_level"] = 0
 
     opt.options["max_iter"] = 1000
-    opt.options["derivative_test"] = "first-order"
+    # opt.options["derivative_test"] = "first-order"
     # opt.options["hessian_approximation"] = "limited-memory"
     # opt.options["nlp_scaling_method"] = "gradient-based"
     # opt.options["mu_strategy"] = "adaptive"
