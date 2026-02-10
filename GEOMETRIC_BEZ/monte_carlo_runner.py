@@ -367,7 +367,7 @@ def run_monte_carlo_simulation(
         "x_range": [-6.0, 6.0],
         "y_range": [-6.0, 6.0],
         "num_pts": 50,
-        "pursuerRange": 1.5,
+        "pursuerRange": 1.4,
         "pursuerCaptureRadius": 0.2,
         "pursuerSpeed": 1.5,
         "min_box": [-3.0, -3.0],
@@ -501,7 +501,7 @@ def run_monte_carlo_simulation(
             cfg,
         )
     if cfg["plot"]:
-        fig, axes = plt.subplots(2, 2)
+        fig, axes = plt.subplots(2, 2, figsize=(8, 8), layout="constrained")
 
     # -----------------------------
     # Main loop
@@ -596,20 +596,34 @@ def run_monte_carlo_simulation(
 
         if cfg["plot"]:
             ax = axes[agentIdx // 2, agentIdx % 2]
+
+            # turn of x and y labels and ticks
+            ax.set_xticks([])
+            ax.set_yticks([])
             t0 = spline.t[spline.k]
             tf = spline.t[-1 - spline.k]
             t = np.linspace(t0, tf, 1000, endpoint=True)
             idx = -1
             # idx = np.where(t <= interceptedTime)[0][-1] + 1 if isIntercepted else -1
             pos = spline(t)[0:idx]
-            ax.plot(pos[:, 0], pos[:, 1], label=f"Sacraficial Agent {agentIdx} Path")
+            ax.plot(
+                pos[:, 0],
+                pos[:, 1],
+                label=f"Sacraficial Path",
+                color="blue",
+            )
 
             t0 = splineHP.t[splineHP.k]
             tf = splineHP.t[-1 - splineHP.k]
             t = np.linspace(t0, tf, 1000, endpoint=True)
 
             posHP = splineHP(t)
-            ax.plot(posHP[:, 0], posHP[:, 1], label="High-Priority Agent Path")
+            ax.plot(
+                posHP[:, 0],
+                posHP[:, 1],
+                label="Safe Path",
+                color="green",
+            )
 
             ax.set_aspect("equal")
 
@@ -647,24 +661,68 @@ def run_monte_carlo_simulation(
                 label="True Pursuer Position",
                 marker="o",
             )
+            circ = plt.Circle(
+                truePursuerPos,
+                cfg["pursuerRange"] + cfg["pursuerCaptureRadius"],
+                color="magenta",
+                alpha=0.1,
+                label="True Reachable Region",
+            )
+            ax.add_artist(circ)
 
-            for i, pos in enumerate(interceptionPositions[0:-1]):
+            for i, pos in enumerate(interceptionPositions):
                 ax.scatter(
                     *pos,
                     color="red",
                     s=50,
-                    label=f"Past Interception {i}",
+                    label=f"Interception",
                     marker="x",
                 )
+                circ = plt.Circle(
+                    pos,
+                    cfg["pursuerRange"] + cfg["pursuerCaptureRadius"],
+                    color="red",
+                    linestyle="--",
+                    fill=False,
+                )
+                ax.add_artist(circ)
             else:
                 for i, pos in enumerate(interceptionPositions):
                     ax.scatter(
                         *pos,
                         color="red",
                         s=50,
-                        label=f"Past Interception {i}",
+                        label=f"Interception",
                         marker="x",
                     )
+
+            if agentIdx == 0:
+                ax.text(
+                    0.03,
+                    0.98,
+                    "Initial plan",
+                    transform=ax.transAxes,
+                    fontsize=11,
+                    fontweight="bold",
+                    va="top",
+                    bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
+                )
+            else:
+                ax.text(
+                    0.03,
+                    0.98,
+                    f"Plan after interception {agentIdx}",
+                    transform=ax.transAxes,
+                    fontsize=11,
+                    fontweight="bold",
+                    va="top",
+                    bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
+                )
+            if agentIdx == 0:
+                # add a hidden point so that the interception positions show up in the legend
+                ax.scatter([], [], color="red", marker="x", label="Interception", s=50)
+                leg = fig.legend(loc="outside lower center", ncols=4)
+                leg.set_in_layout(True)
 
         isIntercepted, interceptedTime, interceptPoint, D, tavelTime = (
             sacraficial_planner.sample_intercept_from_spline(
@@ -804,9 +862,26 @@ def run_monte_carlo_simulation(
         t = np.linspace(t0, tf, 1000, endpoint=True)
 
         posHP = splineHP(t)
-        ax.plot(posHP[:, 0], posHP[:, 1], label="High-Priority Agent Path")
+        ax.plot(
+            posHP[:, 0],
+            posHP[:, 1],
+            label="High-Priority Agent Path",
+            color="green",
+        )
 
         ax.set_aspect("equal")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.text(
+            0.03,
+            0.98,
+            f"Plan after interception {agentIdx + 1}",
+            transform=ax.transAxes,
+            fontsize=11,
+            fontweight="bold",
+            va="top",
+            bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
+        )
 
         if len(interceptionPositions) > 0:
             arcs = sacraficial_planner.bez_from_interceptions.intersection_arcs(
@@ -827,6 +902,40 @@ def run_monte_carlo_simulation(
             sacraficial_planner.bez_from_interceptions.plot_circle_intersection_arcs(
                 arcs, ax=ax
             )
+            ax.scatter(
+                *truePursuerPos,
+                color="red",
+                s=50,
+                label="True Pursuer Position",
+                marker="o",
+            )
+            circ = plt.Circle(
+                truePursuerPos,
+                cfg["pursuerRange"] + cfg["pursuerCaptureRadius"],
+                color="magenta",
+                alpha=0.1,
+            )
+            ax.add_artist(circ)
+
+            for i, pos in enumerate(interceptionPositions):
+                ax.scatter(
+                    *pos,
+                    color="red",
+                    s=50,
+                    label=f"Past Interception {i}",
+                    marker="x",
+                )
+                circ = plt.Circle(
+                    pos,
+                    cfg["pursuerRange"] + cfg["pursuerCaptureRadius"],
+                    color="red",
+                    linestyle="--",
+                    fill=False,
+                )
+                ax.add_artist(circ)
+        fig.savefig(
+            "/home/grant/Desktop/geometric_bez/sample_run.pdf", bbox_inches="tight"
+        )
 
 
 if __name__ == "__main__":
@@ -849,8 +958,8 @@ if __name__ == "__main__":
             saveData=False,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=False,
-            animate=True,
+            plot=True,
+            animate=False,
             measureLaunchTime=measure_launch_time,
             straightLineSacrificial=straight_line_sacrificial,
         )

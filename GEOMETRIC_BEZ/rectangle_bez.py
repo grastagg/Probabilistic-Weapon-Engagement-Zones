@@ -105,7 +105,8 @@ def plot_box_pursuer_reachable_region(
     ax.plot(
         [],
         color="red",
-        label=r"$\partial \mathcal{P}_{\text{rect}}$",
+        # label=r"$\partial \mathcal{P}_{\text{rect}}$",
+        label=r"$\partial \mathcal{P}$",
     )
     ax.add_artist(box)
     xlim = (
@@ -141,7 +142,8 @@ def plot_box_pursuer_reachable_region(
             linestyles=linestyle,
             alpha=alpha,
         )
-    ax.plot([], color=color, label=r"$\partial \mathcal{R}_{\text{rect}}$")
+    # ax.plot([], color=color, label=r"$\partial \mathcal{R}_{\text{rect}}$")
+    ax.plot([], color=color, label=r"$\partial \mathcal{R}$")
     return ax
 
 
