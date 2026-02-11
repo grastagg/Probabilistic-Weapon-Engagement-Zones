@@ -1925,10 +1925,26 @@ def parse_data(dataDir):
     for filename in os.listdir(dataDir):
         if filename.endswith(".npz"):
             data = np.load(os.path.join(dataDir, filename))
+            # strip off .npz extension for cleaner printing
+            seed = filename[:-4]
+            truePathLength = np.genfromtxt(
+                "/home/ggs24/repos/github/RESEARCH/Probabilistic-Weapon-Engagement-Zones/GEOMETRIC_BEZ/data/trueHpPath/trueHpPath/"
+                + seed
+                + ".txt",
+                delimiter=",",
+            )
+
             # process data as needed
 
             intersectionAreas = data["potentialPursuerRegionAreas"]
-            pathTimes = data["highPriorityPathTimes"]
+            pathTimes = data["highPriorityPathTimes"] / truePathLength
+            if np.any(pathTimes < 0.999):
+                print(pathTimes < 1.0)
+                print(pathTimes)
+                print(filename)
+
+            # print("path length data", pathTimes)
+            # print("normalized path times", pathTimes / truePathLength)
             allIntersectionAreas.append(intersectionAreas)
             allPathTimes.append(pathTimes)
             allInterceptionHistories.append(data["interceptionHistory"])
@@ -2003,6 +2019,8 @@ def plot_all_median(
     labelXAxis=False,
     labelYAxis=False,
     yRange=(-1, 17),
+    yNumbers=True,
+    yLabel="Mean Feasible Launch Region Area",
 ):
     # Style choices that pair well with technical papers
     style_map = {
@@ -2027,7 +2045,9 @@ def plot_all_median(
     if labelXAxis:
         ax.set_xlabel("Number of Sacrificial Agents")
     if labelYAxis:
-        ax.set_ylabel("Mean Feasible Launch Region Area")
+        ax.set_ylabel(yLabel)
+    if not yNumbers:
+        ax.set_yticklabels([])
 
     for label, p in datadict.items():
         N = np.arange(len(p))
@@ -2133,12 +2153,17 @@ def plot_all_data(dataDir1, dataDir2, dataDir3):
         color=txtColor,
         bbox=dict(facecolor="white", alpha=0.8, edgecolor="none"),
     )
+    axes[0, 0].hlines(0, 0, 5, color="gray", linestyle=":", linewidth=3)
+    axes[1, 0].hlines(0, 0, 5, color="gray", linestyle=":", linewidth=3)
+    axes[2, 0].hlines(0, 0, 5, color="gray", linestyle=":", linewidth=3)
     fig.savefig(
         "/home/ggs24/Desktop/geometric_bez/area-reductioncomb.pdf",
         bbox_inches="tight",
     )
 
     fig, axes = plt.subplots(1, 3, figsize=(8, 8 / 3), layout="constrained")
+    yRange = (0.98, 1.18)
+
     plot_all_median(
         pathTimeDict1,
         ax=axes[0],
@@ -2146,13 +2171,25 @@ def plot_all_data(dataDir1, dataDir2, dataDir3):
         labelYAxis=True,
         showLegend=True,
         labelXAxis=True,
-        yRange=(14, 17),
+        yRange=yRange,
+        yNumbers=True,
+        yLabel="Mean Normalized\n Safe Path Time",
     )
     plot_all_median(
-        pathTimeDict2, ax=axes[1], fig=fig, labelXAxis=True, yRange=(14, 17)
+        pathTimeDict2,
+        ax=axes[1],
+        fig=fig,
+        labelXAxis=True,
+        yRange=yRange,
+        yNumbers=False,
     )
     plot_all_median(
-        pathTimeDict3, ax=axes[2], fig=fig, labelXAxis=True, yRange=(14, 17)
+        pathTimeDict3,
+        ax=axes[2],
+        fig=fig,
+        labelXAxis=True,
+        yRange=yRange,
+        yNumbers=False,
     )
     xloc = 0.5
     yloc = 0.81
@@ -2193,6 +2230,9 @@ def plot_all_data(dataDir1, dataDir2, dataDir3):
         color=txtColor,
         bbox=dict(facecolor="white", alpha=0.8, edgecolor="none"),
     )
+    axes[0].hlines(1, 0, 5, color="gray", linestyle=":", linewidth=3)
+    axes[1].hlines(1, 0, 5, color="gray", linestyle=":", linewidth=3)
+    axes[2].hlines(1, 0, 5, color="gray", linestyle=":", linewidth=3)
     fig.savefig(
         "/home/ggs24/Desktop/geometric_bez/pathtimecomb.pdf",
         bbox_inches="tight",

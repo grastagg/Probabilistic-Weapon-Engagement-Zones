@@ -669,7 +669,7 @@ def bez_pspline_path(
         pursuerSpeedVar,
         agentSpeed,
         useProbabalistic,
-        left=True,
+        left=False,
     )
     if rightTf < leftTf:
         return rightSpline, rightTf
