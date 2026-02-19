@@ -415,12 +415,12 @@ def plot_safe_cones_for_case(
 
 def main():
     psi_e = np.deg2rad(0.0)  # single evader heading (rad)
-    # psi_e = 2.2255
+    psi_e = 2.2255
 
     v_e = 1.0  # evader speed
 
     t_breaks = jnp.array([0.0, 0.5, 1.0])  # (S+1,)
-    v_p = jnp.array([3.5, 1.5])  # (S,)
+    v_p = jnp.array([3.5, 0.5])  # (S,)
     # find average pursuer speed
     dt = jnp.diff(t_breaks)
     v_avg = jnp.sum(v_p * dt) / jnp.sum(dt)
@@ -454,33 +454,33 @@ def main():
     plt.xlabel("x")
     plt.ylabel("y")
     # plot BEZ of average speed (this only works if average speed > evader speed)
-    pez_plotting.plotEngagementZone(
-        psi_e,
-        jnp.array([0.0, 0.0]),
-        R,
-        0,
-        v_avg,
-        v_e,
-        ax,
-    )
-    pez_plotting.plotEngagementZone(
-        psi_e,
-        jnp.array([0.0, 0.0]),
-        R,
-        0,
-        np.min(v_p),
-        v_e,
-        ax,
-    )
-    pez_plotting.plotEngagementZone(
-        psi_e,
-        jnp.array([0.0, 0.0]),
-        R,
-        0,
-        np.max(v_p),
-        v_e,
-        ax,
-    )
+    # pez_plotting.plotEngagementZone(
+    #     psi_e,
+    #     jnp.array([0.0, 0.0]),
+    #     R,
+    #     0,
+    #     v_avg,
+    #     v_e,
+    #     ax,
+    # )
+    # pez_plotting.plotEngagementZone(
+    #     psi_e,
+    #     jnp.array([0.0, 0.0]),
+    #     R,
+    #     0,
+    #     np.min(v_p),
+    #     v_e,
+    #     ax,
+    # )
+    # pez_plotting.plotEngagementZone(
+    #     psi_e,
+    #     jnp.array([0.0, 0.0]),
+    #     R,
+    #     0,
+    #     np.max(v_p),
+    #     v_e,
+    #     ax,
+    # )
     # plot speed profile
     fig2, ax2 = plt.subplots()
     ax2.step(x=t_breaks, y=jnp.concatenate([v_p, v_p[-1:]]), where="post")
