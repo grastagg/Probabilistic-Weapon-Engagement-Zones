@@ -500,20 +500,20 @@ def optimize_spline_path(
         upper=velocity_constraints[1],
         scale=1.0 / velocity_constraints[1],
     )
-    optProb.addConGroup(
-        "turn_rate",
-        num_constraint_samples,
-        lower=turn_rate_constraints[0],
-        upper=turn_rate_constraints[1],
-        scale=1.0 / turn_rate_constraints[1],
-    )
-    optProb.addConGroup(
-        "curvature",
-        num_constraint_samples,
-        lower=curvature_constraints[0],
-        upper=curvature_constraints[1],
-        scale=1.0 / curvature_constraints[1],
-    )
+    # optProb.addConGroup(
+    #     "turn_rate",
+    #     num_constraint_samples,
+    #     lower=turn_rate_constraints[0],
+    #     upper=turn_rate_constraints[1],
+    #     scale=1.0 / turn_rate_constraints[1],
+    # )
+    # optProb.addConGroup(
+    #     "curvature",
+    #     num_constraint_samples,
+    #     lower=curvature_constraints[0],
+    #     upper=curvature_constraints[1],
+    #     scale=1.0 / curvature_constraints[1],
+    # )
     optProb.addConGroup(
         "pez", num_constraint_samples, lower=None, upper=pez_constraint_limit
     )
@@ -1043,7 +1043,7 @@ def animate_pez():
     endingLocation = np.array([4.0, 4.0])
     initialVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
 
-    numControlPoints = 14
+    numControlPoints = 18
     splineOrder = 3
     turn_rate_constraints = (-50.0, 50.0)
     curvature_constraints = (-10.0, 10.0)
@@ -1051,12 +1051,12 @@ def animate_pez():
     # pez_constraint_limit_list = [.1,.2,.3,.4]
     # pez_constraint_limit_list = [.01,0.05,.1,.2,.3,.4,.5]
     # pez_constraint_limit_list = [0.5]
-    pez_constraint_limit_list = [0.01]
+    pez_constraint_limit_list = [0.5]
 
     # pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
     pursuerPositionCov = np.array([[0.1, 0], [0, 0.1]])
     pursuerPositionCov = np.array([[0.05, -0.06], [-0.06, 0.25]])
-    pursuerRange = 1.0
+    pursuerRange = 2.0
     pursuerRangeVar = 0.1
     # pursuerRangeVar = 0.0
     pursuerCaptureRange = 0.1
@@ -1067,12 +1067,12 @@ def animate_pez():
     pursuerSpeedVar = 0.0
     agentSpeed = 0.5
     # velocity_constraints = (0,1.0)
-    velocity_constraints = (agentSpeed - 0.01, agentSpeed + 0.01)
+    velocity_constraints = (0.0, agentSpeed + 0.01)
 
     useProbabalistic = True
 
     pez_constraint_limit = pez_constraint_limit_list[0]
-    spline = optimize_spline_path(
+    spline, t = optimize_spline_path(
         startingLocation,
         endingLocation,
         initialVelocity,
@@ -1096,6 +1096,7 @@ def animate_pez():
         agentSpeed,
         useProbabalistic,
     )
+    print(spline)
 
     # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit, useProbabalistic)
     currentTime = 0
@@ -1108,21 +1109,33 @@ def animate_pez():
         pdot = spline.derivative(1)(currentTime)
         currentPosition = spline(currentTime)
         currentHeading = np.arctan2(pdot[1], pdot[0])
-        pez_plotting.plotProbablisticEngagementZone(
-            agentPositionCov,
+        # pez_plotting.plotProbablisticEngagementZone(
+        #     agentPositionCov,
+        #     currentHeading,
+        #     agentHeadingVar,
+        #     pursuerPosition,
+        #     pursuerPositionCov,
+        #     pursuerRange,
+        #     pursuerRangeVar,
+        #     pursuerCaptureRange,
+        #     pursuerCaptureRangeVar,
+        #     pursuerSpeed,
+        #     pursuerSpeedVar,
+        #     agentSpeed,
+        #     ax,
+        #     levels=[0.5],
+        #     colors="Reds",
+        # )
+        pez_plotting.plotEngagementZone(
             currentHeading,
-            agentHeadingVar,
             pursuerPosition,
-            pursuerPositionCov,
             pursuerRange,
-            pursuerRangeVar,
             pursuerCaptureRange,
-            pursuerCaptureRangeVar,
             pursuerSpeed,
-            pursuerSpeedVar,
             agentSpeed,
             ax,
-            levels=[0.01, 0.1, 0.2, 0.3, 0.4, 0.5],
+            color="green",
+            width=2,
         )
         # plot triangle at evader position with heading of evader
         plot_spline(
@@ -1153,9 +1166,9 @@ def animate_pez():
             ec="blue",
             zorder=5,
         )
-        pez_plotting.plotMahalanobisDistance(
-            pursuerPosition, pursuerPositionCov, ax, fig
-        )
+        # pez_plotting.plotMahalanobisDistance(
+        #     pursuerPosition, pursuerPositionCov, ax, fig
+        # )
         ax.set_xlim(-4.5, 4.5)
         ax.set_ylim(-4.5, 4.5)
         plt.xticks([])
@@ -1170,5 +1183,5 @@ def animate_pez():
 
 
 if __name__ == "__main__":
-    main()
-    # animate_pez()
+    # main()
+    animate_pez()

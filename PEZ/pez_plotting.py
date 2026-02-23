@@ -111,6 +111,7 @@ def plotProbablisticEngagementZone(
     agentSpeed,
     ax,
     levels=None,
+    colors="viridis",
 ):
     ax.set_aspect("equal")
 
@@ -158,7 +159,9 @@ def plotProbablisticEngagementZone(
     # Plotting
     if levels is None:
         levels = np.linspace(0.1, 1, 10)
-    c = ax.contour(X, Y, engagementZonePlot_reshaped, levels=levels, linewidths=2)
+    c = ax.contour(
+        X, Y, engagementZonePlot_reshaped, levels=levels, linewidths=2, cmap=colors
+    )
     inLine = False
     if inLine:
         ax.clabel(c, inline=True)
@@ -502,4 +505,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    plot_potential_BEZS()
+    # plot_potential_BEZS()

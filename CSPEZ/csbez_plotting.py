@@ -498,12 +498,12 @@ def main_EZ():
 
     pursuerSpeed = 2
 
-    pursuerRange = 2.5
-    minimumTurnRadius = 0.47
+    pursuerRange = 1.5
+    minimumTurnRadius = 0.000047
     captureRadius = 0.0
     evaderHeading = (0 / 20) * np.pi
     evaderSpeed = 1
-    evaderPosition = np.array([-1.14, 2.46])
+    evaderPosition = np.array([-1.0, 1.0])
     # evaderPosition = np.array([-1.6, 2.66])
     startTime = time.time()
 
@@ -527,7 +527,7 @@ def main_EZ():
         pursuerRange,
         minimumTurnRadius,
         ax,
-        colors=["magenta"],
+        colors=["black"],
     )
     plot_dubins_EZ(
         pursuerPosition,
@@ -570,9 +570,19 @@ def main_EZ():
     plt.ylabel("Y")
     ax.set_xlim([-3.1, 3.1])
     ax.set_ylim([-3.1, 3.1])
+
     draw_airplanes.draw_airplane(
         ax, evaderPosition, color="blue", size=0.35, angle=evaderHeading - np.pi / 2
     )  # Blue airplane (evader) pointing toward x-axis
+    if True:
+        evaderFinalPosition = evaderPosition + speedRatio * pursuerRange * np.array(
+            [np.cos(evaderHeading), np.sin(evaderHeading)]
+        )
+        angleToFinalPoint = np.arctan2(
+            evaderFinalPosition[1] - pursuerPosition[1],
+            evaderFinalPosition[0] - pursuerPosition[0],
+        )
+        pursuerHeading = angleToFinalPoint
     draw_airplanes.draw_airplane(
         ax, pursuerPosition, color="red", size=0.35, angle=pursuerHeading - np.pi / 2
     )
