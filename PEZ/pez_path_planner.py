@@ -694,7 +694,7 @@ def main():
     # pez_constraint_limit_list = [.1,.2,.3,.4]
     # pez_constraint_limit_list = [.01,0.05,.1,.2,.3,.4,.5]
     pez_constraint_limit_list = [0.01, 0.05, 0.25, 0.5]
-    pez_constraint_limit_list = [0.5]
+    pez_constraint_limit_list = [0.01]
 
     pursuerPositionCov = np.array([[0.05, -0.06], [-0.06, 0.25]])
     # pursuerPositionCov = np.array([[0.1, 0], [0, 0.1]])
@@ -707,8 +707,23 @@ def main():
     pursuerSpeed = 2.0
     # pursuerSpeedVar = 0.2
     pursuerSpeedVar = 0.0
-    agentSpeed = 0.5
+    agentSpeed = 1.0
     velocity_constraints = (0, agentSpeed + 0.01)
+
+    pursuerRange = 1.0
+    pursuerRangeVar = 0.1
+    pursuerCaptureRange = 0.1
+    pursuerCaptureRangeVar = 0.02
+    pursuerSpeed = 2.0
+    pursuerSpeedVar = 0.0
+    agentSpeed = 0.5
+
+    agentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
+    pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
+    pursuerInitialPosition = np.array([0.0, 0.0])
+
+    agentInitialHeading = 0.0
+    agentHeadingVar = 0.0
 
     num_mc_runs = 10000
 
@@ -717,7 +732,7 @@ def main():
     fig, ax = plt.subplots(figsize=(6, 6))
     for pez_constraint_limit in pez_constraint_limit_list:
         print("PEZ Constraint Limit: ", pez_constraint_limit)
-        spline = optimize_spline_path(
+        spline, t = optimize_spline_path(
             startingLocation,
             endingLocation,
             initialVelocity,
@@ -1183,5 +1198,5 @@ def animate_pez():
 
 
 if __name__ == "__main__":
-    # main()
-    animate_pez()
+    main()
+    # animate_pez()

@@ -1,5 +1,5 @@
 import numpy as np
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+import json
 
 import matplotlib.pyplot as plt
 import jax.numpy as jnp
@@ -162,6 +162,7 @@ def plotProbablisticEngagementZone(
     c = ax.contour(
         X, Y, engagementZonePlot_reshaped, levels=levels, linewidths=2, cmap=colors
     )
+
     inLine = False
     if inLine:
         ax.clabel(c, inline=True)
@@ -356,7 +357,7 @@ def main():
     pursuerCaptureRangeVar = 0.02
     pursuerSpeed = 2.0
     pursuerSpeedVar = 0.0
-    agentSpeed = 0.5
+    agentSpeed = 1.0
 
     agentPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
@@ -371,21 +372,21 @@ def main():
         draw_mahalanobis.plotMahalanobisDistance(
             pursuerInitialPosition, pursuerPositionCov, mcAx, fig
         )
-    mcEz = plotMCProbablisticEngagementZone(
-        agentPositionCov,
-        agentInitialHeading,
-        agentHeadingVar,
-        pursuerInitialPosition,
-        pursuerPositionCov,
-        pursuerRange,
-        pursuerRangeVar,
-        pursuerCaptureRange,
-        pursuerCaptureRangeVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        agentSpeed,
-        mcAx,
-    )
+    # mcEz = plotMCProbablisticEngagementZone(
+    #     agentPositionCov,
+    #     agentInitialHeading,
+    #     agentHeadingVar,
+    #     pursuerInitialPosition,
+    #     pursuerPositionCov,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     pursuerCaptureRange,
+    #     pursuerCaptureRangeVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     agentSpeed,
+    #     mcAx,
+    # )
     # plotEngagementZone(
     #     agentInitialHeading,
     #     pursuerInitialPosition.squeeze(),
@@ -422,6 +423,8 @@ def main():
         agentSpeed,
         linAx,
     )
+
+    # save linepez to .csv
     # plotEngagementZone(
     #     agentInitialHeading,
     #     pursuerInitialPosition,

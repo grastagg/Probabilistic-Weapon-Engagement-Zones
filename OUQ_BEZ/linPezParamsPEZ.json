@@ -1,0 +1,1 @@
+{"agentPositionCov": [[0.0, 0.0], [0.0, 0.0]], "agentHeadingVar": 0.0, "pursuerPosition": [0.0, 0.0], "pursuerPositionCov": [[0.025, -0.04], [-0.04, 0.1]], "pursuerRange": 1.0, "pursuerRangeVar": 0.1, "pursuerCaptureRange": 0.1, "pursuerCaptureRangeVar": 0.02, "pursuerSpeed": 2.0, "pursuerSpeedVar": 0.0, "agentSpeed": 1.0}
