@@ -209,7 +209,7 @@ def annotate_box_EZ_plot(
     ax.text(
         (evader_start[0] + evader_start[0] + dist * np.cos(evader_heading)) / 2,
         (evader_start[1] + evader_start[1] + dist * np.sin(evader_heading)) / 2 - 0.25,
-        r"$\mu R \hat{\mathbf{v}}_E$",
+        r"$\nu R \hat{\mathbf{v}}_E$",
         color="black",
     )
     curlyBrace(

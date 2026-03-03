@@ -1,3 +1,4 @@
+from jax._src.source_info_util import current
 import numpy as np
 import json
 from pyoptsparse import Optimization, OPT, IPOPT
@@ -37,7 +38,7 @@ import PEZ.pez as pez
 import PEZ.pez_plotting as pez_plotting
 import PLOT_COMMON.draw_mahalanobis as draw_mahalanobis
 
-numSamplesPerInterval = 15
+numSamplesPerInterval = 5
 
 
 def load_grid_data(grid_file_path, param_file_path):
@@ -128,8 +129,8 @@ def trilerp_uniform_periodic_psi_single(
     yq = jnp.clip(y, y_min, y_max)
 
     # --- periodic wrap for psi into [psi_min, psi_min + 2*pi) (assumes full 2π coverage) ---
-    # If your psi grid uses a different period, replace 2*pi with (dpsi*npsi).
-    psiq = psi_min + jnp.mod(psi - psi_min, 2.0 * jnp.pi)
+    period = dpsi * npsi
+    psiq = psi_min + jnp.mod(psi - psi_min, period)
 
     # --- compute fractional indices ---
     fx = (xq - x_min) / dx
@@ -367,7 +368,6 @@ def optimize_spline_path_interp_Pez(
     velocity_constraints,
     turn_rate_constraints,
     curvature_constraints,
-    num_constraint_samples,
     x_min,
     dx,
     nx,
@@ -518,8 +518,6 @@ def optimize_spline_path_interp_Pez(
 
         return funcsSens, False
 
-    # num_constraint_samples = numSamplesPerInterval*(num_cont_points-2)-2
-
     optProb = Optimization("path optimization", objfunc)
 
     # if previous_spline is not None:
@@ -575,20 +573,20 @@ def optimize_spline_path_interp_Pez(
         upper=velocity_constraints[1],
         scale=1.0 / velocity_constraints[1],
     )
-    optProb.addConGroup(
-        "turn_rate",
-        num_constraint_samples,
-        lower=turn_rate_constraints[0],
-        upper=turn_rate_constraints[1],
-        scale=1.0 / turn_rate_constraints[1],
-    )
-    optProb.addConGroup(
-        "curvature",
-        num_constraint_samples,
-        lower=curvature_constraints[0],
-        upper=curvature_constraints[1],
-        scale=1.0 / curvature_constraints[1],
-    )
+    # optProb.addConGroup(
+    #     "turn_rate",
+    #     num_constraint_samples,
+    #     lower=turn_rate_constraints[0],
+    #     upper=turn_rate_constraints[1],
+    #     scale=1.0 / turn_rate_constraints[1],
+    # )
+    # optProb.addConGroup(
+    #     "curvature",
+    #     num_constraint_samples,
+    #     lower=curvature_constraints[0],
+    #     upper=curvature_constraints[1],
+    #     scale=1.0 / curvature_constraints[1],
+    # )
     optProb.addConGroup("ez", num_constraint_samples, lower=None, upper=pez_limit)
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
     optProb.addConGroup("end", 2, lower=pf, upper=pf)
@@ -645,7 +643,6 @@ def plan_path_interp_PEZ(
     velocity_constraints,
     turn_rate_constraints,
     curvature_constraints,
-    num_constraint_samples,
     pez_limit,
 ):
     splineLeft, tfLeft = optimize_spline_path_interp_Pez(
@@ -657,7 +654,6 @@ def plan_path_interp_PEZ(
         velocity_constraints=velocity_constraints,
         turn_rate_constraints=turn_rate_constraints,
         curvature_constraints=curvature_constraints,
-        num_constraint_samples=num_constraint_samples,
         x_min=x_min,
         dx=dx,
         nx=nx,
@@ -681,7 +677,6 @@ def plan_path_interp_PEZ(
         velocity_constraints=velocity_constraints,
         turn_rate_constraints=turn_rate_constraints,
         curvature_constraints=curvature_constraints,
-        num_constraint_samples=num_constraint_samples,
         x_min=x_min,
         dx=dx,
         nx=nx,
@@ -797,11 +792,10 @@ def main_path():
     finalEvaderPosition = np.array([4.0, 4.0])
     initialEvaderVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
 
-    numControlPoints = 18
+    numControlPoints = 20
     splineOrder = 3
     turn_rate_constraints = (-5.0, 5.0)
     curvature_constraints = (-1.0, 1.0)
-    num_constraint_samples = 50
     # velocity_constraints = (0,1.0)
     velocity_constraints = (0.0, 1.0)
 
@@ -812,7 +806,7 @@ def main_path():
         grid_file_path, param_file_path
     )
 
-    pez_limit = 0.01
+    pez_limit = 0.05
     spline, tf = plan_path_interp_PEZ(
         minx,
         dx,
@@ -832,7 +826,6 @@ def main_path():
         velocity_constraints,
         turn_rate_constraints,
         curvature_constraints,
-        num_constraint_samples,
         pez_limit,
     )
 
@@ -891,7 +884,7 @@ def main_path():
 
 
 def create_lin_pez_grid():
-    numPoints = 100
+    numPoints = 50
     numHeadings = 50
 
     pursuerRange = 1.0
@@ -906,11 +899,10 @@ def create_lin_pez_grid():
     pursuerPositionCov = np.array([[0.025, -0.04], [-0.04, 0.1]])
     pursuerPosition = np.array([0.0, 0.0])
 
-    agentInitialHeading = 0.0
     agentHeadingVar = 0.0
     headings = np.linspace(-np.pi, np.pi, numHeadings)
-    x = jnp.linspace(-5, 5, numPoints)
-    y = jnp.linspace(-5, 5, numPoints)
+    x = jnp.linspace(-3, 3, numPoints)
+    y = jnp.linspace(-3, 3, numPoints)
     X, Y = jnp.meshgrid(x, y)
     agentPositions = jnp.vstack([X.ravel(), Y.ravel()]).T
     allData = []
@@ -974,6 +966,137 @@ def create_lin_pez_grid():
     json.dump(pez_params, open("./OUQ_BEZ/linPezParamsPEZ.json", "w"))
 
 
+def animate_path():
+    initialEvaderPosition = np.array([-4.0, -4.0])
+    finalEvaderPosition = np.array([4.0, 4.0])
+    initialEvaderVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
+
+    numControlPoints = 24
+    splineOrder = 3
+    turn_rate_constraints = (-5.0, 5.0)
+    curvature_constraints = (-1.0, 1.0)
+    # velocity_constraints = (0,1.0)
+    velocity_constraints = (0.5, 1.0)
+
+    grid_file_path = "OUQ_BEZ/linPez.npy"
+    param_file_path = "OUQ_BEZ/linPezParams.json"
+    print(f"Loading grid data from {grid_file_path}...")
+    P_yxpsi, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_grid_data(
+        grid_file_path, param_file_path
+    )
+
+    pez_limit = 0.05
+    spline, tf = plan_path_interp_PEZ(
+        minx,
+        dx,
+        nx,
+        miny,
+        dy,
+        ny,
+        minpsi,
+        dpsi,
+        npsi,
+        P_yxpsi,
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        numControlPoints,
+        splineOrder,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        pez_limit,
+    )
+    currentTime = 0
+    dt = 0.1
+    finalTime = spline.t[-1 - spline.k]
+    ind = 0
+    while currentTime < finalTime:
+        fig, ax = plt.subplots()
+        pos = spline(np.linspace(0, tf, num=500))
+        pdot = spline.derivative(1)(currentTime)
+        currentPosition = spline(currentTime)
+        currentHeading = np.arctan2(pdot[1], pdot[0])
+
+        new_x = np.linspace(-3, 3, 100)
+        new_y = np.linspace(-3, 3, 100)
+        new_X, new_Y = np.meshgrid(new_x, new_y)
+        points = np.stack([new_X.ravel(), new_Y.ravel()], axis=-1)
+        new_psi = currentHeading * np.ones(points.shape[0])
+        interpPez = trilerp_uniform_periodic_psi(
+            points[:, 0],
+            points[:, 1],
+            new_psi,
+            minx,
+            dx,
+            nx,
+            miny,
+            dy,
+            ny,
+            minpsi,
+            dpsi,
+            npsi,
+            P_yxpsi,
+        ).reshape(new_X.shape)
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        c = ax.contour(
+            new_X,
+            new_Y,
+            interpPez.reshape(new_X.shape),
+            levels=[0.05, 0.1, 0.25, 0.5],
+            alpha=0.5,
+        )
+        handles, labels = c.legend_elements()
+        labels = [f"$\\epsilon={lvl:.2f}$" for lvl in c.levels]
+
+        ax.legend(
+            handles,
+            labels,
+            title="PEZ Level",
+            loc="lower right",
+            framealpha=0.8,
+        )
+
+        # plot triangle at evader position with heading of evader
+        ax.plot(pos[:, 0], pos[:, 1], label="Optimized Path", color="blue")
+        plt.arrow(
+            currentPosition[0],
+            currentPosition[1],
+            1e-6 * np.cos(currentHeading),  # essentially zero-length tail
+            1e-6 * np.sin(currentHeading),
+            head_width=0.2,
+            head_length=0.25,
+            width=0,  # no line
+            fc="blue",
+            ec="blue",
+            zorder=5,
+        )
+        # plt.arrow(
+        #     currentPosition[0],
+        #     currentPosition[1],
+        #     0.2 * np.cos(currentHeading),
+        #     0.2 * np.sin(currentHeading),
+        #     head_width=0.3,
+        #     head_length=0.3,
+        #     width=0.00001,
+        #     fc="blue",
+        #     ec="blue",
+        #     zorder=5,
+        # )
+        plt.xticks([])
+        plt.yticks([])
+        plt.xlabel("")
+        plt.ylabel("")
+
+        fig.savefig(f"video/{ind}.png", dpi=300)
+        ind += 1
+        currentTime += dt
+        plt.close(fig)
+
+
 if __name__ == "__main__":
+    create_lin_pez_grid()
     main_path()
     # main()
+    # animate_path()

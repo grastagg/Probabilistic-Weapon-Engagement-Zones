@@ -22,6 +22,7 @@ matplotlib.rcParams["legend.fontsize"] = 10
 matplotlib.rcParams["ytick.labelsize"] = 10
 matplotlib.rcParams["xtick.labelsize"] = 10
 
+from GEOMETRIC_BEZ import rectangle_bez
 import PEZ.pez_plotting as pez_plotting
 
 
@@ -818,6 +819,9 @@ def bez_learning_bez_plot():
         pursuerSpeed,
         evaderSpeed,
         ax,
+        width=1.5,
+        color="green",
+        label=False,
     )
     ax.scatter(
         pursuerPosition[0],
@@ -835,7 +839,7 @@ def bez_learning_bez_plot():
         color="magenta",
         linewidth=1.5,
     )
-    annotate_box_EZ_plot(
+    rectangle_bez.annotate_box_EZ_plot(
         [-1.67, -1.67],
         evaderHeading,
         evaderSpeed,
@@ -981,7 +985,8 @@ def combined_potential_plot():
 if __name__ == "__main__":
     # main_potential_bez_with_noisey_interception()
 
-    combined_potential_plot()
+    # combined_potential_plot()
     # fig, ax = plt.subplots(1, 1, figsize=(6, 6), layout="constrained")
     # plot_potential_ez(ax, fig)
+    bez_learning_bez_plot()
     plt.show()

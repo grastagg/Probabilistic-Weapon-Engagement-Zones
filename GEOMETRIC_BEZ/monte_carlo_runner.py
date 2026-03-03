@@ -847,15 +847,15 @@ if __name__ == "__main__":
         measure_launch_time = bool(int(sys.argv[2]))
         straight_line_sacrificial = bool(int(sys.argv[3]))
         print("running monte carlo simulation with seed", seed)
-        numAgents = 5
+        numAgents = 3
         runName = "trueHpPath"
         run_monte_carlo_simulation(
             seed,
             numAgents,
-            saveData=True,
+            saveData=False,
             dataDir="GEOMETRIC_BEZ/data/",
             runName=runName,
-            plot=False,
+            plot=True,
             animate=False,
             measureLaunchTime=measure_launch_time,
             straightLineSacrificial=straight_line_sacrificial,
