@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from datetime import datetime, timezone
 
+from matplotlib.lines import lineStyles
 import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -593,7 +594,20 @@ def run_monte_carlo_simulation(
                 print(
                     f"time for agent {agentIdx} optimization: {time.time() - t0:.3f}s"
                 )
-
+        isIntercepted, interceptedTime, interceptPoint, D, tavelTime = (
+            sacraficial_planner.sample_intercept_from_spline(
+                spline,
+                truePursuerPos,
+                cfg["pursuerRange"],
+                cfg["pursuerCaptureRadius"],
+                cfg["pursuerSpeed"],
+                inefficacyRatio=1.05,
+                alpha=cfg["alpha"],
+                beta=cfg["beta"],
+                D_min=cfg["D_min"],
+                rng=rng,
+            )
+        )
         if cfg["plot"]:
             ax = axes[agentIdx // 2, agentIdx % 2]
 
@@ -604,14 +618,17 @@ def run_monte_carlo_simulation(
             tf = spline.t[-1 - spline.k]
             t = np.linspace(t0, tf, 1000, endpoint=True)
             idx = -1
-            # idx = np.where(t <= interceptedTime)[0][-1] + 1 if isIntercepted else -1
-            pos = spline(t)[0:idx]
+            idx = np.where(t <= interceptedTime)[0][-1] + 1 if isIntercepted else -1
+            pos = spline(t)
+            posPreHit = pos[:idx]
+            posPostHit = pos[idx:]
             ax.plot(
-                pos[:, 0],
-                pos[:, 1],
+                posPreHit[:, 0],
+                posPreHit[:, 1],
                 label=f"Sacraficial Path",
                 color="blue",
             )
+            ax.plot(posPostHit[:, 0], posPostHit[:, 1], color="blue", linestyle=":")
 
             t0 = splineHP.t[splineHP.k]
             tf = splineHP.t[-1 - splineHP.k]
@@ -675,7 +692,7 @@ def run_monte_carlo_simulation(
                     *pos,
                     color="red",
                     s=50,
-                    label=f"Interception",
+                    label=f"Past Interceptions",
                     marker="x",
                 )
                 circ = plt.Circle(
@@ -692,7 +709,7 @@ def run_monte_carlo_simulation(
                         *pos,
                         color="red",
                         s=50,
-                        label=f"Interception",
+                        label=f"Past Interceptions",
                         marker="x",
                     )
 
@@ -718,26 +735,23 @@ def run_monte_carlo_simulation(
                     va="top",
                     bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
                 )
+            ax.scatter(
+                interceptPoint[0],
+                interceptPoint[1],
+                color="blue",
+                s=50,
+                marker="x",
+                zorder=1000,
+                label="New Interception",
+            )
             if agentIdx == 0:
                 # add a hidden point so that the interception positions show up in the legend
-                ax.scatter([], [], color="red", marker="x", label="Interception", s=50)
+                ax.scatter(
+                    [], [], color="red", marker="x", label="Past Interceptions", s=50
+                )
                 leg = fig.legend(loc="outside lower center", ncols=4)
                 leg.set_in_layout(True)
 
-        isIntercepted, interceptedTime, interceptPoint, D, tavelTime = (
-            sacraficial_planner.sample_intercept_from_spline(
-                spline,
-                truePursuerPos,
-                cfg["pursuerRange"],
-                cfg["pursuerCaptureRadius"],
-                cfg["pursuerSpeed"],
-                inefficacyRatio=1.05,
-                alpha=cfg["alpha"],
-                beta=cfg["beta"],
-                D_min=cfg["D_min"],
-                rng=rng,
-            )
-        )
         print("travel time:", tavelTime)
         if cfg["animate"]:
             frameNum = animate_sacraficial_trajectory_frames(
