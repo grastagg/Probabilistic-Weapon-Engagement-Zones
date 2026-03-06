@@ -605,7 +605,7 @@ def optimize_spline_path_interp_Pez(
     # opt.options["warm_start_init_point"] = "yes"
     # opt.options["mu_init"] = 1e-1
     # opt.options["nlp_scaling_method"] = "gradient-based"
-    opt.options["tol"] = 1e-8
+    opt.options["tol"] = 1e-6
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
@@ -883,10 +883,7 @@ def main_path():
     plt.show()
 
 
-def create_lin_pez_grid():
-    numPoints = 50
-    numHeadings = 50
-
+def create_lin_pez_grid(nX, nY, nPsi):
     pursuerRange = 1.0
     pursuerRangeVar = 0.1
     pursuerCaptureRange = 0.1
@@ -900,9 +897,9 @@ def create_lin_pez_grid():
     pursuerPosition = np.array([0.0, 0.0])
 
     agentHeadingVar = 0.0
-    headings = np.linspace(-np.pi, np.pi, numHeadings)
-    x = jnp.linspace(-3, 3, numPoints)
-    y = jnp.linspace(-3, 3, numPoints)
+    headings = np.linspace(-np.pi, np.pi, nPsi)
+    x = jnp.linspace(-3, 3, nX)
+    y = jnp.linspace(-3, 3, nY)
     X, Y = jnp.meshgrid(x, y)
     agentPositions = jnp.vstack([X.ravel(), Y.ravel()]).T
     allData = []
@@ -911,7 +908,7 @@ def create_lin_pez_grid():
         pezData = pez.probabalisticEngagementZoneVectorizedTemp(
             agentPositions,
             agentPositionCov,
-            heading * np.ones(numPoints * numPoints),
+            heading * np.ones(nX * nY),
             agentHeadingVar,
             pursuerPosition,
             pursuerPositionCov,
@@ -1096,7 +1093,7 @@ def animate_path():
 
 
 if __name__ == "__main__":
-    create_lin_pez_grid()
+    create_lin_pez_grid(nX=20, nY=20, nPsi=20)
     main_path()
     # main()
     # animate_path()
