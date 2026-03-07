@@ -663,6 +663,7 @@ def animate_spline_path():
         ax.set_xlim(-2.5, 2.5)
         ax.set_ylim(-2.5, 2.5)
         plt.xticks([])
+
         plt.yticks([])
         plt.xlabel("")
         plt.ylabel("")
