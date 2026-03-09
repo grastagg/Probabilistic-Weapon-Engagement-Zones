@@ -151,11 +151,8 @@ def plot_prob_contours(
     safetyProbThresholdRange = np.clip(
         (meanRange - minRange) / safetyProbThreshold + minRange, minRange, maxRange
     )
-    print("safetyProbThresholdRange", safetyProbThresholdRange)
 
     probAtMaxRange = (meanRange - minRange) / (maxRange - minRange)
-
-    print(f"prob at max range: {probAtMaxRange}")
 
     c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
     ax.set_aspect("equal")
@@ -240,11 +237,8 @@ def main():
     safetyProbThresholdRange = np.clip(
         (meanRange - minRange) / safetyProbThreshold + minRange, minRange, maxRange
     )
-    print("safetyProbThresholdRange", safetyProbThresholdRange)
 
     probAtMaxRange = (meanRange - minRange) / (maxRange - minRange)
-
-    print(f"prob at max range: {probAtMaxRange}")
 
     fig, ax = plt.subplots()
     c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
@@ -316,7 +310,7 @@ def animate_spline_path():
     evaderSpeed = 1.0
     pursuerPosition = np.array([0.0, 0.0])
 
-    num_cont_points = 20
+    num_cont_points = 25
     spline_order = 3
     velocity_constraints = (0.0, 1.0)
     curvature_constraints = (-0.5, 0.5)
@@ -352,50 +346,53 @@ def animate_spline_path():
     print("spline order", spline.k)
     pos = spline(t)
     vel = spline.derivative(1)(t)
+
+    print(np.linalg.norm(vel, axis=1))
+    print("start pos", pos[0])
+    print("end pos", pos[-1])
     ind = 0
 
-    # while currentTime < finalTime:
-    #     fig, ax = plt.subplots()
-    #     pdot = spline.derivative(1)(currentTime)
-    #     currentPosition = spline(currentTime)
-    #     currentHeading = np.arctan2(pdot[1], pdot[0])
-    #     plot_prob_contours(
-    #         currentHeading,
-    #         evaderSpeed / pursuerSpeed,
-    #         pursuerCaptureRadius,
-    #         minRange,
-    #         maxRange,
-    #         meanRange,
-    #         pursuerSpeed,
-    #         evaderSpeed,
-    #         ax,
-    #     )
-    #
-    #     plt.arrow(
-    #         currentPosition[0],
-    #         currentPosition[1],
-    #         1e-6 * np.cos(currentHeading),  # essentially zero-length tail
-    #         1e-6 * np.sin(currentHeading),
-    #         head_width=0.25,
-    #         head_length=0.3,
-    #         width=0,  # no line
-    #         fc="blue",
-    #         ec="blue",
-    #         zorder=5,
-    #     )
-    #     ax.plot(pos[:, 0], pos[:, 1], color="blue")
-    #     ax.set_xlim(-4.5, 4.5)
-    #     ax.set_ylim(-4.5, 4.5)
-    #     plt.xticks([])
-    #     plt.yticks([])
-    #     plt.xlabel("")
-    #     plt.ylabel("")
-    #
-    #     fig.savefig(f"video/{ind}.png", dpi=300)
-    #     ind += 1
-    #     currentTime += dt
-    #     plt.close(fig)
-    #
+    while currentTime < finalTime:
+        fig, ax = plt.subplots()
+        pdot = spline.derivative(1)(currentTime)
+        currentPosition = spline(currentTime)
+        currentHeading = np.arctan2(pdot[1], pdot[0])
+        plot_prob_contours(
+            currentHeading,
+            evaderSpeed / pursuerSpeed,
+            pursuerCaptureRadius,
+            minRange,
+            maxRange,
+            meanRange,
+            pursuerSpeed,
+            evaderSpeed,
+            ax,
+        )
+
+        plt.arrow(
+            currentPosition[0],
+            currentPosition[1],
+            1e-6 * np.cos(currentHeading),  # essentially zero-length tail
+            1e-6 * np.sin(currentHeading),
+            head_width=0.25,
+            head_length=0.3,
+            width=0,  # no line
+            fc="blue",
+            ec="blue",
+            zorder=5,
+        )
+        ax.plot(pos[:, 0], pos[:, 1], color="blue")
+        ax.set_xlim(-4.5, 4.5)
+        ax.set_ylim(-4.5, 4.5)
+        plt.xticks([])
+        plt.yticks([])
+        plt.xlabel("")
+        plt.ylabel("")
+
+        fig.savefig(f"video/{ind}.png", dpi=300)
+        ind += 1
+        currentTime += dt
+        plt.close(fig)
 
 
 if __name__ == "__main__":

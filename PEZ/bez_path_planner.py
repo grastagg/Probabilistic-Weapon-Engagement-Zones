@@ -21,7 +21,7 @@ matplotlib.rcParams["ps.fonttype"] = 42
 import bspline.spline_opt_tools as spline_opt_tools
 import PEZ.bez as bez
 
-numSamplesPerInterval = 10
+numSamplesPerInterval = 2
 
 
 def plot_spline(spline, ax, width=1):

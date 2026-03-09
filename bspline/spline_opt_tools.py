@@ -31,7 +31,7 @@ def evaluate_spline_derivative(
 @partial(jit, static_argnums=(2, 3))
 def create_unclamped_knot_points(t0, tf, numControlPoints, splineOrder):
     internalKnots = jnp.linspace(
-        t0, tf, numControlPoints - splineOrder - 1, endpoint=True
+        t0, tf, numControlPoints - (splineOrder - 1), endpoint=True
     )
     h = internalKnots[1] - internalKnots[0]
     knots = jnp.concatenate(
@@ -115,64 +115,27 @@ def get_end_constraint(controlPoints):
     return (1 / 6) * cpnMinus2 + (2 / 3) * cpnMinus1 + (1 / 6) * cpn
 
 
-# def get_start_constraint_jacobian(controlPoints):
-#     numControlPoints = int(controlPoints.shape[0] / 2)
-#     jac = np.zeros((2, 2 * numControlPoints))
-#     jac[0, 0] = 1 / 6
-#     jac[0, 2] = 2 / 3
-#     jac[0, 4] = 1 / 6
-#     jac[1, 1] = 1 / 6
-#     jac[1, 3] = 2 / 3
-#     jac[1, 5] = 1 / 6
-#     return jac
 def get_start_constraint_jacobian(controlPoints):
     numControlPoints = int(controlPoints.shape[0] / 2)
     jac = np.zeros((2, 2 * numControlPoints))
-
-    jac[0, 0] = 1 / 24
-    jac[0, 2] = 11 / 24
-    jac[0, 4] = 11 / 24
-    jac[0, 6] = 1 / 24
-    jac[0, 8] = 0
-
-    jac[1, 1] = 1 / 24
-    jac[1, 3] = 11 / 24
-    jac[1, 5] = 11 / 24
-    jac[1, 7] = 1 / 24
-    jac[1, 9] = 0
-
+    jac[0, 0] = 1 / 6
+    jac[0, 2] = 2 / 3
+    jac[0, 4] = 1 / 6
+    jac[1, 1] = 1 / 6
+    jac[1, 3] = 2 / 3
+    jac[1, 5] = 1 / 6
     return jac
-
-
-#
-# def get_end_constraint_jacobian(controlPoints):
-#     numControlPoints = int(controlPoints.shape[0] / 2)
-#     jac = np.zeros((2, 2 * numControlPoints))
-#     jac[0, -6] = 1 / 6
-#     jac[0, -4] = 2 / 3
-#     jac[0, -2] = 1 / 6
-#     jac[1, -5] = 1 / 6
-#     jac[1, -3] = 2 / 3
-#     jac[1, -1] = 1 / 6
-#     return jac
 
 
 def get_end_constraint_jacobian(controlPoints):
     numControlPoints = int(controlPoints.shape[0] / 2)
     jac = np.zeros((2, 2 * numControlPoints))
-
-    jac[0, -10] = 0
-    jac[0, -8] = 1 / 24
-    jac[0, -6] = 11 / 24
-    jac[0, -4] = 11 / 24
-    jac[0, -2] = 1 / 24
-
-    jac[1, -9] = 0
-    jac[1, -7] = 1 / 24
-    jac[1, -5] = 11 / 24
-    jac[1, -3] = 11 / 24
-    jac[1, -1] = 1 / 24
-
+    jac[0, -6] = 1 / 6
+    jac[0, -4] = 2 / 3
+    jac[0, -2] = 1 / 6
+    jac[1, -5] = 1 / 6
+    jac[1, -3] = 2 / 3
+    jac[1, -1] = 1 / 6
     return jac
 
 
@@ -180,10 +143,10 @@ def get_turn_rate_velocity_and_headings(
     controlPoints, knotPoints, numSamplesPerInterval
 ):
     out_d1 = evaluate_spline_derivative(
-        controlPoints, knotPoints, 4, 1, numSamplesPerInterval
+        controlPoints, knotPoints, 3, 1, numSamplesPerInterval
     )
     out_d2 = evaluate_spline_derivative(
-        controlPoints, knotPoints, 4, 2, numSamplesPerInterval
+        controlPoints, knotPoints, 3, 2, numSamplesPerInterval
     )
     v = jnp.linalg.norm(out_d1, axis=1)
     v_safe = jnp.maximum(v, _VEL_FLOOR)
@@ -211,7 +174,7 @@ def assure_velocity_constraint(
     velocityBounds,
     numSamplesPerInterval,
 ):
-    splineOrder = 4
+    splineOrder = 3
     tf = np.linalg.norm(controlPoints[0] - controlPoints[-1]) / agentSpeed
     v = get_spline_velocity(controlPoints, tf, splineOrder, numSamplesPerInterval)
     while np.max(v) > velocityBounds[1]:
