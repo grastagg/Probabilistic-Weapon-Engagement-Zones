@@ -218,12 +218,10 @@ def optimize_spline_path_BEZ(
     def objfunc(xDict):
         tf = xDict["tf"]
         knotPoints = spline_opt_tools.create_unclamped_knot_points(
-            0, tf, num_cont_points, 3
+            0, tf, num_cont_points, spline_order
         )
         controlPoints = xDict["control_points"]
         funcs = {}
-        funcs["start"] = spline_opt_tools.get_start_constraint(controlPoints)
-        funcs["end"] = spline_opt_tools.get_end_constraint(controlPoints)
         controlPoints = controlPoints.reshape((num_cont_points, 2))
 
         velocity, turn_rate, curvature, ez, pos = compute_spline_constraints_for_bez(
@@ -235,6 +233,9 @@ def optimize_spline_path_BEZ(
             pursuerCaptureRadius,
             pursuerSpeed,
         )
+
+        funcs["start"] = pos[0]  # spline_opt_tools.get_start_constraint(controlPoints)
+        funcs["end"] = pos[-1]  # spline_opt_tools.get_end_constraint(controlPoints)
 
         # funcs['start'] = self.get_start_constraint_jax(controlPoints)
         # funcs['start'] = pos[0]
@@ -279,22 +280,22 @@ def optimize_spline_path_BEZ(
             pursuerSpeed,
         )
         dVelocityDControlPointsVal = spline_opt_tools.dVelocityDControlPoints(
-            controlPoints, tf, 3, numSamplesPerInterval
+            controlPoints, tf, spline_order, numSamplesPerInterval
         )
         dVelocityDtfVal = spline_opt_tools.dVelocityDtf(
-            controlPoints, tf, 3, numSamplesPerInterval
+            controlPoints, tf, spline_order, numSamplesPerInterval
         )
         dTurnRateDControlPointsVal = spline_opt_tools.dTurnRateDControlPoints(
-            controlPoints, tf, 3, numSamplesPerInterval
+            controlPoints, tf, spline_order, numSamplesPerInterval
         )
         dTurnRateDtfVal = spline_opt_tools.dTurnRateTf(
-            controlPoints, tf, 3, numSamplesPerInterval
+            controlPoints, tf, spline_order, numSamplesPerInterval
         )
         dCurvatureDControlPointsVal = spline_opt_tools.dCurvatureDControlPoints(
-            controlPoints, tf, 3, numSamplesPerInterval
+            controlPoints, tf, spline_order, numSamplesPerInterval
         )
         dCurvatureDtfVal = spline_opt_tools.dCurvatureDtf(
-            controlPoints, tf, 3, numSamplesPerInterval
+            controlPoints, tf, spline_order, numSamplesPerInterval
         )
 
         funcsSens["obj"] = {
@@ -365,7 +366,7 @@ def optimize_spline_path_BEZ(
         )
 
     tempVelocityContstraints = spline_opt_tools.get_spline_velocity(
-        x0, 1, 3, numSamplesPerInterval
+        x0, 1, spline_order, numSamplesPerInterval
     )
     start = time.time()
     num_constraint_samples = len(tempVelocityContstraints)
@@ -419,7 +420,7 @@ def optimize_spline_path_BEZ(
     sol = opt(optProb, sens=sens)
 
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
-        0, sol.xStar["tf"][0], num_cont_points, 3
+        0, sol.xStar["tf"][0], num_cont_points, spline_order
     )
 
     controlPoints = sol.xStar["control_points"].reshape((num_cont_points, 2))
