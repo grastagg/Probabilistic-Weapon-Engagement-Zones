@@ -80,6 +80,52 @@ max_prob = jax.jit(
 )
 
 
+def prob_uniform_single(
+    evaderPosition,
+    evaderHeading,
+    speedRatio,
+    captureRadius,
+    minRange,
+    maxRange,
+):
+    x, y = evaderPosition
+
+    a = speedRatio**2 - 1.0
+    alpha = x * jnp.cos(evaderHeading) + y * jnp.sin(evaderHeading)
+    b = 2.0 * (speedRatio * alpha - captureRadius)
+    c = x**2 + y**2 - captureRadius**2
+
+    discriminant = b**2 - 4.0 * a * c
+
+    # Safe sqrt so we never take sqrt of a negative number
+    sqrt_disc = jnp.sqrt(jnp.maximum(discriminant, 0.0))
+
+    # Safe denominator in case a == 0
+    denom = 2.0 * a
+    R1 = jnp.where(jnp.abs(denom) > 1e-12, (-b - sqrt_disc) / denom, jnp.inf)
+
+    prob_when_real_root = jnp.where(
+        R1 < minRange,
+        1.0,
+        jnp.where(
+            R1 <= maxRange,
+            (maxRange - R1) / (maxRange - minRange),
+            0.0,
+        ),
+    )
+
+    # If discriminant < 0, return 1.0
+    return jnp.where(discriminant < 0.0, 1.0, prob_when_real_root)
+
+
+uniform_prob = jax.jit(
+    jax.vmap(
+        prob_uniform_single,
+        in_axes=(0, 0, None, None, None, None),
+    )
+)
+
+
 def ouq_range_only_path(
     pursuerPosition,
     minRange,
@@ -101,6 +147,46 @@ def ouq_range_only_path(
 ):
     safetyProbThresholdRange = np.clip(
         (meanRange - minRange) / pez_limit + minRange, meanRange, maxRange
+    )
+    spline, tf = bez_path_planner.plan_path_BEZ(
+        pursuerPosition,
+        safetyProbThresholdRange,
+        captureRadius,
+        pursuerSpeed,
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        evaderSpeed,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+    )
+    return spline, tf
+
+
+def uniform_range_only_path(
+    pursuerPosition,
+    minRange,
+    maxRange,
+    captureRadius,
+    pursuerSpeed,
+    evaderSpeed,
+    initialEvaderPosition,
+    finalEvaderPosition,
+    initialEvaderVelocity,
+    num_cont_points,
+    spline_order,
+    velocity_constraints,
+    turn_rate_constraints,
+    curvature_constraints,
+    num_constraint_samples,
+    pez_limit,
+):
+    safetyProbThresholdRange = np.clip(
+        maxRange - pez_limit * (maxRange - minRange), minRange, maxRange
     )
     spline, tf = bez_path_planner.plan_path_BEZ(
         pursuerPosition,
@@ -210,7 +296,7 @@ def plot_prob_contours(
     ax.set_ylim(-4, 4)
 
 
-def main():
+def main_max():
     x = np.linspace(-4, 4, 500)
     y = np.linspace(-4, 4, 500)
     X, Y = np.meshgrid(x, y)
@@ -233,6 +319,7 @@ def main():
         maxRange,
         meanRange,
     )
+
     safetyProbThreshold = 0.2
     safetyProbThresholdRange = np.clip(
         (meanRange - minRange) / safetyProbThreshold + minRange, minRange, maxRange
@@ -298,6 +385,95 @@ def main():
     plt.show()
 
 
+def main_uniform():
+    x = np.linspace(-4, 4, 500)
+    y = np.linspace(-4, 4, 500)
+    X, Y = np.meshgrid(x, y)
+    points = np.stack([X.ravel(), Y.ravel()], axis=-1)
+    psi = 0.0 * np.ones(points.shape[0])
+    pursuerSpeed = 1.0
+    evaderSpeed = 0.9
+
+    speedRatio = evaderSpeed / pursuerSpeed
+    captureRadius = 0.1
+    minRange = 0.5
+    maxRange = 2.0
+    meanRange = 0.75
+
+    prob = uniform_prob(
+        points,
+        psi,
+        speedRatio,
+        captureRadius,
+        minRange,
+        maxRange,
+    )
+
+    safetyProbThreshold = 0.2
+    safetyProbThresholdRange = np.clip(
+        maxRange - safetyProbThreshold * (maxRange - minRange), minRange, maxRange
+    )
+
+    probAtMaxRange = (meanRange - minRange) / (maxRange - minRange)
+
+    fig, ax = plt.subplots()
+    c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
+    ax.set_aspect("equal")
+    ax.contour(
+        X,
+        Y,
+        prob.reshape(X.shape),
+        levels=[safetyProbThreshold],
+        linewidths=3,
+        colors="green",
+    )
+    plt.colorbar(c, label="Max Probability of Capture")
+    plt.xlabel("X Position")
+    plt.ylabel("Y Position")
+    pez_plotting.plotEngagementZone(
+        0.0,
+        np.array([0.0, 0.0]),
+        minRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        ax,
+        alpha=1.0,
+        width=1,
+        color="red",
+        label=True,
+    )
+    pez_plotting.plotEngagementZone(
+        0.0,
+        np.array([0.0, 0.0]),
+        maxRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        ax,
+        alpha=1.0,
+        width=1,
+        color="red",
+        label=True,
+    )
+    pez_plotting.plotEngagementZone(
+        0.0,
+        np.array([0.0, 0.0]),
+        safetyProbThresholdRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        ax,
+        alpha=1.0,
+        width=1,
+        color="red",
+        label=True,
+    )
+    ax.set_xlim(-4, 4)
+    ax.set_ylim(-4, 4)
+    plt.show()
+
+
 def animate_spline_path():
     initialEvaderPosition = np.array([-4.0, -4.0])
     finalEvaderPosition = np.array([4.0, 4.0])
@@ -317,7 +493,7 @@ def animate_spline_path():
     turn_rate_constraints = (-1.0, 1.0)
     num_constraint_samples = 50
 
-    pez_limit = 0.2
+    pez_limit = 0.05
 
     spline, tf = ouq_range_only_path(
         pursuerPosition,
@@ -339,6 +515,27 @@ def animate_spline_path():
         pez_limit,
     )
 
+    splineUniform, tfUniform = uniform_range_only_path(
+        pursuerPosition,
+        minRange,
+        maxRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples,
+        pez_limit,
+    )
+    print("OUQ path duration:", tf)
+    print("Uniform path duration:", tfUniform)
+
     currentTime = 0
     dt = 0.08
     finalTime = spline.t[-1 - spline.k]
@@ -347,9 +544,6 @@ def animate_spline_path():
     pos = spline(t)
     vel = spline.derivative(1)(t)
 
-    print(np.linalg.norm(vel, axis=1))
-    print("start pos", pos[0])
-    print("end pos", pos[-1])
     ind = 0
 
     while currentTime < finalTime:
@@ -397,4 +591,4 @@ def animate_spline_path():
 
 if __name__ == "__main__":
     animate_spline_path()
-    # main()
+    # main_uniform()
