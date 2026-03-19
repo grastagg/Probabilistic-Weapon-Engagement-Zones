@@ -776,7 +776,6 @@ def optimize_spline_path_minimize_area(
         scale=1.0 / curvature_constraints[1],
     )
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
-    print("interval for intercepted:", pmin)
     # optProb.addConGroup("intercepted", 1, lower=pmin, upper=None)
 
     optProb.addObj("obj")
@@ -804,7 +803,6 @@ def optimize_spline_path_minimize_area(
 
     # sol = opt(optProb, sens="FD")
     sol = opt(optProb, sens=sens)
-    print(sol)
 
     controlPoints = sol.xStar["control_points"].reshape((num_cont_points, 2))
 
@@ -1157,10 +1155,8 @@ def sample_intercept(traj_xy, x_p, R, r, alpha, beta, D_min=0.0, rng=None):
     # Sample D in [D_min, R]
     U = rng.beta(alpha, beta)
     D = D_min + (R - D_min) * U
-    print("commitmet distance D =", D)
 
     dists = np.linalg.norm(traj - x_p, axis=1)
-    print("minimum distance to pursuer along traj:", dists.min())
 
     inside = dists <= (D + r)
     crossings = np.where((~inside[:-1]) & inside[1:])[0]
@@ -1445,7 +1441,6 @@ def main_planner():
     isIntercepted, idx, interceptPoint, D = sample_intercept(
         pos, expected_launch_pos, pursuerRange, alpha, beta, D_min=0.5 * pursuerRange
     )
-    print("Is intercepted:", isIntercepted)
     fig, ax = plt.subplots()
     # plot_area_objective_function(
     #     interceptionPositions, pursuerRange, pursuerCaptureRadius, oldRadii, fig, ax
@@ -1492,7 +1487,6 @@ def main_planner_box():
 
     expected_launch_pos = np.array([0.0, 0.0])
     # expected_launch_pos = np.array([2.5, 2.5])
-    # print("Expected launch position:", expected_launch_pos, "Z=", Z)
 
     sacraficialRange = 10.0
 
@@ -1544,7 +1538,6 @@ def main_planner_box():
     isIntercepted, idx, interceptPoint, D = sample_intercept(
         pos, truePursuerPos, pursuerRange, 2.0, 2.0, D_min=0.5 * pursuerRange
     )
-    print("Is intercepted:", isIntercepted)
     fig, ax = plt.subplots()
     plot_spline(spline, ax)
 
@@ -1860,6 +1853,7 @@ def median_iqr_plot(
     first_quartile = np.percentile(data, 25, axis=0)
     third_quartile = np.percentile(data, 75, axis=0)
     mean = np.mean(data, axis=0)
+    print(mean)
     std = np.std(data, axis=0)
     median = np.percentile(data, 50, axis=0)
 
@@ -1912,8 +1906,6 @@ def interception_metrics(intercept: np.ndarray):
     for k in range(Nmax):
         q_first_at_N[k + 1] = np.mean(first_idx == k)
     q_first_at_N[0] = np.mean(first_idx == Nmax)  # "no interception at all" mass
-    print("p by N:", p_by_N)
-    print("q first at N:", q_first_at_N)
 
     return p_by_N, q_first_at_N
 
@@ -2022,6 +2014,7 @@ def plot_all_median(
     yNumbers=True,
     yLabel="Mean Feasible Launch Region Area",
 ):
+    print(yLabel)
     # Style choices that pair well with technical papers
     style_map = {
         "Straight — no launch time": dict(
@@ -2052,6 +2045,7 @@ def plot_all_median(
     for label, p in datadict.items():
         N = np.arange(len(p))
 
+        print(label)
         median_iqr_plot(
             p,
             ax=ax,
@@ -2062,7 +2056,7 @@ def plot_all_median(
             linewidth=style_map[label]["linewidth"],
         )
     if showLegend:
-        leg = fig.legend(loc="outside lower center", ncol=2)
+        leg = fig.legend(loc="outside lower center", ncol=2, handlelength=5)
         leg.set_in_layout(True)
 
 
@@ -2106,6 +2100,7 @@ def plot_all_data(dataDir1, dataDir2, dataDir3):
     p_dict2, intersectionDict2, pathTimeDict2 = get_data_dicts(dataDir2)
     p_dict3, intersectionDict3, pathTimeDict3 = get_data_dicts(dataDir3)
     fig, axes = plt.subplots(3, 2, figsize=(8, 8), layout="constrained")
+    fig.set_constrained_layout_pads(wspace=0.1)
     plot_all_median(intersectionDict1, ax=axes[0][0], fig=fig, showLegend=True)
     plot_all_median(intersectionDict2, ax=axes[1][0], fig=fig, labelYAxis=True)
     plot_all_median(intersectionDict3, ax=axes[2][0], fig=fig, labelXAxis=True)
@@ -2160,6 +2155,7 @@ def plot_all_data(dataDir1, dataDir2, dataDir3):
         "/home/ggs24/Desktop/geometric_bez/area-reductioncomb.pdf",
         bbox_inches="tight",
     )
+    plt.show()
 
     fig, axes = plt.subplots(1, 3, figsize=(8, 8 / 3), layout="constrained")
     yRange = (0.98, 1.18)
