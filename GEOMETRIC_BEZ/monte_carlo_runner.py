@@ -625,7 +625,7 @@ def run_monte_carlo_simulation(
             ax.plot(
                 posPreHit[:, 0],
                 posPreHit[:, 1],
-                label=f"Sacraficial Path",
+                label=f"Sacrificial Path",
                 color="blue",
             )
             ax.plot(posPostHit[:, 0], posPostHit[:, 1], color="blue", linestyle=":")
