@@ -13,6 +13,7 @@ import jax.numpy as jnp
 import getpass
 import matplotlib.pyplot as plt
 import matplotlib
+import h5py
 
 
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -703,18 +704,56 @@ def plan_path_interp_PEZ(
     return spline, tf
 
 
+def load_jd2l_data(filepath):
+    with h5py.File(filepath, "r") as f:
+        pez = np.array(f["P_max"]).squeeze()
+        xs = np.array(f["xs"]).squeeze()
+        ys = np.array(f["ys"]).squeeze()
+        psis = np.array(f["ψs"]).squeeze()
+
+    pez = np.transpose(pez, (2, 1, 0))
+
+    print("test", pez.shape)
+    minx = xs[0]
+    dx = xs[1] - xs[0]
+    nx = len(xs)
+
+    miny = ys[0]
+    dy = ys[1] - ys[0]
+    ny = len(ys)
+
+    minpsi = psis[0]
+    dpsi = psis[1] - psis[0]
+    npsi = len(psis)
+
+    return pez, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi
+
+
+# def load_ez_params_from_jd2l(filepath):
+#     with h5py.File(filepath, "r") as f:
+#         print(f.keys())
+#         r = f["r_capture_radius"]
+#         speedRatio=μ_speed_ratio
+
+
+def plan_path_from_file(filepath):
+    pez, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_jd2l_data(filepath)
+
+
 def main():
     grid_file_path = "OUQ_BEZ/linPez.npy"
+    grid_file_path = "OUQ_BEZ/xypsi_50.jld2"
     param_file_path = "OUQ_BEZ/linPezParams.json"
     print(f"Loading grid data from {grid_file_path}...")
-    pez, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_grid_data(
-        grid_file_path, param_file_path
-    )
+    # pez, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_grid_data(
+    #     grid_file_path, param_file_path
+    # )
+    pez, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_jd2l_data(grid_file_path)
     print("grid data shape", pez.shape)
     print("grid parameters", minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi)
 
-    new_x = np.linspace(-2, 2, 500)
-    new_y = np.linspace(-2, 2, 500)
+    new_x = np.linspace(-5, 5, 500)
+    new_y = np.linspace(-5, 5, 500)
     new_X, new_Y = np.meshgrid(new_x, new_y)
     points = np.stack([new_X.ravel(), new_Y.ravel()], axis=-1)
     heading = np.deg2rad(0.0)
@@ -741,48 +780,43 @@ def main():
     # )
     #
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.contour(
+    c = ax.contour(
         new_X,
         new_Y,
         interpPez.reshape(new_X.shape),
         levels=10,
-        alpha=0.5,
     )
-    ax.set_aspect("equal")
-    ax.set_xlim(-2, 2)
-    ax.set_ylim(-2, 2)
-
-    pezParams = json.load(open("OUQ_BEZ/linPezParamsPEZ.json", "r"))
-    pursuerRange = pezParams["pursuerRange"]
-    pursuerRangeVar = pezParams["pursuerRangeVar"]
-    pursuerCaptureRange = pezParams["pursuerCaptureRange"]
-    pursuerCaptureRangeVar = pezParams["pursuerCaptureRangeVar"]
-    pursuerPositionMean = jnp.asarray(pezParams["pursuerPosition"])
-    pursuerPositionCov = jnp.asarray(pezParams["pursuerPositionCov"])
-    pursuerSpeed = pezParams["pursuerSpeed"]
-    pursuerSpeedVar = pezParams["pursuerSpeedVar"]
-    agentSpeed = pezParams["agentSpeed"]
-    pez_plotting.plotProbablisticEngagementZone(
-        np.array([[0.0, 0.0], [0.0, 0.0]]),
-        heading,
-        0.0,
-        pursuerPositionMean,
-        pursuerPositionCov,
-        pursuerRange,
-        pursuerRangeVar,
-        pursuerCaptureRange,
-        pursuerCaptureRangeVar,
-        pursuerSpeed,
-        pursuerSpeedVar,
-        agentSpeed,
-        ax,
-        levels=None,
-        colors="viridis",
-    )
+    plt.colorbar(c)
     ax.set_aspect("equal")
 
-    # Define the grid
-    numPoints = 100
+    # pezParams = json.load(open("OUQ_BEZ/linPezParamsPEZ.json", "r"))
+    # pursuerRange = pezParams["pursuerRange"]
+    # pursuerRangeVar = pezParams["pursuerRangeVar"]
+    # pursuerCaptureRange = pezParams["pursuerCaptureRange"]
+    # pursuerCaptureRangeVar = pezParams["pursuerCaptureRangeVar"]
+    # pursuerPositionMean = jnp.asarray(pezParams["pursuerPosition"])
+    # pursuerPositionCov = jnp.asarray(pezParams["pursuerPositionCov"])
+    # pursuerSpeed = pezParams["pursuerSpeed"]
+    # pursuerSpeedVar = pezParams["pursuerSpeedVar"]
+    # agentSpeed = pezParams["agentSpeed"]
+    # pez_plotting.plotProbablisticEngagementZone(
+    #     np.array([[0.0, 0.0], [0.0, 0.0]]),
+    #     heading,
+    #     0.0,
+    #     pursuerPositionMean,
+    #     pursuerPositionCov,
+    #     pursuerRange,
+    #     pursuerRangeVar,
+    #     pursuerCaptureRange,
+    #     pursuerCaptureRangeVar,
+    #     pursuerSpeed,
+    #     pursuerSpeedVar,
+    #     agentSpeed,
+    #     ax,
+    #     levels=None,
+    #     colors="viridis",
+    # )
+    ax.set_aspect("equal")
 
     plt.show()
 
@@ -802,8 +836,12 @@ def main_path():
     grid_file_path = "OUQ_BEZ/linPez.npy"
     param_file_path = "OUQ_BEZ/linPezParams.json"
     print(f"Loading grid data from {grid_file_path}...")
-    P_yxpsi, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_grid_data(
-        grid_file_path, param_file_path
+    # P_yxpsi, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_grid_data(
+    #     grid_file_path, param_file_path
+    # )
+    jd2l_grid_file_path = "OUQ_BEZ/xypsi_50.jld2"
+    P_yxpsi, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_jd2l_data(
+        jd2l_grid_file_path
     )
 
     pez_limit = 0.05
@@ -978,8 +1016,13 @@ def animate_path():
     grid_file_path = "OUQ_BEZ/linPez.npy"
     param_file_path = "OUQ_BEZ/linPezParams.json"
     print(f"Loading grid data from {grid_file_path}...")
-    P_yxpsi, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_grid_data(
-        grid_file_path, param_file_path
+    # P_yxpsi, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_grid_data(
+    #     grid_file_path, param_file_path
+    # )
+    jd2l_grid_file_path = "OUQ_BEZ/xypsi_50.jld2"
+    jd2l_grid_file_path = "OUQ_BEZ/xypsi_5dim_20.jld2"
+    P_yxpsi, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_jd2l_data(
+        jd2l_grid_file_path
     )
 
     pez_limit = 0.05
@@ -1042,7 +1085,6 @@ def animate_path():
             new_Y,
             interpPez.reshape(new_X.shape),
             levels=[0.05, 0.1, 0.25, 0.5],
-            alpha=0.5,
         )
         handles, labels = c.legend_elements()
         labels = [f"$\\epsilon={lvl:.2f}$" for lvl in c.levels]
@@ -1069,6 +1111,7 @@ def animate_path():
             ec="blue",
             zorder=5,
         )
+        ax.set_aspect("equal")
         # plt.arrow(
         #     currentPosition[0],
         #     currentPosition[1],
@@ -1090,10 +1133,13 @@ def animate_path():
         ind += 1
         currentTime += dt
         plt.close(fig)
+        plt.close()
 
 
 if __name__ == "__main__":
-    create_lin_pez_grid(nX=20, nY=20, nPsi=20)
-    main_path()
+    # load_jd2l_data("./OUQ_BEZ/xypsi_50.jld2")
+
+    # create_lin_pez_grid(nX=20, nY=20, nPsi=20)
+    # main_path()
     # main()
-    # animate_path()
+    animate_path()

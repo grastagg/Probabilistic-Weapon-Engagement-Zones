@@ -216,6 +216,7 @@ def plot_prob_contours(
     meanRange,
     pursuerSpeed,
     evaderSpeed,
+    safetyProbThreshold,
     ax,
 ):
     psiS = psi
@@ -233,7 +234,6 @@ def plot_prob_contours(
         maxRange,
         meanRange,
     )
-    safetyProbThreshold = 0.2
     safetyProbThresholdRange = np.clip(
         (meanRange - minRange) / safetyProbThreshold + minRange, minRange, maxRange
     )
@@ -481,6 +481,7 @@ def animate_spline_path():
     minRange = 0.5
     maxRange = 2.0
     meanRange = 0.75
+    meanRange = (minRange + maxRange) / 2.0
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.0
     evaderSpeed = 1.0
@@ -493,7 +494,7 @@ def animate_spline_path():
     turn_rate_constraints = (-1.0, 1.0)
     num_constraint_samples = 50
 
-    pez_limit = 0.05
+    pez_limit = 0.25
 
     spline, tf = ouq_range_only_path(
         pursuerPosition,
@@ -540,9 +541,45 @@ def animate_spline_path():
     dt = 0.08
     finalTime = spline.t[-1 - spline.k]
     t = np.linspace(0, finalTime, 500)
-    print("spline order", spline.k)
-    pos = spline(t)
-    vel = spline.derivative(1)(t)
+    uniformSplinePoints = splineUniform(t)
+    uniformSplineVelocities = splineUniform.derivative(1)(t)
+    uniformSplineHeadings = np.arctan2(
+        uniformSplineVelocities[:, 1], uniformSplineVelocities[:, 0]
+    )
+    ouqProbAtUniformPoints = max_prob(
+        uniformSplinePoints,
+        uniformSplineHeadings,
+        evaderSpeed / pursuerSpeed,
+        pursuerCaptureRadius,
+        minRange,
+        maxRange,
+        meanRange,
+    )
+    print("OUQ probabilities at uniform points:", np.max(ouqProbAtUniformPoints))
+    ouqSplinePos = spline(t)
+    ouqSplineVel = spline.derivative(1)(t)
+    ouqSplineHeadings = np.arctan2(ouqSplineVel[:, 1], ouqSplineVel[:, 0])
+    ouqProbAtOUQPoints = max_prob(
+        ouqSplinePos,
+        ouqSplineHeadings,
+        evaderSpeed / pursuerSpeed,
+        pursuerCaptureRadius,
+        minRange,
+        maxRange,
+        meanRange,
+    )
+    print("OUQ probabilities at OUQ points:", np.max(ouqProbAtOUQPoints))
+    uniformProbAtOUQPoints = uniform_prob(
+        ouqSplinePos,
+        ouqSplineHeadings,
+        evaderSpeed / pursuerSpeed,
+        pursuerCaptureRadius,
+        minRange,
+        maxRange,
+    )
+    print("Uniform probabilities at OUQ points:", np.max(uniformProbAtOUQPoints))
+    pos = ouqSplinePos
+    # vel = spline.derivative(1)(t)
 
     ind = 0
 
@@ -560,6 +597,7 @@ def animate_spline_path():
             meanRange,
             pursuerSpeed,
             evaderSpeed,
+            pez_limit,
             ax,
         )
 
@@ -576,6 +614,7 @@ def animate_spline_path():
             zorder=5,
         )
         ax.plot(pos[:, 0], pos[:, 1], color="blue")
+        ax.plot(uniformSplinePoints[:, 0], uniformSplinePoints[:, 1], color="magenta")
         ax.set_xlim(-4.5, 4.5)
         ax.set_ylim(-4.5, 4.5)
         plt.xticks([])
@@ -587,6 +626,7 @@ def animate_spline_path():
         ind += 1
         currentTime += dt
         plt.close(fig)
+    #
 
 
 if __name__ == "__main__":
