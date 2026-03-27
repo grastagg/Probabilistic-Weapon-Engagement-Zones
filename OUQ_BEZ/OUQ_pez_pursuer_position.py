@@ -8,6 +8,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
+import PEZ.pez_plotting as pez_plotting
+
+
 def first_forward_intersection(p0, p1, center, radius, tol=1e-9):
     """
     Returns the first forward intersection of a ray starting at p0 and going toward p1.
@@ -378,9 +381,9 @@ def main():
     pursuerRange = 1.0
     minX = -2.0
     maxX = 2.0
-    minY = -2.0
-    maxY = 2.0
-    meanX = 0.0
+    minY = -1.0
+    maxY = 1.0
+    meanX = -0.5
     meanY = 0.0
     test = max_ouq_prob_pursuer_position_uncertainty_single(
         -2.0,
@@ -419,8 +422,11 @@ def main():
         prob.reshape(X.shape),
         cmap="viridis",
         shading="auto",
-        levels=np.arange(0, 1.1, 0.1),
+        levels=np.arange(0, 1.2, 0.1),
     )
+    # inline labels for contours
+    clabels = ax.clabel(c, inline=True, fontsize=8, fmt="%.1f")
+
     # c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
     ax.set_aspect("equal")
     plt.colorbar(c, label="Max Probability of Capture")
@@ -432,6 +438,19 @@ def main():
 
     ax.set_xlim(-4, 4)
     ax.set_ylim(-4, 4)
+
+    pez_plotting.plotEngagementZone(
+        psi[0],
+        np.array([meanX, meanY]),
+        pursuerRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        ax,
+        alpha=1.0,
+        width=1,
+        label=True,
+    )
     plt.show()
 
 
