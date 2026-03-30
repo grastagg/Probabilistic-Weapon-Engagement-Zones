@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 
 
 import PEZ.pez_plotting as pez_plotting
+import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
 
 
 def first_forward_intersection(p0, p1, center, radius, tol=1e-9):
@@ -367,12 +368,61 @@ max_ouq_prob_pursuer_position_uncertainty = jax.jit(
 )
 
 
+def ouq_inner_rectangle_for_alpha(
+    alpha,
+    x_pmean,
+    y_pmean,
+    x_pmin,
+    x_pmax,
+    y_pmin,
+    y_pmax,
+):
+    """
+    Rectangle Z_alpha = K ∩ A_alpha such that:
+        p(z) >= alpha  iff  z in Z_alpha
+    for the 2-atom OUQ probability p(z)=b/(a+b).
+    """
+    if not (0.0 < alpha < 1.0):
+        raise ValueError("alpha must be in (0,1)")
+
+    s = (1.0 - alpha) / alpha
+
+    axmin = x_pmean - s * (x_pmax - x_pmean)
+    axmax = x_pmean + s * (x_pmean - x_pmin)
+
+    aymin = y_pmean - s * (y_pmax - y_pmean)
+    aymax = y_pmean + s * (y_pmean - y_pmin)
+
+    # must also lie inside the support box K
+    zxmin = jnp.maximum(x_pmin, axmin)
+    zxmax = jnp.minimum(x_pmax, axmax)
+    zymin = jnp.maximum(y_pmin, aymin)
+    zymax = jnp.minimum(y_pmax, aymax)
+
+    return zxmin, zxmax, zymin, zymax
+
+
+def max_rectangle_in_bounds(x0, y0, q, Xmin, Xmax, Ymin, Ymax):
+    if not (0.0 < q < 1.0):
+        raise ValueError("q must be in (0,1)")
+
+    W = min((x0 - Xmin) / (1.0 - q), (Xmax - x0) / q)
+    H = min((y0 - Ymin) / (1.0 - q), (Ymax - y0) / q)
+
+    xmin = x0 - (1.0 - q) * W
+    xmax = x0 + q * W
+    ymin = y0 - (1.0 - q) * H
+    ymax = y0 + q * H
+
+    return xmin, xmax, ymin, ymax
+
+
 def main():
     x = np.linspace(-4, 4, 500)
     y = np.linspace(-4, 4, 500)
     X, Y = np.meshgrid(x, y)
     points = np.stack([X.ravel(), Y.ravel()], axis=-1)
-    psi = np.deg2rad(0.0) * np.ones(points.shape[0])
+    psi = np.deg2rad(45.0) * np.ones(points.shape[0])
     pursuerSpeed = 1.0
     evaderSpeed = 0.5
 
@@ -383,10 +433,10 @@ def main():
     maxX = 2.0
     minY = -1.0
     maxY = 1.0
-    meanX = -0.5
-    meanY = 0.0
+    meanX = -1.5
+    meanY = 0.5
     test = max_ouq_prob_pursuer_position_uncertainty_single(
-        -2.0,
+        2.0,
         1.4,
         0.0,
         pursuerRange,
@@ -416,6 +466,7 @@ def main():
     )
 
     fig, ax = plt.subplots()
+    ax.grid(True)
     c = ax.contour(
         X,
         Y,
@@ -439,18 +490,31 @@ def main():
     ax.set_xlim(-4, 4)
     ax.set_ylim(-4, 4)
 
-    pez_plotting.plotEngagementZone(
-        psi[0],
-        np.array([meanX, meanY]),
+    pez_limit = 0.2
+    minXlim, maxXlim, minYlim, maxYlim = ouq_inner_rectangle_for_alpha(
+        pez_limit, meanX, meanY, minX, maxX, minY, maxY
+    )
+    # plot rectangle to be expanded for alpha
+    plt.plot(
+        [minXlim, maxXlim, maxXlim, minXlim, minXlim],
+        [minYlim, minYlim, maxYlim, maxYlim, minYlim],
+        "g--",
+        label=f"OUQ Inner Rectangle for alpha={pez_limit}",
+    )
+    rectangle_bez.plot_box_pursuer_engagement_zone(
+        np.array([minXlim, minYlim]),
+        np.array([maxXlim, maxYlim]),
         pursuerRange,
         captureRadius,
         pursuerSpeed,
+        psi[0],
         evaderSpeed,
+        (-3, 3),
+        (-3, 3),
         ax,
-        alpha=1.0,
-        width=1,
-        label=True,
+        color="green",
     )
+
     plt.show()
 
 
