@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 
 import PEZ.pez_plotting as pez_plotting
 import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
+import GEOMETRIC_BEZ.rectangle_bez_path_planner as rectangle_bez_path_planner
 
 
 def first_forward_intersection(p0, p1, center, radius, tol=1e-9):
@@ -490,7 +491,7 @@ def main():
     ax.set_xlim(-4, 4)
     ax.set_ylim(-4, 4)
 
-    pez_limit = 0.2
+    pez_limit = 0.3
     minXlim, maxXlim, minYlim, maxYlim = ouq_inner_rectangle_for_alpha(
         pez_limit, meanX, meanY, minX, maxX, minY, maxY
     )

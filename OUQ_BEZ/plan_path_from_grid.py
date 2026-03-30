@@ -1141,5 +1141,5 @@ if __name__ == "__main__":
 
     # create_lin_pez_grid(nX=20, nY=20, nPsi=20)
     # main_path()
-    # main()
-    animate_path()
+    main()
+    # animate_path()
