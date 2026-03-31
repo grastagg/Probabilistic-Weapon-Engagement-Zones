@@ -1,3 +1,4 @@
+from jax._src.xla_bridge import FORCE_FORWARD_COMPAT_LOWERING_PLATFORMS
 import numpy as np
 from pyoptsparse import Optimization, OPT, IPOPT
 from scipy.interpolate import BSpline
@@ -34,6 +35,7 @@ import bspline.spline_opt_tools as spline_opt_tools
 import PEZ.pez as pez
 import PEZ.pez_plotting as pez_plotting
 import PLOT_COMMON.draw_mahalanobis as draw_mahalanobis
+import PLOT_COMMON.draw_airplanes as draw_airplanes
 
 numSamplesPerInterval = 15
 
@@ -132,7 +134,6 @@ def plot_spline(
     ax.set_aspect(1)
     # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
     #
-    plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r")
     # ax.add_artist(c)
     plt.xlabel("X")
     plt.ylabel("Y")
@@ -1115,9 +1116,17 @@ def animate_pez():
 
     # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit, useProbabalistic)
     currentTime = 0
-    dt = 0.2
+    dt = 0.05
     finalTime = spline.t[-1 - spline.k]
-    ind = 0
+
+    # ind = 0
+    hitPosition = None
+    secondHalfAnimation = True
+    numFrames = int(np.ceil(finalTime / dt))
+    if secondHalfAnimation:
+        ind = numFrames
+    else:
+        ind = 0
     while currentTime < finalTime:
         print("Current Time: ", currentTime)
         fig, ax = plt.subplots()
@@ -1141,17 +1150,47 @@ def animate_pez():
         #     levels=[0.5],
         #     colors="Reds",
         # )
-        pez_plotting.plotEngagementZone(
-            currentHeading,
-            pursuerPosition,
-            pursuerRange,
-            pursuerCaptureRange,
-            pursuerSpeed,
-            agentSpeed,
-            ax,
-            color="green",
-            width=2,
-        )
+        if secondHalfAnimation:
+            actualPursuerPostion = pursuerPosition + np.array([-0.5, 0.5])
+            pez_plotting.plotEngagementZone(
+                currentHeading,
+                pursuerPosition,
+                pursuerRange,
+                pursuerCaptureRange,
+                pursuerSpeed,
+                agentSpeed,
+                ax,
+                color="red",
+                width=2,
+                alpha=0.3,
+            )
+            plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r", alpha=0.3)
+            plt.scatter(actualPursuerPostion[0], actualPursuerPostion[1], c="r")
+            pez_plotting.plotEngagementZone(
+                currentHeading,
+                actualPursuerPostion,
+                pursuerRange,
+                pursuerCaptureRange,
+                pursuerSpeed,
+                agentSpeed,
+                ax,
+                color="red",
+                width=2,
+            )
+        else:
+            pez_plotting.plotEngagementZone(
+                currentHeading,
+                pursuerPosition,
+                pursuerRange,
+                pursuerCaptureRange,
+                pursuerSpeed,
+                agentSpeed,
+                ax,
+                color="red",
+                width=2,
+                alpha=1.0,
+            )
+            plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r", alpha=1.0)
         # plot triangle at evader position with heading of evader
         plot_spline(
             spline,
@@ -1169,34 +1208,63 @@ def animate_pez():
             pez_constraint_limit,
             ax,
         )
-        plt.arrow(
-            currentPosition[0],
-            currentPosition[1],
-            1e-6 * np.cos(currentHeading),  # essentially zero-length tail
-            1e-6 * np.sin(currentHeading),
-            head_width=0.25,
-            head_length=0.3,
-            width=0,  # no line
-            fc="blue",
-            ec="blue",
-            zorder=5,
+        if ind == numFrames + 170:
+            hitPosition = currentPosition
+        if ind > numFrames + 170:
+            plt.scatter(
+                hitPosition[0], hitPosition[1], c="blue", s=200, marker="X", zorder=1000
+            )
+        else:
+            draw_airplanes.draw_airplane(
+                ax,
+                currentPosition,
+                angle=currentHeading - np.pi / 2,
+                color="blue",
+                size=0.4,
+            )
+        plt.scatter(
+            endingLocation[0],
+            endingLocation[1],
+            marker="*",
+            c="green",
+            s=150,
+            zorder=50,
         )
+        # plt.arrow(
+        #     currentPosition[0],
+        #     currentPosition[1],
+        #     1e-6 * np.cos(currentHeading),  # essentially zero-length tail
+        #     1e-6 * np.sin(currentHeading),
+        #     head_width=0.25,
+        #     head_length=0.3,
+        #     width=0,  # no line
+        #     fc="blue",
+        #     ec="blue",
+        #     zorder=5,
+        # )
         # pez_plotting.plotMahalanobisDistance(
         #     pursuerPosition, pursuerPositionCov, ax, fig
         # )
+        if secondHalfAnimation:
+            plt.title("True adversary differs → interception")
+        else:
+            plt.title("Assumed adversary position")
+
         ax.set_xlim(-4.5, 4.5)
         ax.set_ylim(-4.5, 4.5)
+        ax.set_frame_on(False)
         plt.xticks([])
         plt.yticks([])
         plt.xlabel("")
         plt.ylabel("")
 
-        fig.savefig(f"video/{ind}.png", dpi=300)
+        # save with no whitespace around the figure
+        fig.savefig(f"video/{ind}.png", dpi=300, bbox_inches="tight", pad_inches=0)
         ind += 1
         currentTime += dt
         plt.close(fig)
 
 
 if __name__ == "__main__":
-    main()
-    # animate_pez()
+    # main()
+    animate_pez()

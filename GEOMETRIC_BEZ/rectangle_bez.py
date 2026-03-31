@@ -157,6 +157,7 @@ def plot_box_pursuer_engagement_zone(
     ylim,
     ax,
     color="green",
+    width=1,
 ):
     numPoints = 200
     points, X, Y = get_meshgrid_points(xlim, ylim, numPoints)
@@ -178,6 +179,7 @@ def plot_box_pursuer_engagement_zone(
         EZ.reshape((numPoints, numPoints)),
         levels=[0],
         colors=color,
+        widths=width,
     )
     ax.plot([], label=r"$\partial \mathcal{Z}_{\text{rect}}$", color="green")
     return ax

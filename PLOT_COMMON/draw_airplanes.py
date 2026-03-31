@@ -9,48 +9,211 @@ matplotlib.rcParams["ps.fonttype"] = 42
 import PEZ.pez_plotting as pez_plotting
 
 
-# Function to draw a more realistic and larger airplane shape
-def draw_airplane(ax, position, color="red", size=1.5, angle=0):
-    # Fuselage (main body)
-    fuselage = np.array([[0, 0.6], [-0.08, -0.8], [0.08, -0.8]]) * size
+import numpy as np
+from matplotlib.patches import Polygon, Circle
+import matplotlib.patheffects as pe
 
-    # Left wing
-    left_wing = np.array([[-0.08, -0.2], [-0.6, -0.5], [-0.08, -0.5]]) * size
 
-    # Right wing
-    right_wing = np.array([[0.08, -0.2], [0.08, -0.5], [0.6, -0.5]]) * size
+def draw_airplane(ax, position, color="red", size=1.8, angle=0, zorder=100):
+    """
+    Draw a stylized airplane centered at `position`.
 
-    # Tail fin
-    tail = np.array([[-0.03, -0.8], [0.03, -0.8], [0, -1]]) * size
+    Parameters
+    ----------
+    ax : matplotlib axis
+    position : array-like, shape (2,)
+        Airplane center position [x, y]
+    color : str
+        Main airplane color
+    size : float
+        Overall scale factor
+    angle : float
+        Rotation angle in radians
+    zorder : int or float
+        Draw order; larger means plotted on top
+    """
 
-    # Cockpit (optional detail)
-    cockpit = np.array([[0, 0.4], [-0.05, 0], [0.05, 0]]) * size
+    position = np.asarray(position)
 
-    # Rotate all parts by the specified angle (in radians)
-    rotation_matrix = np.array(
-        [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+    # Base geometry: airplane points roughly in +y before rotation
+    fuselage = (
+        np.array(
+            [
+                [0.00, 1.00],  # nose
+                [-0.10, 0.55],
+                [-0.12, -0.55],
+                [-0.06, -1.00],
+                [0.06, -1.00],
+                [0.12, -0.55],
+                [0.10, 0.55],
+            ]
+        )
+        * size
     )
-    fuselage_rotated = fuselage @ rotation_matrix.T
-    left_wing_rotated = left_wing @ rotation_matrix.T
-    right_wing_rotated = right_wing @ rotation_matrix.T
-    tail_rotated = tail @ rotation_matrix.T
-    cockpit_rotated = cockpit @ rotation_matrix.T
 
-    # Translate the airplane to its position
-    fuselage_translated = fuselage_rotated + position
-    left_wing_translated = left_wing_rotated + position
-    right_wing_translated = right_wing_rotated + position
-    tail_translated = tail_rotated + position
-    cockpit_translated = cockpit_rotated + position
+    left_wing = (
+        np.array(
+            [
+                [-0.10, -0.10],
+                [-0.95, -0.45],
+                [-0.20, -0.42],
+                [-0.02, -0.22],
+            ]
+        )
+        * size
+    )
 
-    # Create polygons for each part and add them to the plot
-    ax.add_patch(Polygon(fuselage_translated, closed=True, color=color))
-    ax.add_patch(Polygon(left_wing_translated, closed=True, color=color))
-    ax.add_patch(Polygon(right_wing_translated, closed=True, color=color))
-    ax.add_patch(Polygon(tail_translated, closed=True, color=color))
-    ax.add_patch(
-        Polygon(cockpit_translated, closed=True, color="gray")
-    )  # Cockpit in a different color
+    right_wing = (
+        np.array(
+            [
+                [0.10, -0.10],
+                [0.02, -0.22],
+                [0.20, -0.42],
+                [0.95, -0.45],
+            ]
+        )
+        * size
+    )
+
+    left_tail = (
+        np.array(
+            [
+                [-0.08, -0.72],
+                [-0.42, -0.95],
+                [-0.02, -0.88],
+            ]
+        )
+        * size
+    )
+
+    right_tail = (
+        np.array(
+            [
+                [0.08, -0.72],
+                [0.02, -0.88],
+                [0.42, -0.95],
+            ]
+        )
+        * size
+    )
+
+    vertical_tail = (
+        np.array(
+            [
+                [0.00, -0.72],
+                [-0.04, -1.02],
+                [0.04, -1.02],
+            ]
+        )
+        * size
+    )
+
+    canopy = (
+        np.array(
+            [
+                [0.00, 0.72],
+                [-0.055, 0.45],
+                [0.055, 0.45],
+            ]
+        )
+        * size
+    )
+
+    # Rotation
+    c, s = np.cos(angle), np.sin(angle)
+    R = np.array([[c, -s], [s, c]])
+
+    def transform(points):
+        return points @ R.T + position
+
+    # Slight shadow / outline effect for readability on busy plots
+    outline = [pe.Stroke(linewidth=2.0, foreground="black"), pe.Normal()]
+
+    patch_kwargs = dict(
+        closed=True,
+        edgecolor="black",
+        linewidth=0.8,
+        joinstyle="round",
+        zorder=zorder,
+        clip_on=False,  # helps keep it visible even near plot edges
+    )
+
+    # Draw major parts
+    for pts in [left_wing, right_wing, left_tail, right_tail, vertical_tail, fuselage]:
+        p = Polygon(transform(pts), facecolor=color, **patch_kwargs)
+        p.set_path_effects(outline)
+        ax.add_patch(p)
+
+    # Canopy
+    canopy_patch = Polygon(
+        transform(canopy),
+        closed=True,
+        facecolor="#87CEEB",
+        edgecolor="black",
+        linewidth=0.6,
+        alpha=0.95,
+        zorder=zorder + 1,
+        clip_on=False,
+    )
+    canopy_patch.set_path_effects(outline)
+    ax.add_patch(canopy_patch)
+
+    # Nose highlight
+    nose_center = transform(np.array([[0.0, 0.92 * size]]))[0]
+    nose = Circle(
+        nose_center,
+        radius=0.035 * size,
+        facecolor="white",
+        edgecolor="none",
+        alpha=0.35,
+        zorder=zorder + 2,
+        clip_on=False,
+    )
+    ax.add_patch(nose)
+
+
+# Function to draw a more realistic and larger airplane shape
+# def draw_airplane(ax, position, color="red", size=1.5, angle=0):
+#     # Fuselage (main body)
+#     fuselage = np.array([[0, 0.6], [-0.08, -0.8], [0.08, -0.8]]) * size
+#
+#     # Left wing
+#     left_wing = np.array([[-0.08, -0.2], [-0.6, -0.5], [-0.08, -0.5]]) * size
+#
+#     # Right wing
+#     right_wing = np.array([[0.08, -0.2], [0.08, -0.5], [0.6, -0.5]]) * size
+#
+#     # Tail fin
+#     tail = np.array([[-0.03, -0.8], [0.03, -0.8], [0, -1]]) * size
+#
+#     # Cockpit (optional detail)
+#     cockpit = np.array([[0, 0.4], [-0.05, 0], [0.05, 0]]) * size
+#
+#     # Rotate all parts by the specified angle (in radians)
+#     rotation_matrix = np.array(
+#         [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+#     )
+#     fuselage_rotated = fuselage @ rotation_matrix.T
+#     left_wing_rotated = left_wing @ rotation_matrix.T
+#     right_wing_rotated = right_wing @ rotation_matrix.T
+#     tail_rotated = tail @ rotation_matrix.T
+#     cockpit_rotated = cockpit @ rotation_matrix.T
+#
+#     # Translate the airplane to its position
+#     fuselage_translated = fuselage_rotated + position
+#     left_wing_translated = left_wing_rotated + position
+#     right_wing_translated = right_wing_rotated + position
+#     tail_translated = tail_rotated + position
+#     cockpit_translated = cockpit_rotated + position
+#
+#     # Create polygons for each part and add them to the plot
+#     ax.add_patch(Polygon(fuselage_translated, closed=True, color=color))
+#     ax.add_patch(Polygon(left_wing_translated, closed=True, color=color))
+#     ax.add_patch(Polygon(right_wing_translated, closed=True, color=color))
+#     ax.add_patch(Polygon(tail_translated, closed=True, color=color))
+#     ax.add_patch(
+#         Polygon(cockpit_translated, closed=True, color="gray")
+#     )  # Cockpit in a different color
 
 
 def angle_to_target(p1, heading, p2):

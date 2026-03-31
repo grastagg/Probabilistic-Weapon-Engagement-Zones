@@ -38,6 +38,8 @@ import bspline.spline_opt_tools as spline_opt_tools
 import PEZ.pez as pez
 import PEZ.pez_plotting as pez_plotting
 import PLOT_COMMON.draw_mahalanobis as draw_mahalanobis
+import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
+import PLOT_COMMON.draw_airplanes as draw_airplanes
 
 numSamplesPerInterval = 5
 
@@ -704,6 +706,20 @@ def plan_path_interp_PEZ(
     return spline, tf
 
 
+def load_jd2l_params(filepath):
+    with h5py.File(filepath, "r") as f:
+        print(f.keys())
+        xMin = np.array(f["xTmin"])
+        xMax = np.array(f["xTmax"])
+        yMin = np.array(f["yTmin"])
+        yMax = np.array(f["yTmax"])
+        speedRatio = np.array(f["μ_speed_ratio"])
+        maxRange = np.array(f["Rmax"])
+        minRange = np.array(f["Rmin"])
+        captureRadius = np.array(f["r_capture_radius"])
+    return xMin, xMax, yMin, yMax, speedRatio, minRange, maxRange, captureRadius
+
+
 def load_jd2l_data(filepath):
     with h5py.File(filepath, "r") as f:
         pez = np.array(f["P_max"]).squeeze()
@@ -741,25 +757,21 @@ def plan_path_from_file(filepath):
 
 
 def main():
-    grid_file_path = "OUQ_BEZ/linPez.npy"
     grid_file_path = "OUQ_BEZ/xypsi_50.jld2"
-    param_file_path = "OUQ_BEZ/linPezParams.json"
-    print(f"Loading grid data from {grid_file_path}...")
-    # pez, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_grid_data(
-    #     grid_file_path, param_file_path
-    # )
     pez, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_jd2l_data(grid_file_path)
-    print("grid data shape", pez.shape)
-    print("grid parameters", minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi)
+    xMin, xMax, yMin, yMax, speedRatio, minRange, maxRange, captureRadius = (
+        load_jd2l_params(grid_file_path)
+    )
+    print("minRange", minRange)
+    print("maxRange", maxRange)
 
-    new_x = np.linspace(-5, 5, 500)
-    new_y = np.linspace(-5, 5, 500)
+    new_x = np.linspace(-4, 2, 500)
+    new_y = np.linspace(-3, 3, 500)
     new_X, new_Y = np.meshgrid(new_x, new_y)
     points = np.stack([new_X.ravel(), new_Y.ravel()], axis=-1)
     heading = np.deg2rad(0.0)
     new_psi = heading * np.ones(points.shape[0])
-    print("shape of points", points.shape)
-    print("shape of new psi", new_psi.shape)
+
     interpPez = trilerp_uniform_periodic_psi(
         points[:, 0],
         points[:, 1],
@@ -784,39 +796,51 @@ def main():
         new_X,
         new_Y,
         interpPez.reshape(new_X.shape),
-        levels=10,
+        levels=[0.1, 0.25, 0.5],
+        widths=2,
     )
-    plt.colorbar(c)
+    # inline labels
+    cl = ax.clabel(c, inline=True, fontsize=14, fmt="%.2f")
+    # plt.colorbar(c)
     ax.set_aspect("equal")
 
-    # pezParams = json.load(open("OUQ_BEZ/linPezParamsPEZ.json", "r"))
-    # pursuerRange = pezParams["pursuerRange"]
-    # pursuerRangeVar = pezParams["pursuerRangeVar"]
-    # pursuerCaptureRange = pezParams["pursuerCaptureRange"]
-    # pursuerCaptureRangeVar = pezParams["pursuerCaptureRangeVar"]
-    # pursuerPositionMean = jnp.asarray(pezParams["pursuerPosition"])
-    # pursuerPositionCov = jnp.asarray(pezParams["pursuerPositionCov"])
-    # pursuerSpeed = pezParams["pursuerSpeed"]
-    # pursuerSpeedVar = pezParams["pursuerSpeedVar"]
-    # agentSpeed = pezParams["agentSpeed"]
-    # pez_plotting.plotProbablisticEngagementZone(
-    #     np.array([[0.0, 0.0], [0.0, 0.0]]),
-    #     heading,
-    #     0.0,
-    #     pursuerPositionMean,
-    #     pursuerPositionCov,
-    #     pursuerRange,
-    #     pursuerRangeVar,
-    #     pursuerCaptureRange,
-    #     pursuerCaptureRangeVar,
-    #     pursuerSpeed,
-    #     pursuerSpeedVar,
-    #     agentSpeed,
-    #     ax,
-    #     levels=None,
-    #     colors="viridis",
-    # )
-    ax.set_aspect("equal")
+    # plot box xMin, xMax, yMin, yMax
+    plt.plot(
+        [xMin, xMax, xMax, xMin, xMin],
+        [yMin, yMin, yMax, yMax, yMin],
+        color="red",
+        linewidth=2,
+    )
+
+    # plot max range ez
+    pursuerSpeed = 1
+    evaderSpeed = speedRatio * pursuerSpeed
+    rectangle_bez.plot_box_pursuer_engagement_zone(
+        np.array([xMin, yMin - 0.05]),
+        np.array([xMax, yMax + 0.05]),
+        maxRange,
+        captureRadius,
+        pursuerSpeed,
+        0.0,
+        evaderSpeed,
+        (-3, 3),
+        (-3, 3),
+        ax,
+        color="green",
+        width=2,
+    )
+    draw_airplanes.draw_airplane(
+        ax,
+        np.array([-3.5, 0]),
+        angle=new_psi[0] - np.pi / 2,
+        color="blue",
+        size=0.3,
+    )
+    ax.grid(True)
+    ax.set_xlim(-4, 1)
+    ax.set_ylim(-2, 2)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
 
     plt.show()
 
@@ -833,12 +857,6 @@ def main_path():
     # velocity_constraints = (0,1.0)
     velocity_constraints = (0.0, 1.0)
 
-    grid_file_path = "OUQ_BEZ/linPez.npy"
-    param_file_path = "OUQ_BEZ/linPezParams.json"
-    print(f"Loading grid data from {grid_file_path}...")
-    # P_yxpsi, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_grid_data(
-    #     grid_file_path, param_file_path
-    # )
     jd2l_grid_file_path = "OUQ_BEZ/xypsi_50.jld2"
     P_yxpsi, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_jd2l_data(
         jd2l_grid_file_path
@@ -1020,12 +1038,15 @@ def animate_path():
     #     grid_file_path, param_file_path
     # )
     jd2l_grid_file_path = "OUQ_BEZ/xypsi_50.jld2"
-    jd2l_grid_file_path = "OUQ_BEZ/xypsi_5dim_20.jld2"
+    # jd2l_grid_file_path = "OUQ_BEZ/xypsi_5dim_20.jld2"
     P_yxpsi, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_jd2l_data(
         jd2l_grid_file_path
     )
+    xMin, xMax, yMin, yMax, speedRatio, minRange, maxRange, captureRadius = (
+        load_jd2l_params(jd2l_grid_file_path)
+    )
 
-    pez_limit = 0.05
+    pez_limit = 0.1
     spline, tf = plan_path_interp_PEZ(
         minx,
         dx,
@@ -1084,7 +1105,39 @@ def animate_path():
             new_X,
             new_Y,
             interpPez.reshape(new_X.shape),
-            levels=[0.05, 0.1, 0.25, 0.5],
+            levels=[0.1, 0.25, 0.5],
+        )
+        pursuerSpeed = 1
+        evaderSpeed = speedRatio * pursuerSpeed
+        # rectangle_bez.plot_box_pursuer_engagement_zone(
+        #     np.array([xMin, yMin - 0.05]),
+        #     np.array([xMax, yMax + 0.05]),
+        #     maxRange,
+        #     captureRadius,
+        #     pursuerSpeed,
+        #     new_psi[0],
+        #     evaderSpeed,
+        #     (-3, 3),
+        #     (-3, 3),
+        #     ax,
+        #     color="green",
+        #     width=2,
+        # )
+        rectangle_bez.plot_box_pursuer_reachable_region(
+            np.array([xMin, yMin - 0.05]),
+            np.array([xMax, yMax + 0.05]),
+            maxRange,
+            captureRadius,
+            ax,
+            color="red",
+            linestyle="dashed",
+        )
+        draw_airplanes.draw_airplane(
+            ax,
+            currentPosition,
+            angle=new_psi[0] - np.pi / 2,
+            color="blue",
+            size=0.3,
         )
         handles, labels = c.legend_elements()
         labels = [f"$\\epsilon={lvl:.2f}$" for lvl in c.levels]
@@ -1099,18 +1152,6 @@ def animate_path():
 
         # plot triangle at evader position with heading of evader
         ax.plot(pos[:, 0], pos[:, 1], label="Optimized Path", color="blue")
-        plt.arrow(
-            currentPosition[0],
-            currentPosition[1],
-            1e-6 * np.cos(currentHeading),  # essentially zero-length tail
-            1e-6 * np.sin(currentHeading),
-            head_width=0.2,
-            head_length=0.25,
-            width=0,  # no line
-            fc="blue",
-            ec="blue",
-            zorder=5,
-        )
         ax.set_aspect("equal")
         # plt.arrow(
         #     currentPosition[0],
@@ -1129,7 +1170,8 @@ def animate_path():
         plt.xlabel("")
         plt.ylabel("")
 
-        fig.savefig(f"video/{ind}.png", dpi=300)
+        # fig.savefig(f"video/{ind}.png", dpi=300)
+        fig.savefig(f"video/{ind}.svg", bbox_inches="tight", pad_inches=0)
         ind += 1
         currentTime += dt
         plt.close(fig)
@@ -1141,5 +1183,5 @@ if __name__ == "__main__":
 
     # create_lin_pez_grid(nX=20, nY=20, nPsi=20)
     # main_path()
-    main()
-    # animate_path()
+    # main()
+    animate_path()

@@ -423,7 +423,7 @@ def main():
     y = np.linspace(-4, 4, 500)
     X, Y = np.meshgrid(x, y)
     points = np.stack([X.ravel(), Y.ravel()], axis=-1)
-    psi = np.deg2rad(45.0) * np.ones(points.shape[0])
+    psi = np.deg2rad(0.0) * np.ones(points.shape[0])
     pursuerSpeed = 1.0
     evaderSpeed = 0.5
 
@@ -434,8 +434,8 @@ def main():
     maxX = 2.0
     minY = -1.0
     maxY = 1.0
-    meanX = -1.5
-    meanY = 0.5
+    meanX = 0.0
+    meanY = 0.0
     test = max_ouq_prob_pursuer_position_uncertainty_single(
         2.0,
         1.4,
@@ -481,7 +481,7 @@ def main():
 
     # c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
     ax.set_aspect("equal")
-    # plt.colorbar(c, label="Max Probability of Capture")
+    plt.colorbar(c, label="Max Probability of Capture")
     plt.xlabel("X Position")
     plt.ylabel("Y Position")
     # plot minx, maxx, miny, maxy box
@@ -491,7 +491,7 @@ def main():
     ax.set_xlim(-4, 4)
     ax.set_ylim(-4, 4)
 
-    pez_limit = 0.3
+    pez_limit = 0.99
     minXlim, maxXlim, minYlim, maxYlim = ouq_inner_rectangle_for_alpha(
         pez_limit, meanX, meanY, minX, maxX, minY, maxY
     )
