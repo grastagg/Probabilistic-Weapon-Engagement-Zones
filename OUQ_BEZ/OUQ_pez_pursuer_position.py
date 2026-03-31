@@ -481,7 +481,7 @@ def main():
 
     # c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
     ax.set_aspect("equal")
-    plt.colorbar(c, label="Max Probability of Capture")
+    # plt.colorbar(c, label="Max Probability of Capture")
     plt.xlabel("X Position")
     plt.ylabel("Y Position")
     # plot minx, maxx, miny, maxy box
