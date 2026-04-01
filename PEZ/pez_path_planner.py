@@ -1116,7 +1116,7 @@ def animate_pez():
 
     # plot_constraints(spline, velocity_constraints, turn_rate_constraints, curvature_constraints, pez_constraint_limit, useProbabalistic)
     currentTime = 0
-    dt = 0.05
+    dt = 0.04
     finalTime = spline.t[-1 - spline.k]
 
     # ind = 0
@@ -1177,6 +1177,23 @@ def animate_pez():
                 color="red",
                 width=2,
             )
+            ax.text(
+                actualPursuerPostion[0] - 0.15,
+                actualPursuerPostion[1],
+                "True",
+                color="red",
+                ha="right",
+                va="center",
+            )
+            ax.text(
+                pursuerPosition[0] - 0.15,
+                pursuerPosition[1],
+                "Assumed",
+                color="red",
+                ha="right",
+                va="center",
+                alpha=0.3,
+            )
         else:
             pez_plotting.plotEngagementZone(
                 currentHeading,
@@ -1191,6 +1208,14 @@ def animate_pez():
                 alpha=1.0,
             )
             plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r", alpha=1.0)
+            ax.text(
+                pursuerPosition[0] - 0.15,
+                pursuerPosition[1],
+                "Assumed",
+                color="red",
+                ha="right",
+                va="center",
+            )
         # plot triangle at evader position with heading of evader
         plot_spline(
             spline,
@@ -1208,9 +1233,10 @@ def animate_pez():
             pez_constraint_limit,
             ax,
         )
-        if ind == numFrames + 170:
+        stopFrame = 200
+        if ind == numFrames + stopFrame:
             hitPosition = currentPosition
-        if ind > numFrames + 170:
+        if ind > (numFrames + stopFrame):
             plt.scatter(
                 hitPosition[0], hitPosition[1], c="blue", s=200, marker="X", zorder=1000
             )
@@ -1230,18 +1256,6 @@ def animate_pez():
             s=150,
             zorder=50,
         )
-        # plt.arrow(
-        #     currentPosition[0],
-        #     currentPosition[1],
-        #     1e-6 * np.cos(currentHeading),  # essentially zero-length tail
-        #     1e-6 * np.sin(currentHeading),
-        #     head_width=0.25,
-        #     head_length=0.3,
-        #     width=0,  # no line
-        #     fc="blue",
-        #     ec="blue",
-        #     zorder=5,
-        # )
         # pez_plotting.plotMahalanobisDistance(
         #     pursuerPosition, pursuerPositionCov, ax, fig
         # )
@@ -1262,6 +1276,8 @@ def animate_pez():
         fig.savefig(f"video/{ind}.png", dpi=300, bbox_inches="tight", pad_inches=0)
         ind += 1
         currentTime += dt
+        if secondHalfAnimation and ind > (numFrames + stopFrame + 1):
+            currentTime = np.inf
         plt.close(fig)
 
 
