@@ -536,7 +536,7 @@ def main():
     ax.set_xlim(-4, 4)
     ax.set_ylim(-4, 4)
 
-    pez_limit = 0.99
+    pez_limit = 0.3
     minXlim, maxXlim, minYlim, maxYlim = ouq_inner_rectangle_for_alpha(
         pez_limit, meanX, meanY, minX, maxX, minY, maxY
     )
@@ -555,8 +555,8 @@ def main():
         pursuerSpeed,
         psi[0],
         evaderSpeed,
-        (-3, 3),
-        (-3, 3),
+        (-4, 4),
+        (-4, 4),
         ax,
         color="green",
     )
@@ -676,4 +676,5 @@ def animate_spline_path():
 
 
 if __name__ == "__main__":
-    animate_spline_path()
+    # animate_spline_path()
+    main()
