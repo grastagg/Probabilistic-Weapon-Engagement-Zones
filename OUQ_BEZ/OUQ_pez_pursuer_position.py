@@ -479,8 +479,8 @@ def main():
     maxX = 2.0
     minY = -1.0
     maxY = 1.0
-    meanX = 0.0
-    meanY = 0.0
+    meanX = -1.2
+    meanY = 0.7
     test = max_ouq_prob_pursuer_position_uncertainty_single(
         2.0,
         1.4,
@@ -572,7 +572,7 @@ def animate_spline_path():
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.1
     evaderSpeed = 1.0
-    pursuerPositionMean = np.array([0.0, 0.0])
+    pursuerPositionMean = np.array([-1.2, 0.7])
     pursuerMinX = -2.0
     pursuerMaxX = 2.0
     pursuerMinY = -1.0
@@ -588,7 +588,7 @@ def animate_spline_path():
     curvature_constraints = (-0.5, 0.5)
     turn_rate_constraints = (-1.0, 1.0)
 
-    pez_limit = 0.25
+    pez_limit = 0.2
 
     spline, tf = plan_ouq_path(
         pez_limit,
@@ -676,5 +676,5 @@ def animate_spline_path():
 
 
 if __name__ == "__main__":
-    # animate_spline_path()
-    main()
+    animate_spline_path()
+    # main()
