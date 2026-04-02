@@ -21,7 +21,7 @@ matplotlib.rcParams["ps.fonttype"] = 42
 import bspline.spline_opt_tools as spline_opt_tools
 import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
 
-numSamplesPerInterval = 15
+numSamplesPerInterval = 5
 
 
 def plot_spline(spline, ax, width=1):
@@ -429,7 +429,7 @@ def optimize_spline_path_box_BEZ(
     optProb.addObj("obj")
 
     opt = OPT("ipopt")
-    opt.options["print_level"] = 0
+    opt.options["print_level"] = 5
     opt.options["max_iter"] = 1000
     username = getpass.getuser()
     opt.options["hsllib"] = (

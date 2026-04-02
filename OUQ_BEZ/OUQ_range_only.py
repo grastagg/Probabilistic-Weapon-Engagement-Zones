@@ -17,6 +17,7 @@ import matplotlib
 
 import PEZ.pez_plotting as pez_plotting
 import PEZ.bez_path_planner as bez_path_planner
+import PLOT_COMMON.draw_airplanes as draw_airplanes
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -218,6 +219,7 @@ def plot_prob_contours(
     evaderSpeed,
     safetyProbThreshold,
     ax,
+    plotMinMax=True,
 ):
     psiS = psi
     psi = np.ones(500 * 500) * psi
@@ -240,58 +242,67 @@ def plot_prob_contours(
 
     probAtMaxRange = (meanRange - minRange) / (maxRange - minRange)
 
-    c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
+    # c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
     ax.set_aspect("equal")
-    ax.contour(
+    c = ax.contour(
         X,
         Y,
         prob.reshape(X.shape),
-        levels=[safetyProbThreshold],
+        levels=[0.05, 0.1, 0.25, 0.5],
         linewidths=3,
-        colors="green",
     )
-    plt.colorbar(c, label="Max PEZ")
+    handles, labels = c.legend_elements()
+    labels = [f"$\\epsilon={lvl:.2f}$" for lvl in c.levels]
+
+    ax.legend(
+        handles,
+        labels,
+        title="PEZ Level",
+        loc="lower right",
+        framealpha=0.8,
+    )
     plt.xlabel("X Position")
     plt.ylabel("Y Position")
-    pez_plotting.plotEngagementZone(
-        psiS,
-        np.array([0.0, 0.0]),
-        meanRange,
-        captureRadius,
-        pursuerSpeed,
-        evaderSpeed,
-        ax,
-        alpha=1.0,
-        width=1,
-        color="red",
-        label=True,
-    )
-    pez_plotting.plotEngagementZone(
-        psiS,
-        np.array([0.0, 0.0]),
-        maxRange,
-        captureRadius,
-        pursuerSpeed,
-        evaderSpeed,
-        ax,
-        alpha=1.0,
-        width=1,
-        color="red",
-        label=True,
-    )
-    pez_plotting.plotEngagementZone(
-        psiS,
-        np.array([0.0, 0.0]),
-        safetyProbThresholdRange,
-        captureRadius,
-        pursuerSpeed,
-        evaderSpeed,
-        ax,
-        alpha=1.0,
-        width=1,
-        color="red",
-        label=True,
-    )
+    if plotMinMax:
+        pez_plotting.plotEngagementZone(
+            psiS,
+            np.array([0.0, 0.0]),
+            meanRange,
+            captureRadius,
+            pursuerSpeed,
+            evaderSpeed,
+            ax,
+            alpha=1.0,
+            width=1,
+            color="red",
+            label=True,
+        )
+        pez_plotting.plotEngagementZone(
+            psiS,
+            np.array([0.0, 0.0]),
+            maxRange,
+            captureRadius,
+            pursuerSpeed,
+            evaderSpeed,
+            ax,
+            alpha=1.0,
+            width=1,
+            color="red",
+            label=True,
+        )
+        pez_plotting.plotEngagementZone(
+            psiS,
+            np.array([0.0, 0.0]),
+            safetyProbThresholdRange,
+            captureRadius,
+            pursuerSpeed,
+            evaderSpeed,
+            ax,
+            alpha=1.0,
+            width=1,
+            color="red",
+            label=True,
+        )
     ax.set_xlim(-4, 4)
     ax.set_ylim(-4, 4)
 
@@ -320,7 +331,7 @@ def main_max():
         meanRange,
     )
 
-    safetyProbThreshold = 0.2
+    safetyProbThreshold = 0.3
     safetyProbThresholdRange = np.clip(
         (meanRange - minRange) / safetyProbThreshold + minRange, minRange, maxRange
     )
@@ -328,17 +339,18 @@ def main_max():
     probAtMaxRange = (meanRange - minRange) / (maxRange - minRange)
 
     fig, ax = plt.subplots()
-    c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
+    # c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
     ax.set_aspect("equal")
-    ax.contour(
+    c = ax.contour(
         X,
         Y,
         prob.reshape(X.shape),
-        levels=[safetyProbThreshold],
+        levels=np.arange(0.0, 1.01, 0.1),
         linewidths=3,
-        colors="green",
     )
-    plt.colorbar(c, label="Max Probability of Capture")
+    # create legend for co
+    clabels = ax.clabel(c, inline=True, fontsize=8, fmt="%.1f")
+    # plt.colorbar(c, label="Max Probability of Capture")
     plt.xlabel("X Position")
     plt.ylabel("Y Position")
     pez_plotting.plotEngagementZone(
@@ -481,7 +493,7 @@ def animate_spline_path():
     minRange = 0.5
     maxRange = 2.0
     meanRange = 0.75
-    meanRange = (minRange + maxRange) / 2.0
+    # meanRange = (minRange + maxRange) / 2.0
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.0
     evaderSpeed = 1.0
@@ -495,6 +507,11 @@ def animate_spline_path():
     num_constraint_samples = 50
 
     pez_limit = 0.25
+
+    x = np.linspace(-4, 4, 500)
+    y = np.linspace(-4, 4, 500)
+    X, Y = np.meshgrid(x, y)
+    points = np.stack([X.ravel(), Y.ravel()], axis=-1)
 
     spline, tf = ouq_range_only_path(
         pursuerPosition,
@@ -599,22 +616,18 @@ def animate_spline_path():
             evaderSpeed,
             pez_limit,
             ax,
+            plotMinMax=False,
         )
 
-        plt.arrow(
-            currentPosition[0],
-            currentPosition[1],
-            1e-6 * np.cos(currentHeading),  # essentially zero-length tail
-            1e-6 * np.sin(currentHeading),
-            head_width=0.25,
-            head_length=0.3,
-            width=0,  # no line
-            fc="blue",
-            ec="blue",
-            zorder=5,
+        draw_airplanes.draw_airplane(
+            ax,
+            currentPosition,
+            angle=currentHeading - np.pi / 2,
+            color="blue",
+            size=0.4,
         )
         ax.plot(pos[:, 0], pos[:, 1], color="blue")
-        ax.plot(uniformSplinePoints[:, 0], uniformSplinePoints[:, 1], color="magenta")
+        # ax.plot(uniformSplinePoints[:, 0], uniformSplinePoints[:, 1], color="magenta")
         ax.set_xlim(-4.5, 4.5)
         ax.set_ylim(-4.5, 4.5)
         plt.xticks([])
@@ -632,3 +645,4 @@ def animate_spline_path():
 if __name__ == "__main__":
     animate_spline_path()
     # main_uniform()
+    # main_max()

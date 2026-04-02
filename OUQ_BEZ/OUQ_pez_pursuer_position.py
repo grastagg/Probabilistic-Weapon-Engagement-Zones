@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-import PEZ.pez_plotting as pez_plotting
+import PLOT_COMMON.draw_airplanes as draw_airplanes
 import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
 import GEOMETRIC_BEZ.rectangle_bez_path_planner as rectangle_bez_path_planner
 
@@ -418,6 +418,51 @@ def max_rectangle_in_bounds(x0, y0, q, Xmin, Xmax, Ymin, Ymax):
     return xmin, xmax, ymin, ymax
 
 
+def plan_ouq_path(
+    pez_limit,
+    meanX,
+    meanY,
+    minX,
+    maxX,
+    minY,
+    maxY,
+    pursuerRange,
+    pursuerCaptureRadius,
+    pursuerSpeed,
+    initialEvaderPosition,
+    finalEvaderPosition,
+    initialEvaderVelocity,
+    evaderSpeed,
+    num_cont_points,
+    spline_order,
+    velocity_constraints,
+    turn_rate_constraints,
+    curvature_constraints,
+):
+    minXlim, maxXlim, minYlim, maxYlim = ouq_inner_rectangle_for_alpha(
+        pez_limit, meanX, meanY, minX, maxX, minY, maxY
+    )
+    print("minXlim, maxXlim, minYlim, maxYlim:", minXlim, maxXlim, minYlim, maxYlim)
+    spline, tf = rectangle_bez_path_planner.plan_path_box_BEZ(
+        np.array([minXlim, minYlim]),
+        np.array([maxXlim, maxYlim]),
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        evaderSpeed,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+        num_constraint_samples=None,
+    )
+    return spline, tf
+
+
 def main():
     x = np.linspace(-4, 4, 500)
     y = np.linspace(-4, 4, 500)
@@ -519,5 +564,116 @@ def main():
     plt.show()
 
 
+def animate_spline_path():
+    initialEvaderPosition = np.array([-4.0, -4.0])
+    finalEvaderPosition = np.array([4.0, 4.0])
+    initialEvaderVelocity = np.array([1.0, 0.0])
+    pursuerRange = 1.0
+    pursuerSpeed = 2.0
+    pursuerCaptureRadius = 0.1
+    evaderSpeed = 1.0
+    pursuerPositionMean = np.array([0.0, 0.0])
+    pursuerMinX = -2.0
+    pursuerMaxX = 2.0
+    pursuerMinY = -1.0
+    pursuerMaxY = 1.0
+    x = np.linspace(-4, 4, 500)
+    y = np.linspace(-4, 4, 500)
+    X, Y = np.meshgrid(x, y)
+    points = np.stack([X.ravel(), Y.ravel()], axis=-1)
+
+    num_cont_points = 25
+    spline_order = 3
+    velocity_constraints = (0.0, 1.0)
+    curvature_constraints = (-0.5, 0.5)
+    turn_rate_constraints = (-1.0, 1.0)
+
+    pez_limit = 0.25
+
+    spline, tf = plan_ouq_path(
+        pez_limit,
+        pursuerPositionMean[0],
+        pursuerPositionMean[1],
+        pursuerMinX,
+        pursuerMaxX,
+        pursuerMinY,
+        pursuerMaxY,
+        pursuerRange,
+        pursuerCaptureRadius,
+        pursuerSpeed,
+        initialEvaderPosition,
+        finalEvaderPosition,
+        initialEvaderVelocity,
+        evaderSpeed,
+        num_cont_points,
+        spline_order,
+        velocity_constraints,
+        turn_rate_constraints,
+        curvature_constraints,
+    )
+
+    print("OUQ path duration:", tf)
+
+    currentTime = 0
+    dt = 0.08
+    finalTime = spline.t[-1 - spline.k]
+    t = np.linspace(0, finalTime, 500)
+    ouqSplinePos = spline(t)
+    pos = ouqSplinePos
+    # vel = spline.derivative(1)(t)
+
+    ind = 0
+
+    while currentTime < finalTime:
+        fig, ax = plt.subplots()
+        pdot = spline.derivative(1)(currentTime)
+        currentPosition = spline(currentTime)
+        currentHeading = np.arctan2(pdot[1], pdot[0])
+
+        draw_airplanes.draw_airplane(
+            ax,
+            currentPosition,
+            angle=currentHeading - np.pi / 2,
+            color="blue",
+            size=0.4,
+        )
+        ax.plot(pos[:, 0], pos[:, 1])
+        ax.set_xlim(-4.5, 4.5)
+        ax.set_ylim(-4.5, 4.5)
+        plt.xticks([])
+        plt.yticks([])
+        plt.xlabel("")
+        plt.ylabel("")
+
+        prob = max_ouq_prob_pursuer_position_uncertainty(
+            points[:, 0],
+            points[:, 1],
+            currentHeading * np.ones(points.shape[0]),
+            pursuerRange,
+            pursuerCaptureRadius,
+            evaderSpeed / pursuerSpeed,
+            pursuerPositionMean[0],
+            pursuerPositionMean[1],
+            pursuerMinX,
+            pursuerMaxX,
+            pursuerMinY,
+            pursuerMaxY,
+        )
+        c = ax.contour(
+            X,
+            Y,
+            prob.reshape(X.shape),
+            cmap="viridis",
+            shading="auto",
+            levels=np.arange(0, 1.2, 0.1),
+        )
+        # inline labels for contours
+        clabels = ax.clabel(c, inline=True, fontsize=8, fmt="%.1f")
+        fig.savefig(f"video/{ind}.png", dpi=300)
+        ind += 1
+        currentTime += dt
+        plt.close(fig)
+
+
 if __name__ == "__main__":
-    main()
+    animate_spline_path()
