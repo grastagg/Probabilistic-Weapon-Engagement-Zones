@@ -1169,9 +1169,11 @@ def animate_path():
         plt.yticks([])
         plt.xlabel("")
         plt.ylabel("")
+        ax.set_xlim(-4.2, 4.2)
+        ax.set_ylim(-4.2, 4.2)
 
-        # fig.savefig(f"video/{ind}.png", dpi=300)
-        fig.savefig(f"video/{ind}.svg", bbox_inches="tight", pad_inches=0)
+        fig.savefig(f"video/{ind}.png", dpi=300)
+        # fig.savefig(f"video/{ind}.svg", bbox_inches="tight", pad_inches=0)
         ind += 1
         currentTime += dt
         plt.close(fig)
