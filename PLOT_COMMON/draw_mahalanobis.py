@@ -1,76 +1,56 @@
-import numpy as np
-import matplotlib.pyplot as plt
+"""Helpers for plotting Mahalanobis-distance contours."""
+
 import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
-plt.rcParams["mathtext.fontset"] = "cm"  # Computer Modern
+plt.rcParams["mathtext.fontset"] = "cm"
 plt.rcParams["mathtext.rm"] = "serif"
-# get rid of type 3 fonts
-matplotlib.rcParams["pdf.fonttype"] = 42
-matplotlib.rcParams["ps.fonttype"] = 42
-# set font size for title, axis labels, and legend, and tick labels
 matplotlib.rcParams["axes.titlesize"] = 14
 matplotlib.rcParams["axes.labelsize"] = 12
 matplotlib.rcParams["legend.fontsize"] = 10
 matplotlib.rcParams["ytick.labelsize"] = 10
 matplotlib.rcParams["xtick.labelsize"] = 10
 
+_GRID_LIMITS = (-2.0, 2.0)
+_GRID_SAMPLES = 100
+_CONTOUR_LEVELS = [0, 1, 2, 3]
+_CONTOUR_COLORS = ["#CC0000", "#FF6666", "#FFCCCC"]
+
 
 def plotMahalanobisDistance(
     pursuerPosition, pursuerPositionCov, ax, fig, plotColorbar=False, cax=None
 ):
-    # Define the grid
-    x = np.linspace(-2, 2, 100)
-    y = np.linspace(-2, 2, 100)
-    X, Y = np.meshgrid(x, y)
+    """Plot Mahalanobis-distance contours for a pursuer position covariance."""
+    x = np.linspace(*_GRID_LIMITS, _GRID_SAMPLES)
+    y = np.linspace(*_GRID_LIMITS, _GRID_SAMPLES)
+    x_grid, y_grid = np.meshgrid(x, y)
+    points = np.column_stack((x_grid.ravel(), y_grid.ravel()))
 
-    # Stack X, Y coordinates into a single array
-    points = np.stack([X.ravel(), Y.ravel()]).T
+    inverse_covariance = np.linalg.inv(pursuerPositionCov)
+    delta = points - np.asarray(pursuerPosition).T
+    mahalanobis_distance = np.sqrt(
+        np.einsum("ij,jk,ik->i", delta, inverse_covariance, delta)
+    ).reshape(x_grid.shape)
 
-    # Compute the inverse of the covariance matrix
-    inv_cov = np.linalg.inv(pursuerPositionCov)
-
-    # Compute Mahalanobis distance for each point (vectorized)
-    delta = points - pursuerPosition.T
-    malhalanobisDistance = np.sqrt(np.einsum("ij,jk,ik->i", delta, inv_cov, delta))
-    malhalanobisDistance = malhalanobisDistance.reshape(X.shape)
-
-    # Specify darker shades of red
-    colors = ["#CC0000", "#FF6666", "#FFCCCC"]
-
-    # Plot filled contours for Mahalanobis distance with darker red shades
-    c = ax.contourf(
-        X,
-        Y,
-        malhalanobisDistance,
-        levels=[0, 1, 2, 3],
-        colors=colors,
+    contour = ax.contourf(
+        x_grid,
+        y_grid,
+        mahalanobis_distance,
+        levels=_CONTOUR_LEVELS,
+        colors=_CONTOUR_COLORS,
         alpha=0.75,
     )
-    # c = ax.pcolormesh(X, Y, malhalanobisDistance)
 
-    # Mark the pursuer position with a dark red dot
-    # ax.scatter(
-    #     pursuerPosition[0],
-    #     pursuerPosition[1],
-    #     color="darkred",
-    # )
-
-    # Add a color bar and increase font size
     if plotColorbar:
-        divider = make_axes_locatable(ax)  # ax_nn is the last subplot axis
-        # cax = divider.append_axes("right", size="5%", pad=0.05)
-        # fig.colorbar(c, cax=cax)
-        # l, b, w, h = ax.get_position().bounds
-        # cax = fig.add_axes([l + w + 0.02, b, 0.02, h])  # new colorbar axis
-        cbar = plt.colorbar(c, cax=cax, ticks=[0, 1, 2, 3], shrink=0.5)
-        cbar.set_label("Pursuer Std Dev")
-        cbar.ax.tick_params()
-    # if plotColorbar:
-    #     l, b, w, h = ax.get_position().bounds
-    #     cax = fig.add_axes([l + w + 0.02, b, 0.02, h])
-    #     # cbar = fig.colorbar(c, ax=cax, cax=cax, ticks=[0, 1, 2, 3], shrink=0.5)
-    #     cbar = plt.colorbar(c, ax=cax, ticks=[0, 1, 2, 3])
-    #     cbar.set_label("Pursuer Std Dev", fontsize=26)
+        if cax is None:
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+        colorbar = fig.colorbar(contour, cax=cax, ticks=_CONTOUR_LEVELS, shrink=0.5)
+        colorbar.set_label("Pursuer Std Dev")
+        colorbar.ax.tick_params()
+
+    return contour
