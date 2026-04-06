@@ -1,10 +1,11 @@
+"""Deterministic maneuvering-constraint utilities for a single pursuer."""
+
 import numpy as np
 
 import jax.numpy as jnp
 import jax
 import matplotlib.pyplot as plt
 
-from PEZ import pez
 from PEZ import bez
 import PEZ.pez_plotting as pez_plotting
 
@@ -72,6 +73,7 @@ def dmc(
     pursuerRange,  # R
     pursuerCaptureRadius,  # r
 ):
+    """Evaluate the analytic deterministic maneuvering constraint at one state."""
     # speed ratio μ = v_A / v_T (μ < 1 in the paper)
     mu = agentSpeed / pursuerSpeed
     R = pursuerRange
@@ -104,6 +106,7 @@ def dmc_multiple_pursuer(
     pursuerRanges,
     pursuerCaptureRadiuses,
 ):
+    """Evaluate the worst-case DMC value over a collection of pursuers."""
     dmcs = dmc_batched_vmap(
         agentPositions,
         agentHeadings,
@@ -154,6 +157,7 @@ def in_dmc(
     pursuerCaptureRadius,  # r
     dmcVal,
 ):
+    """Evaluate the DMC-safe analogue of the BEZ level-set function."""
     bezNominal = bez.inEngagementZoneJax(
         agentPosition,
         agentHeading,
@@ -210,6 +214,7 @@ def plot_dmc(
     color="purple",
     contour=True,
 ):
+    """Plot DMC values over a workspace grid for a fixed agent heading."""
     x = jnp.linspace(xlim[0], xlim[1], numPoints)
     y = jnp.linspace(ylim[0], ylim[1], numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -275,6 +280,7 @@ def plot_in_dmc(
     numPoints=100,
     ax=None,
 ):
+    """Plot the zero contour of the DMC-constrained engagement region."""
     x = jnp.linspace(xlim[0], xlim[1], numPoints)
     y = jnp.linspace(ylim[0], ylim[1], numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -305,6 +311,7 @@ def plot_in_dmc(
 
 
 def main():
+    """Run the single-pursuer DMC visualization demo."""
     agentHeading = 0
     agentSpeed = 1.5
     pursuerPosition = jnp.array([0.0, 0.0])

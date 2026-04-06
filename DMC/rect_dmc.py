@@ -1,6 +1,6 @@
-import time
+"""Rectangular launch-set variants of the deterministic maneuvering constraint."""
+
 import jax.numpy as jnp
-from matplotlib import colors
 import numpy as np
 import jax
 import matplotlib.pyplot as plt
@@ -49,6 +49,7 @@ def rect_dmc(
     pursuerSpeed,
     dmcVal,
 ):
+    """Evaluate the rectangular DMC level set for a fixed heading offset."""
     rectBezNominal = rectangle_bez.box_pursuer_engagment_zone(
         evaderPositions,
         evaderHeadings,
@@ -124,6 +125,7 @@ def rect_dmc_val_solve(
     n_samples=2048,
     tol=1e-6,
 ):
+    """Numerically find heading offsets where the rectangular BEZ boundary is met."""
     def func(xiStar):
         return rectangle_bez.box_pursuer_engagment_zone(
             evaderPosition,
@@ -239,6 +241,7 @@ def rect_dmc_val_solve_jax(
     pursuerCaptureRadius,
     pursuerSpeed,
 ):
+    """JAX-compatible approximation of the rectangular DMC heading offset."""
     def bez_at_xi(xi):
         return rectangle_bez.box_pursuer_engagment_zone(
             evaderPosition,
@@ -409,6 +412,7 @@ def rect_dmc_new(
     pursuerSpeed,
     dmcVal,
 ):
+    """Approximate the rectangular DMC using the worst boundary-aligned pursuer."""
     worstPursuer, hit = line_rect_intersection_or_closest(
         evaderPosition.flatten(), evaderHeading.flatten(), box_min, box_max
     )
@@ -445,6 +449,7 @@ def plot_rect_dmc(
     color="purple",
     numPoints=500,
 ):
+    """Plot the zero contour of the rectangular DMC-constrained region."""
     points, X, Y = rectangle_bez.get_meshgrid_points(xlim, ylim, numPoints)
     evaderHeadings = evaderHeading * jnp.ones((points.shape[0],))
 
@@ -487,6 +492,7 @@ def plot_dmc_rect_solve(
     linestyle="--",
     linewidth=2,
 ):
+    """Plot contours of solved rectangular DMC heading offsets over a workspace."""
     points, X, Y = rectangle_bez.get_meshgrid_points(xlim, ylim, numPoints)
     evaderHeadings = evaderHeading * jnp.ones((points.shape[0],))
     dmcVals = np.abs(
@@ -523,6 +529,7 @@ def plot_dmc_rect_solve(
 
 
 def main_solve():
+    """Run the rectangular DMC solver visualization demo."""
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.2
@@ -683,6 +690,7 @@ def plot_centroid_heading_rays(
 
 
 def main():
+    """Run the rectangular DMC comparison demo."""
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.2

@@ -1,18 +1,16 @@
+"""Spline path planning under deterministic maneuvering-constraint limits."""
+
 import numpy as np
 import jax
 
-from pyoptsparse import Optimization, OPT, IPOPT
-from scipy.interpolate import BSpline, _bsplines
+from pyoptsparse import Optimization, OPT
+from scipy.interpolate import BSpline
 import time
-from tqdm import tqdm
-from jax import jacfwd, jacobian
-from jax import jit
-from functools import partial
+from jax import jacfwd
 import jax.numpy as jnp
 import getpass
 import matplotlib.pyplot as plt
 import matplotlib
-import jax
 
 
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -25,6 +23,7 @@ numSamplesPerInterval = 15
 
 
 def plot_spline(spline, ax, width=1):
+    """Plot a 2D spline trajectory on the provided axes."""
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
@@ -50,6 +49,7 @@ def plot_spline(spline, ax, width=1):
 
 
 def create_spline(knotPoints, controlPoints, order):
+    """Construct a SciPy B-spline from knot and control-point arrays."""
     spline = BSpline(knotPoints, controlPoints, order)
     return spline
 
@@ -65,6 +65,7 @@ def dmc_along_spline(
     pursuerSpeed,
     dmcVal,
 ):
+    """Sample the DMC-constrained engagement metric along a spline trajectory."""
     numControlPoints = int(len(controlPoints) / 2)
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf, numControlPoints, 3
@@ -101,6 +102,7 @@ def compute_spline_constraints_for_DMC(
     pursuerSpeed,
     dmcVal,
 ):
+    """Return spline kinematics and DMC values used by the optimizer."""
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
@@ -132,6 +134,7 @@ dDMCDtf = jax.jit(jax.jacfwd(dmc_along_spline, argnums=1))
 
 
 def get_initial_spline_control_points(p0, pf, numControlPoints):
+    """Create a straight-line initial control polygon between the endpoints."""
     controlPoints = np.linspace(p0, pf, numControlPoints)
     return controlPoints
 
@@ -155,6 +158,7 @@ def optimize_spline_path_DMC(
     previous_spline=None,
     dmc_limit=0.1,
 ):
+    """Solve the spline optimization problem with DMC path constraints."""
     # Compute Jacobian of engagement zone function
 
     def objfunc(xDict):
@@ -385,6 +389,7 @@ def optimize_spline_path_DMC(
 
 
 def main_dmc():
+    """Run the DMC path-planning demo."""
     initialEvaderPosition = np.array([-2.5, 1.0])
     finalEvaderPosition = np.array([2.5, -1.0])
     initialEvaderVelocity = np.array([1.0, 0.0])
