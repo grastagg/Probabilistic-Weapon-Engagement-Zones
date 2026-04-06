@@ -1,3 +1,5 @@
+"""Geometric box-based reachable-region and engagement-zone helpers."""
+
 import jax.numpy as jnp
 import numpy as np
 import jax
@@ -44,6 +46,7 @@ signed_distance_to_box_vmap = jax.jit(
 
 
 def box_reachable_region(points, box_min, box_max, pursuerRange, pursuerCaptureRadius):
+    """Evaluate the signed-distance reachable-region model for a rectangular base set."""
     dists = signed_distance_to_box_vmap(points, box_min, box_max)
     return dists - (pursuerRange + pursuerCaptureRadius)
 
@@ -58,6 +61,7 @@ def box_pursuer_engagment_zone(
     pursuerCaptureRadius,
     pursuerSpeed,
 ):
+    """Shift evader positions forward and evaluate the box engagement-zone boundary."""
     speedRatio = evaderSpeed / pursuerSpeed
     futureEvaderPositions = (
         evaderPositions
@@ -76,6 +80,7 @@ def box_pursuer_engagment_zone(
 
 
 def get_meshgrid_points(xlim, ylim, numPoints):
+    """Return flattened sample points together with the meshgrid arrays."""
     x = jnp.linspace(xlim[0], xlim[1], numPoints)
     y = jnp.linspace(ylim[0], ylim[1], numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -94,6 +99,7 @@ def plot_box_pursuer_reachable_region(
     alpha=1.0,
     numPoints=200,
 ):
+    """Plot the rectangular pursuer base set and its geometric reachable boundary."""
     box = plt.Rectangle(
         min_box,
         max_box[0] - min_box[0],
@@ -159,6 +165,7 @@ def plot_box_pursuer_engagement_zone(
     color="green",
     width=1,
 ):
+    """Plot the zero contour of the rectangular geometric engagement-zone model."""
     numPoints = 200
     points, X, Y = get_meshgrid_points(xlim, ylim, numPoints)
     evaderHeadings = evaderHeading * jnp.ones((points.shape[0],))
@@ -196,6 +203,7 @@ def annotate_box_EZ_plot(
     p1=[0, 2.6],
     p2=[0, 1],
 ):
+    """Annotate the geometric interpretation used in the rectangle BEZ figure."""
     ax.plot(evader_start[0], evader_start[1], "k")
     speedRatio = evader_speed / pursuerSpeed
     dist = speedRatio * pursuerRange
@@ -229,6 +237,7 @@ def annotate_box_EZ_plot(
 
 
 def bez_learning_rect_ez_plot():
+    """Generate the dissertation-style rectangle BEZ illustration."""
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.1

@@ -1,18 +1,16 @@
+"""Spline path planning against interception-driven probabilistic engagement zones."""
+
 import numpy as np
 import jax
 
-from pyoptsparse import Optimization, OPT, IPOPT
-from scipy.interpolate import BSpline, _bsplines
+from pyoptsparse import Optimization, OPT
+from scipy.interpolate import BSpline
 import time
-from tqdm import tqdm
-from jax import jacfwd, jacobian
-from jax import jit
-from functools import partial
+from jax import jacfwd
 import jax.numpy as jnp
 import getpass
 import matplotlib.pyplot as plt
 import matplotlib
-import jax
 
 
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -25,6 +23,7 @@ numSamplesPerInterval = 15
 
 
 def plot_spline(spline, ax, width=1):
+    """Plot a 2D spline trajectory on the provided axes."""
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
@@ -50,11 +49,13 @@ def plot_spline(spline, ax, width=1):
 
 
 def create_spline(knotPoints, controlPoints, order):
+    """Construct a SciPy B-spline from knot and control-point arrays."""
     spline = BSpline(knotPoints, controlPoints, order)
     return spline
 
 
 def rect_left_and_top(lower_left, upper_right, n_points_total):
+    """Build an initial guess that follows the left and top rectangle edges."""
     x1, y1 = lower_left
     x2, y2 = upper_right
 
@@ -81,6 +82,7 @@ def rect_left_and_top(lower_left, upper_right, n_points_total):
 
 
 def rect_bottom_and_right(lower_left, upper_right, n_points_total):
+    """Build an initial guess that follows the bottom and right rectangle edges."""
     x1, y1 = lower_left
     x2, y2 = upper_right
 
@@ -118,6 +120,7 @@ def PEZ_from_interceptions_along_spline(
     integrationPoints,
     dArea,
 ):
+    """Sample the interception-driven PEZ constraint along a spline trajectory."""
     numControlPoints = int(len(controlPoints) / 2)
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf, numControlPoints, 3
@@ -164,6 +167,7 @@ def compute_spline_constraints_for_PEZ_from_interceptions(
     integrationPoints,
     dArea,
 ):
+    """Return spline kinematics and PEZ values used by the optimizer."""
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
@@ -216,6 +220,7 @@ def optimize_spline_path_PEZ_from_interceptions(
     previous_spline=None,
     pez_limit=0.1,
 ):
+    """Solve the spline optimization problem with interception-driven PEZ constraints."""
     # Compute Jacobian of engagement zone function
 
     def objfunc(xDict):
@@ -471,6 +476,7 @@ def plan_path_PEZ_from_interceptions(
     num_constraint_samples,
     pez_limit,
 ):
+    """Plan a path by comparing left- and right-initialized spline solutions."""
     integrationPoints, X, Y = (
         pez_from_interceptions.bez_from_interceptions.get_meshgrid_points(
             xlim, ylim, numPoints
@@ -542,6 +548,7 @@ def plan_path_PEZ_from_interceptions(
 
 
 def main_pez_from_interceptions():
+    """Run the interception-driven PEZ path-planning demo."""
     initialEvaderPosition = np.array([-5.0, -5.0])
     finalEvaderPosition = np.array([5.0, 5.0])
     initialEvaderVelocity = np.array([1.0, 0.0])

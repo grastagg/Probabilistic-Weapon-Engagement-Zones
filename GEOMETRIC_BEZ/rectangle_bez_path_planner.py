@@ -1,13 +1,12 @@
+"""Spline path planning against the rectangular geometric BEZ approximation."""
+
 import numpy as np
 import jax
 
-from pyoptsparse import Optimization, OPT, IPOPT
+from pyoptsparse import Optimization, OPT
 from scipy.interpolate import BSpline
 import time
-from tqdm import tqdm
 from jax import jacfwd
-from jax import jit
-from functools import partial
 import jax.numpy as jnp
 import getpass
 import matplotlib.pyplot as plt
@@ -25,6 +24,7 @@ numSamplesPerInterval = 5
 
 
 def plot_spline(spline, ax, width=1):
+    """Plot a 2D spline trajectory on the provided axes."""
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
@@ -67,6 +67,7 @@ def plot_spline(spline, ax, width=1):
 
 
 def create_spline(knotPoints, controlPoints, order):
+    """Construct a SciPy B-spline from knot and control-point arrays."""
     spline = BSpline(knotPoints, controlPoints, order)
     return spline
 
@@ -88,6 +89,7 @@ def rect_left_and_top(lower_left, upper_right, n_points_total):
 
 
 def rect_left_and_top(lower_left, upper_right, n_points_total):
+    """Build an initial guess that follows the left and top rectangle edges."""
     x1, y1 = lower_left
     x2, y2 = upper_right
 
@@ -114,6 +116,7 @@ def rect_left_and_top(lower_left, upper_right, n_points_total):
 
 
 def rect_bottom_and_right(lower_left, upper_right, n_points_total):
+    """Build an initial guess that follows the bottom and right rectangle edges."""
     x1, y1 = lower_left
     x2, y2 = upper_right
 
@@ -150,6 +153,7 @@ def box_BEZ_along_spline(
     pursuerCaptureRadius,
     pursuerSpeed,
 ):
+    """Sample the rectangular BEZ constraint along a spline trajectory."""
     numControlPoints = int(len(controlPoints) / 2)
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf, numControlPoints, 3
@@ -185,6 +189,7 @@ def compute_spline_constraints_for_box_BEZ(
     pursuerCaptureRadius,
     pursuerSpeed,
 ):
+    """Return spline kinematics and box-BEZ values used by the optimizer."""
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
@@ -234,6 +239,7 @@ def optimize_spline_path_box_BEZ(
     right=True,
     previous_spline=None,
 ):
+    """Solve the spline optimization problem with rectangular BEZ constraints."""
     # Compute Jacobian of engagement zone function
 
     def objfunc(xDict):
@@ -474,6 +480,7 @@ def plan_path_box_BEZ(
     curvature_constraints,
     num_constraint_samples=None,
 ):
+    """Plan a path by comparing left- and right-initialized spline solutions."""
     (splineRight, tfRight) = optimize_spline_path_box_BEZ(
         initialEvaderPosition,
         finalEvaderPosition,
@@ -525,6 +532,7 @@ def plan_path_box_BEZ(
 
 
 def main_box():
+    """Run the rectangular BEZ path-planning demo."""
     initialEvaderPosition = np.array([-5.0, -5.0])
     finalEvaderPosition = np.array([5.0, 5.0])
     initialEvaderVelocity = np.array([1.0, 0.0])

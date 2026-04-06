@@ -1,5 +1,6 @@
+"""Probabilistic engagement-zone models built from interception constraints."""
+
 import numpy as np
-import time
 import jax.numpy as jnp
 import jax
 import matplotlib
@@ -53,6 +54,7 @@ prob_launch_feasible_from_intercepts_vmap = jax.jit(
 def launch_region_pdf_from_intercepts_find_normalization_constant(
     interception_positions, range_mean, range_std, xlim, ylim, numPoints=200
 ):
+    """Numerically integrate the unnormalized launch-feasibility field over a grid."""
     points, X, Y = bez_from_interceptions.get_meshgrid_points(xlim, ylim, numPoints)
     probs = prob_launch_feasible_from_intercepts_vmap(
         points, interception_positions, range_mean, range_std
@@ -66,6 +68,7 @@ def launch_region_pdf_from_intercepts_find_normalization_constant(
 def launch_region_pdf_from_intercepts(
     points, interception_positions, range_mean, range_std, normalization_constant
 ):
+    """Evaluate the normalized launch-region density at query points."""
     probs = prob_launch_feasible_from_intercepts_vmap(
         points, interception_positions, range_mean, range_std
     )
@@ -75,6 +78,7 @@ def launch_region_pdf_from_intercepts(
 def build_launch_region_pdf_range_uncertainty(
     interception_positions, range_mean, range_std, xlim, ylim, numPoints=200
 ):
+    """Build a discretized launch-position PDF under range uncertainty."""
     # grid of launch candidates
     integrationPoints, X, Y = bez_from_interceptions.get_meshgrid_points(
         xlim, ylim, numPoints
@@ -103,6 +107,7 @@ def prob_reachable_given_pdf(
     range_std,
     dArea,
 ):
+    """Integrate reachable probability for one point against a launch-position PDF."""
     dists = jnp.linalg.norm(integrationPoints - point, axis=1)
     # survival function = P(R >= d)
     # probs = jax.scipy.stats.norm.sf(dists, loc=range_mean, scale=range_std)
@@ -137,6 +142,7 @@ def pez_from_launch_region_pdf(
     range_std,
     dArea,
 ):
+    """Evaluate the probabilistic engagement zone induced by a launch-position PDF."""
     futureEvaderPositions = (
         points
         + (evaderSpeed / pursuerSpeed)
@@ -280,6 +286,7 @@ def pez_numerical_soft(
     pursuerCaptureRadius,
     dA,
 ):
+    """Evaluate a smoothed PEZ contour using numerical integration over launch points."""
     futureEvaderPositions = (
         evaderPosition
         + (evaderSpeed / pursuerSpeed)
@@ -308,6 +315,7 @@ def pez_numerical(
     pursuerCaptureRadius,
     dA,
 ):
+    """Evaluate the PEZ exactly on a discretized launch-position grid."""
     futureEvaderPositions = (
         evaderPosition
         + (evaderSpeed / pursuerSpeed)
@@ -324,6 +332,7 @@ def pez_numerical(
 
 
 def plot_potential_pursuer_launch_with_range_uncertainty():
+    """Generate the figure set for uncertain launch range and potential PEZ."""
     pursuerRangeMean = 1.5
     pursuerRangeStd = 0.3
     pursuerSpeed = 2.0
@@ -542,6 +551,7 @@ def plot_prob_reachable(
     ax,
     levels,
 ):
+    """Plot contours of reachable probability under a uniform launch-region PDF."""
     points, X, Y = bez_from_interceptions.get_meshgrid_points(xlim, ylim, numPoints)
 
     dArea = (
@@ -566,6 +576,7 @@ def plot_prob_reachable(
 
 
 def plot_pez_from_interception():
+    """Generate the interception-driven probabilistic reachable-region figure."""
     pursuerSpeed = 2.0
     pursuerRange = 1.5
     pursuerCaptureRadius = 0.1

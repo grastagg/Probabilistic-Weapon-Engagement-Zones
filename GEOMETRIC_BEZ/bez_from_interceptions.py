@@ -1,3 +1,5 @@
+"""Geometric BEZ constructions built from interception-point constraints."""
+
 import jax.numpy as jnp
 import jax
 import matplotlib.pyplot as plt
@@ -27,6 +29,7 @@ import PEZ.pez_plotting as pez_plotting
 
 
 def in_circle(center, raduis, points):
+    """Return a mask for points that lie within a circle centered at `center`."""
     dists = jnp.linalg.norm(points - center, axis=1)
     return dists <= raduis
 
@@ -35,11 +38,13 @@ in_circle_vmap = jax.vmap(in_circle, in_axes=(0, None, None))
 
 
 def in_circle_intersection(centers, radius, points):
+    """Return a mask for points that lie in every circle in a common-radius family."""
     in_circles = in_circle_vmap(centers, radius, points)
     return jnp.all(in_circles, axis=0)
 
 
 def _circle_intersections(c1, r1, c2, r2, tol=1e-9):
+    """Return the pairwise intersection points between two circles."""
     c1, c2 = np.asarray(c1, float), np.asarray(c2, float)
     d = np.linalg.norm(c2 - c1)
     if d < tol or d > r1 + r2 + tol or d < abs(r1 - r2) - tol:
@@ -57,14 +62,17 @@ def _circle_intersections(c1, r1, c2, r2, tol=1e-9):
 
 
 def _wrap_angle(theta):
+    """Wrap an angle to the `[0, 2*pi)` interval."""
     return np.mod(theta, 2 * np.pi)
 
 
 def _ccw_delta(t1, t2):
+    """Return the counter-clockwise angular difference from `t1` to `t2`."""
     return (t2 - t1) % (2 * np.pi)
 
 
 def _inside_all(p, centers, radii, tol=1e-9):
+    """Check whether a point lies inside every circle in a family."""
     for c, r in zip(centers, radii):
         if np.linalg.norm(p - c) > r + tol:
             return False
@@ -72,6 +80,7 @@ def _inside_all(p, centers, radii, tol=1e-9):
 
 
 def _unique(pts, tol=1e-8):
+    """Deduplicate 2D points using a Euclidean tolerance."""
     out = []
     for p in pts:
         if all(np.linalg.norm(p - q) > tol for q in out):
@@ -159,6 +168,7 @@ def intersection_arcs(centers, radii, tol=1e-9):
 def compute_potential_pursuer_region_from_interception_position(
     interceptionPositions, pursuerRange, pursuerCaptureRadius
 ):
+    """Construct the feasible pursuer boundary from exact interception locations."""
     arcs = intersection_arcs(
         interceptionPositions,
         radii=[pursuerRange + pursuerCaptureRadius] * len(interceptionPositions),
@@ -185,6 +195,7 @@ def compute_potential_pursuer_region_from_interception_position_and_launch_time(
 def compute_potential_pursuer_region_from_interception_position_and_radii(
     interceptionPositions, radii
 ):
+    """Construct the feasible pursuer boundary from per-point interception radii."""
     arcs = intersection_arcs(interceptionPositions, radii)
     return arcs
 
@@ -226,6 +237,7 @@ def is_between_angles_radians(start_angle, stop_angle, angle):
 
 
 def dist_point_to_arc(point, center, radius, theta1, theta2):
+    """Return the distance from a point to a circular arc segment."""
     endPointA = center + radius * jnp.array([jnp.cos(theta1), jnp.sin(theta1)])
     endPointB = center + radius * jnp.array([jnp.cos(theta2), jnp.sin(theta2)])
 
@@ -251,6 +263,7 @@ dists_point_to_arcs = jax.vmap(dist_point_to_arc, in_axes=(None, 0, 0, 0, 0))
 
 
 def dist_point_to_arcs(point, centers, radii, theta_start, theta_end):
+    """Return the minimum distance from a point to a collection of arcs."""
     dists = dists_point_to_arcs(point, centers, radii, theta_start, theta_end)
     min_dist = jnp.min(dists)
     min_index = jnp.argmin(dists)
@@ -265,6 +278,7 @@ signed_distance_to_arcs_vmap = jax.vmap(
 def potential_reachable_region(
     points, centers, radii, theta_start, theta_end, pursuerRange, pursuerCaptureRadius
 ):
+    """Evaluate the signed-distance reachable-region model induced by arc boundaries."""
     dists, _ = signed_distance_to_arcs_vmap(
         points, centers, radii, theta_start, theta_end
     )
@@ -283,6 +297,7 @@ def potential_pursuer_engagment_zone(
     pursuerCaptureRadius,
     pursuerSpeed,
 ):
+    """Evaluate the geometric potential engagement-zone boundary on sample points."""
     speedRatio = evaderSpeed / pursuerSpeed
     futureEvaderPositions = (
         evaderPositions
@@ -303,6 +318,7 @@ def potential_pursuer_engagment_zone(
 
 
 def get_meshgrid_points(xlim, ylim, numPoints):
+    """Return flattened sample points together with their 2D meshgrid."""
     x = jnp.linspace(xlim[0], xlim[1], numPoints)
     y = jnp.linspace(ylim[0], ylim[1], numPoints)
     [X, Y] = jnp.meshgrid(x, y)
@@ -310,6 +326,7 @@ def get_meshgrid_points(xlim, ylim, numPoints):
 
 
 def plot_in_circle_intersection(centers, radaii, fig, ax):
+    """Visualize the intersection set of equal-radius circles on a dense grid."""
     numPoints = 500
     x = jnp.linspace(-5, 5, numPoints)
     y = jnp.linspace(-5, 5, numPoints)
@@ -328,6 +345,7 @@ def plot_in_circle_intersection(centers, radaii, fig, ax):
 def plot_pursuer_reachable_region(
     pursuerPosition, pursuerRange, pursuerCaptureRadius, fig, ax
 ):
+    """Plot the nominal single-pursuer reachable region for comparison."""
     circle = plt.Circle(
         (pursuerPosition[0], pursuerPosition[1]),
         pursuerRange + pursuerCaptureRadius,
@@ -488,6 +506,7 @@ prob_within_radius_mult = jax.jit(
 
 
 def prob_within_multiple_radii_single(x, mus, sigmas, R):
+    """Combine independent circular-capture probabilities for one query point."""
     probs = prob_within_radius_mult(x, mus, sigmas, R)
     # return 1 - jnp.prod(1 - probs)
     # return jnp.sum(probs, axis=0) - jnp.prod(probs, axis=0)
@@ -551,6 +570,7 @@ def plot_potential_pursuer_engagement_zone(
     numPoints=200,
     ax=None,
 ):
+    """Plot the zero contour of the geometric potential engagement zone."""
     centers, radii, theta_start, theta_end = arcs_to_arrays(arcs)
     x = jnp.linspace(xlim[0], xlim[1], numPoints)
     y = jnp.linspace(ylim[0], ylim[1], numPoints)
@@ -594,6 +614,7 @@ def plot_potential_pursuer_engagement_zone(
 def plot_potential_pursuer_reachable_region(
     arcs, pursuerRange, pursuerCaptureRadius, xlim, ylim, numPoints=200, ax=None
 ):
+    """Plot the zero contour of the geometric potential reachable region."""
     centers, radii, theta_start, theta_end = arcs_to_arrays(arcs)
     x = jnp.linspace(xlim[0], xlim[1], numPoints)
     y = jnp.linspace(ylim[0], ylim[1], numPoints)
@@ -627,6 +648,7 @@ def plot_potential_pursuer_reachable_region(
 
 
 def plot_interception_points(interceptionPositions, radii, ax):
+    """Plot interception locations and their associated construction circles."""
     ax.scatter(
         interceptionPositions[:, 0],
         interceptionPositions[:, 1],
@@ -643,6 +665,7 @@ def plot_interception_points(interceptionPositions, radii, ax):
 
 
 def main():
+    """Standalone example comparing potential and nominal engagement regions."""
     pursuerPosition = np.array([0.0, 0.0])
     pursuerRange = 1.5
     pursuerSpeed = 2.0
@@ -701,6 +724,7 @@ def main():
 
 
 def plot_potential_ez(ax, fig):
+    """Populate an axes with the baseline potential-BEZ illustration."""
     pursuerPosition = np.array([0.0, 0.0])
     pursuerRange = 1.5
     pursuerSpeed = 2.0
@@ -752,6 +776,7 @@ def plot_potential_ez(ax, fig):
 
 
 def plot_potential_ez_with_launch_time(ax, fig):
+    """Populate an axes using interception circles induced by launch times."""
     pursuerPosition = np.array([0.0, 0.0])
     pursuerRange = 1.5
     pursuerSpeed = 2.0
@@ -803,6 +828,7 @@ def plot_potential_ez_with_launch_time(ax, fig):
 
 
 def bez_learning_bez_plot():
+    """Generate the dissertation-style geometric BEZ learning figure."""
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.1
@@ -864,6 +890,7 @@ def bez_learning_bez_plot():
 def plot_pursuer_position_probability_heatmap(
     interceptionPositions, sigmas, pursuerRange, pursuerCaptureRadius, ax
 ):
+    """Plot a workspace heatmap of feasible pursuer-position probability."""
     numPoints = 200
     points, X, Y = get_meshgrid_points(xlim=(-2, 2), ylim=(-2, 2), numPoints=numPoints)
     prob = prob_within_multiple_radii(
@@ -879,6 +906,7 @@ def plot_pursuer_position_probability_heatmap(
 
 
 def main_potential_bez_with_noisey_interception():
+    """Standalone noisy-interception example for the potential-BEZ model."""
     pursuerRange = 1.5
     pursuerPosition = np.array([0.0, 0.0])
     interceptionPositions = np.array([[1.0, 1.0]])
@@ -919,6 +947,7 @@ def main_potential_bez_with_noisey_interception():
 
 
 def bez_learning_potential_bez_plot():
+    """Retained experimental figure helper for the potential-BEZ variant."""
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.1
@@ -958,6 +987,7 @@ def bez_learning_potential_bez_plot():
 
 
 def combined_potential_plot():
+    """Generate the side-by-side launch-time comparison figure."""
     fig, ax = plt.subplots(1, 2, figsize=(6.0, 4.0), layout="constrained")
     plot_potential_ez_with_launch_time(ax[1], fig)
     ax[1].set_title("With Launch Times")

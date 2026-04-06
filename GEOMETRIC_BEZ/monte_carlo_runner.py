@@ -1,4 +1,7 @@
 from __future__ import annotations
+
+"""Monte Carlo driver and animation helpers for geometric BEZ experiments."""
+
 import sys
 import os
 
@@ -16,6 +19,7 @@ from PEZ import pez_path_planner
 
 
 def _jsonable(x):
+    """Convert NumPy-heavy objects into JSON-serializable Python values."""
     if isinstance(x, (np.integer, np.floating)):
         return x.item()
     if isinstance(x, np.ndarray):
@@ -33,12 +37,14 @@ def _jsonable(x):
 
 
 def _write_json(path: Path, obj: dict):
+    """Write a JSON file, creating parent directories when needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(_jsonable(obj), f, indent=2, sort_keys=True)
 
 
 def animate_true_pursuer(pursuerPosition, pursuerRange, pursuerCaptureRadius, ax):
+    """Draw the true pursuer position and its nominal reachable disk."""
     ax.scatter(
         *pursuerPosition, color="red", s=50, label="True Pursuer Position", marker="o"
     )
@@ -280,6 +286,7 @@ def animate_hp_path(
     numFramesForHp,
     cfg,
 ):
+    """Write hold frames for the high-priority path visualization."""
     fig, ax = plt.subplots()
     animate_true_pursuer(
         truePursuerPos, cfg["pursuerRange"], cfg["pursuerCaptureRadius"], ax
@@ -352,6 +359,7 @@ def run_monte_carlo_simulation(
     measureLaunchTime=False,
     straightLineSacrificial=False,
 ):
+    """Run one Monte Carlo trial and optionally save plots, animation frames, and data."""
     # -----------------------------
     # Config (everything saved)
     # -----------------------------

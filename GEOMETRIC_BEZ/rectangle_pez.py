@@ -1,6 +1,6 @@
-from jax._src.source_info_util import raw_frame_to_frame
+"""Probabilistic reachable-region and engagement-zone models for box launch sets."""
+
 import numpy as np
-import time
 import jax.numpy as jnp
 import jax
 import matplotlib
@@ -153,6 +153,7 @@ def prob_engagment_zone_uniform_box(
     min_box,
     max_box,
 ):
+    """Evaluate the rectangular PEZ by shifting evader positions along their headings."""
     futureEvaderPositions = (
         points
         + (evaderSpeed / pursuerSpeed)
@@ -182,6 +183,7 @@ def plot_rectangle_prr(
     ax,
     numPoints=120,
 ):
+    """Plot reachable-probability contours for a uniform rectangular launch prior."""
     points, X, Y = bez_from_interceptions.get_meshgrid_points(xlim, ylim, numPoints)
     probReachable = prob_reachable_uniform_box(
         points, pursuerRange, pursuerCaptureRadius, min_box, max_box
@@ -196,6 +198,7 @@ def plot_rectangle_prr(
 
 
 def rectangle_pez_plot():
+    """Generate the dissertation-style comparison figure for the box PEZ model."""
     pursuerRange = 1.5
     pursuerSpeed = 2.0
     pursuerCaptureRadius = 0.1

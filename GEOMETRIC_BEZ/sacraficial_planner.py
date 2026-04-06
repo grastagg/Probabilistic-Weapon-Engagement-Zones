@@ -1,7 +1,4 @@
-"""
-idx=-1
-Sacrificial agent B-spline planner (pyOptSparse + IPOPT + JAX).
-"""
+"""Sacrificial-agent spline planning and Monte Carlo analysis for geometric BEZ studies."""
 
 from __future__ import annotations
 
@@ -16,12 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pyoptsparse import OPT, Optimization
 from scipy.interpolate import BSpline
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import scipy
-
-import os
-
-from scipy.sparse import lil_array
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = (
@@ -38,7 +30,6 @@ matplotlib.use("Agg")
 
 from GEOMETRIC_BEZ import bez_from_interceptions
 import GEOMETRIC_BEZ.pez_from_interceptions as pez_from_interceptions
-import GEOMETRIC_BEZ.rectangle_pez as rectangle_pez
 import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
 from GEOMETRIC_BEZ import rectangle_bez_path_planner
 from GEOMETRIC_BEZ import bez_from_interceptions_path_planner
@@ -54,6 +45,7 @@ numSamplesPerInterval = NUM_SAMPLES_PER_INTERVAL
 
 
 def plot_spline(spline, ax, width=1, color="blue"):
+    """Plot a 2D spline trajectory on the provided axes."""
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
@@ -1352,6 +1344,7 @@ def plot_dist_objective_function(
 
 
 def main_planner():
+    """Run the interception-history sacrificial-planner demo."""
     x_range = [-5.0, 5.0]
     y_range = [-5.0, 5.0]
     num_pts = 50
@@ -1463,6 +1456,7 @@ def main_planner():
 
 
 def main_planner_box():
+    """Run the box-based sacrificial-planner demo."""
     x_range = [-5.0, 5.0]
     y_range = [-5.0, 5.0]
     num_pts = 50
@@ -1567,6 +1561,7 @@ def run_monte_carlo_simulation(
     dataDir="GEOMETRIC_BEZ/data/test/",
     runName="test",
 ):
+    """Run one sacrificial-agent Monte Carlo batch and save aggregate outputs."""
     # make data directory and directory for runName is they don't exist
     os.makedirs(dataDir, exist_ok=True)
     os.makedirs(os.path.join(dataDir, runName), exist_ok=True)
@@ -1837,6 +1832,7 @@ def run_monte_carlo_simulation(
 def median_iqr_plot(
     data, ax=None, label=None, marker="o", color="green", linestyle="-", linewidth=2
 ):
+    """Plot the mean trajectory of a collection of per-agent metrics."""
     if ax is None:
         fig, ax = plt.subplots()
     # average intersection areas over all runs
@@ -1911,6 +1907,7 @@ def interception_metrics(intercept: np.ndarray):
 
 
 def parse_data(dataDir):
+    """Load saved Monte Carlo runs and extract area, path-time, and intercept metrics."""
     allIntersectionAreas = []
     allPathTimes = []
     allInterceptionHistories = []
@@ -2014,6 +2011,7 @@ def plot_all_median(
     yNumbers=True,
     yLabel="Mean Feasible Launch Region Area",
 ):
+    """Plot aggregated Monte Carlo summary curves for one metric dictionary."""
     print(yLabel)
     # Style choices that pair well with technical papers
     style_map = {
@@ -2061,6 +2059,7 @@ def plot_all_median(
 
 
 def get_data_dicts(dataDir):
+    """Load all Monte Carlo result groups for a single experiment directory."""
     allIntersectionAreasNoTimeStraight, allPathTimesNoTimeStraight, p_straight_no = (
         parse_data(dataDir + "/noLaunchTime/straightLine")
     )
@@ -2096,6 +2095,7 @@ def get_data_dicts(dataDir):
 
 
 def plot_all_data(dataDir1, dataDir2, dataDir3):
+    """Generate the combined comparison figures across three doctrine settings."""
     p_dict1, intersectionDict1, pathTimeDict1 = get_data_dicts(dataDir1)
     p_dict2, intersectionDict2, pathTimeDict2 = get_data_dicts(dataDir2)
     p_dict3, intersectionDict3, pathTimeDict3 = get_data_dicts(dataDir3)
