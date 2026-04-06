@@ -12,7 +12,6 @@ import jax.numpy as jnp
 import getpass
 import matplotlib.pyplot as plt
 import matplotlib
-import jax
 
 
 matplotlib.rcParams["pdf.fonttype"] = 42

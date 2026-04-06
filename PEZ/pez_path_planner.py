@@ -1,4 +1,3 @@
-from jax._src.xla_bridge import FORCE_FORWARD_COMPAT_LOWERING_PLATFORMS
 import numpy as np
 from pyoptsparse import Optimization, OPT, IPOPT
 from scipy.interpolate import BSpline
@@ -32,6 +31,7 @@ matplotlib.rcParams["xtick.labelsize"] = 10
 
 
 import bspline.spline_opt_tools as spline_opt_tools
+import PEZ.bez as bez
 import PEZ.pez as pez
 import PEZ.pez_plotting as pez_plotting
 import PLOT_COMMON.draw_mahalanobis as draw_mahalanobis
@@ -1121,7 +1121,7 @@ def animate_pez():
 
     # ind = 0
     hitPosition = None
-    secondHalfAnimation = True
+    secondHalfAnimation = False
     numFrames = int(np.ceil(finalTime / dt))
     if secondHalfAnimation:
         ind = numFrames

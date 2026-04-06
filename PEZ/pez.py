@@ -1,28 +1,12 @@
-import numpy as np
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+"""Probabilistic engagement-zone calculations built on the deterministic BEZ."""
 
-import matplotlib.pyplot as plt
-import jax.numpy as jnp
-from jax import jacfwd, value_and_grad
-
-from scipy.stats import norm
-import time
-from jax import jit
 import jax
-from jax import vmap
-
-from PEZ import bez
+import jax.numpy as jnp
+import numpy as np
+from jax import jacfwd, vmap
+from scipy.stats import norm
 
 jax.config.update("jax_enable_x64", True)
-
-# jax.config.update("jax_platform_name", "cpu")
-# jax.default_device(jax.devices("cpu")[0])
-# jax.config.update("jax_platform_name", "cpu")
-
-
-from math import erf, sqrt
-from math import erfc
-import matplotlib
 
 import PEZ.bez as bez
 
@@ -45,11 +29,9 @@ def monte_carlo_probalistic_engagment_zone(
     agentPositionSamples=None,
 ):
     if pursurPositionSamples is None:
-        # randomly sample from the pursuer position distribution
         pursurPositionSamples = np.random.multivariate_normal(
             pursuerPosition.squeeze(), pursuerPositionCov, numMonteCarloTrials
         )
-    # randomly sample from the pursuer position distribution
 
     numInEngagementZone = 0
     for i, pursuerPositionSample in enumerate(pursurPositionSamples):
@@ -119,7 +101,6 @@ def probabalisticEngagementZone(
     pursuerSpeed,
     agentSpeed,
 ):
-    start = time.time()
     rotationMinusHeading = np.array(
         [
             [np.cos(agentHeading), np.sin(agentHeading)],
@@ -168,7 +149,6 @@ def probabalisticEngagementZone(
     return diffDistribution.cdf(0)
 
 
-# @jit
 def probabalisticEngagementZoneTemp(
     agentPosition,
     agentHeading,

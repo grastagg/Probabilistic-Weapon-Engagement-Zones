@@ -1,35 +1,20 @@
-import numpy as np
-import json
+"""Plotting helpers for deterministic and probabilistic engagement zones."""
 
+import matplotlib
 import matplotlib.pyplot as plt
-import jax.numpy as jnp
-from jax import jacfwd, value_and_grad
-
-from scipy.stats import norm
+import numpy as np
 import time
-from jax import jit
 import jax
-from jax import vmap
+import jax.numpy as jnp
 
 jax.config.update("jax_enable_x64", True)
 
-# jax.config.update("jax_platform_name", "cpu")
-# jax.default_device(jax.devices("cpu")[0])
-# jax.config.update("jax_platform_name", "cpu")
-
-
-from math import erf, sqrt
-from math import erfc
-import matplotlib
-
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
-plt.rcParams["mathtext.fontset"] = "cm"  # Computer Modern
+plt.rcParams["mathtext.fontset"] = "cm"
 plt.rcParams["mathtext.rm"] = "serif"
-# get rid of type 3 fonts
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
-# set font size for title, axis labels, and legend, and tick labels
 matplotlib.rcParams["axes.titlesize"] = 14
 matplotlib.rcParams["axes.labelsize"] = 12
 matplotlib.rcParams["legend.fontsize"] = 10

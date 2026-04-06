@@ -1,76 +1,18 @@
-import numpy as np
+"""Deterministic BEZ boundary functions.
 
-import matplotlib.pyplot as plt
-import jax.numpy as jnp
-from jax import jacfwd, value_and_grad
+The repository uses these functions as the baseline deterministic engagement
+zone model. Public names are preserved exactly because they are imported in
+multiple other folders.
+"""
 
-from scipy.stats import norm
-import time
-from jax import jit
 import jax
+import jax.numpy as jnp
+import numpy as np
 from jax import vmap
 
 jax.config.update("jax_enable_x64", True)
 
-# jax.config.update("jax_platform_name", "cpu")
-# jax.default_device(jax.devices("cpu")[0])
-# jax.config.update("jax_platform_name", "cpu")
 
-
-from math import erf, sqrt
-from math import erfc
-import matplotlib
-
-
-# @jit
-# def inEngagementZoneJax(
-#     agentPosition,
-#     agentHeading,
-#     pursuerPosition,
-#     pursuerRange,
-#     pursuerCaptureRange,
-#     pursuerSpeed,
-#     agentSpeed,
-# ):
-#     rotationMinusHeading = jnp.array(
-#         [
-#             [jnp.cos(agentHeading), jnp.sin(agentHeading)],
-#             [-jnp.sin(agentHeading), jnp.cos(agentHeading)],
-#         ]
-#     )
-#     pursuerPositionHat = rotationMinusHeading @ (pursuerPosition - pursuerPosition)
-#     agentPositionHat = rotationMinusHeading @ (agentPosition - pursuerPosition)
-#
-#     speedRatio = agentSpeed / pursuerSpeed
-#     # jax.debug.print("agentPosition jax: {x}", x=agentPosition)
-#     # jax.debug.print("pursuerPosition jax: {x}", x=pursuerPosition)
-#     distance = jnp.linalg.norm(agentPosition - pursuerPosition)
-#     # epsilon = agentHeading + np.arctan2(agentPosition[1] - pursuerPosition[1], pursuerPosition[0] - agentPosition[0])
-#     # epsilon = np.arctan2(agentPositionHat[1] - pursuerPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
-#     epsilon = jnp.arctan2(
-#         pursuerPositionHat[1] - agentPositionHat[1],
-#         pursuerPositionHat[0] - agentPositionHat[0],
-#     )
-#     # print(epsilon)
-#     rho = (
-#         speedRatio
-#         * pursuerRange
-#         * (
-#             jnp.cos(epsilon)
-#             + jnp.sqrt(
-#                 jnp.cos(epsilon) ** 2
-#                 - 1
-#                 + (pursuerRange + pursuerCaptureRange) ** 2
-#                 / (speedRatio**2 * pursuerRange**2)
-#             )
-#         )
-#     )
-#
-#     # return distnce < rho
-#     # jax.debug.print("rho jax: {x}", x=rho)
-#     # jax.debug.print("distance jax: {x}", x=distance)
-#     # return distance - rho[0]
-#     return distance - rho
 def inEngagementZoneJax(
     agentPosition,
     agentHeading,
@@ -80,18 +22,17 @@ def inEngagementZoneJax(
     pursuerSpeed,
     agentSpeed,
 ):
+    """Return the implicit BEZ boundary function evaluated with JAX."""
     x_p = pursuerPosition[0]
     y_p = pursuerPosition[1]
     x_e, y_e = agentPosition
     psi_e = agentHeading
-    nu = agentSpeed / pursuerSpeed
-    R = pursuerRange
-    r = pursuerCaptureRange
+    speed_ratio = agentSpeed / pursuerSpeed
 
     return (
-        (x_e - x_p + nu * R * jnp.cos(psi_e)) ** 2
-        + (y_e - y_p + nu * R * jnp.sin(psi_e)) ** 2
-        - (R + r) ** 2
+        (x_e - x_p + speed_ratio * pursuerRange * jnp.cos(psi_e)) ** 2
+        + (y_e - y_p + speed_ratio * pursuerRange * jnp.sin(psi_e)) ** 2
+        - (pursuerRange + pursuerCaptureRange) ** 2
     )
 
 
@@ -104,17 +45,20 @@ def inEngagementZoneJaxVectorized(
     pursuerSpeed,
     agentSpeed,
 ):
-    single_agent_prob = lambda agentPosition, agentHeading: inEngagementZoneJax(
-        agentPosition,
-        agentHeading,
-        pursuerPosition,
-        pursuerRange,
-        pursuerCaptureRange,
-        pursuerSpeed,
-        agentSpeed,
-    )
-    # agentPosition = agentPosition.reshape(-1, 1)
-    return vmap(single_agent_prob)(agentPositions, agentHeadings)
+    """Vectorized JAX BEZ evaluation over many agent states."""
+
+    def single_agent_value(agentPosition, agentHeading):
+        return inEngagementZoneJax(
+            agentPosition,
+            agentHeading,
+            pursuerPosition,
+            pursuerRange,
+            pursuerCaptureRange,
+            pursuerSpeed,
+            agentSpeed,
+        )
+
+    return vmap(single_agent_value)(agentPositions, agentHeadings)
 
 
 def inEngagementZone(
@@ -126,26 +70,22 @@ def inEngagementZone(
     pursuerSpeed,
     agentSpeed,
 ):
-    rotationMinusHeading = np.array(
+    """Return ``distance - rho`` for the deterministic BEZ geometry."""
+    rotation_minus_heading = np.array(
         [
             [np.cos(agentHeading), np.sin(agentHeading)],
             [-np.sin(agentHeading), np.cos(agentHeading)],
         ]
     )
-    pursuerPositionHat = rotationMinusHeading @ (pursuerPosition - pursuerPosition)
-    agentPositionHat = rotationMinusHeading @ (agentPosition - pursuerPosition)
+    pursuerPositionHat = rotation_minus_heading @ (pursuerPosition - pursuerPosition)
+    agentPositionHat = rotation_minus_heading @ (agentPosition - pursuerPosition)
 
     speedRatio = agentSpeed / pursuerSpeed
-    # print("agentPosition not jax: ", agentPosition)
-    # print("pursuerPosition not jax: ", pursuerPosition)
     distance = np.linalg.norm(agentPosition - pursuerPosition)
-    # epsilon = agentHeading + np.arctan2(agentPosition[1] - pursuerPosition[1], pursuerPosition[0] - agentPosition[0])
-    # epsilon = np.arctan2(agentPositionHat[1] - pursuerPositionHat[1], pursuerPositionHat[0] - agentPositionHat[0])
     epsilon = np.arctan2(
         pursuerPositionHat[1] - agentPositionHat[1],
         pursuerPositionHat[0] - agentPositionHat[0],
     )
-    # print(epsilon)
     rho = (
         speedRatio
         * pursuerRange
@@ -160,8 +100,4 @@ def inEngagementZone(
         )
     )
 
-    # return distance < rho
-    # print("rho not jax: ", rho)
-    # print("distance not jax: ", distance)
     return distance - rho
-    # return rho
