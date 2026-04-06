@@ -1,14 +1,10 @@
-import enum
-import os
+"""Plotting helpers and figure-generation scripts for the CSBEZ model."""
 
-from jax.lax import random_gamma_grad
-from matplotlib.markers import MarkerStyle
 import numpy as np
 import time
 import matplotlib.pyplot as plt
 from matplotlib import patches
 
-import jax
 import jax.numpy as jnp
 
 
@@ -35,10 +31,7 @@ matplotlib.rcParams["xtick.labelsize"] = 10
 
 
 def _arc_between_points(center, radius, p_start, p_end, ccw=True, num=200):
-    """
-    Compute points on an arc from p_start to p_end around `center`
-    with radius `radius`, going CCW or CW.
-    """
+    """Compute sampled points on an arc between two points on the same circle."""
     ang1 = np.arctan2(p_start[1] - center[1], p_start[0] - center[0])
     ang2 = np.arctan2(p_end[1] - center[1], p_end[0] - center[0])
 
@@ -58,6 +51,7 @@ def _arc_between_points(center, radius, p_start, p_end, ccw=True, num=200):
 
 
 def plot_turn_radius_circles(startPosition, startHeading, turnRadius, ax):
+    """Plot the left and right turning circles for a Dubins pursuer."""
     theta = np.linspace(0, 2 * np.pi, 100)
     leftCenter = np.array(
         [
@@ -92,6 +86,7 @@ def plot_dubins_EZ(
     alpha=1.0,
     label="CSBEZ",
 ):
+    """Plot the zero contour of the Dubins-style CSBEZ boundary."""
     numPoints = 1000
     rangeX = 8.2
     x = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -148,6 +143,7 @@ def plot_dubins_path(
     path_type="LS",  # "LS" = left-then-straight, "RS" = right-then-straight
     width=3,
 ):
+    """Plot a Dubins path composed of one turn arc and one straight segment."""
     # Compute circle centers from start pose
     leftCenter = np.array(
         [
@@ -204,6 +200,7 @@ def plot_dubins_reachable_set(
     alpha=1.0,
     numPoints=2000,
 ):
+    """Plot the reachable-set boundary induced by Dubins kinematics."""
     rangeX = 8.0
     x = np.linspace(-rangeX, rangeX, numPoints)
     y = np.linspace(-rangeX, rangeX, numPoints)
@@ -358,6 +355,7 @@ def plot_test_grad(
 
 
 def add_arrow(ax, start, end, color, label, annotationFontSize):
+    """Draw a labeled arrow and return a legend proxy artist."""
     # Draw arrow on plot
     # arrow = FancyArrowPatch(start, end, arrowstyle="->", color=color, lw=2)
     arrow = patches.FancyArrowPatch(

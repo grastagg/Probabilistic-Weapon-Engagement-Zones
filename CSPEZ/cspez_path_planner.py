@@ -1,14 +1,11 @@
+"""Probabilistic CSPEZ-constrained spline path planning utilities."""
+
 import os
 import numpy as np
-import matplotlib.gridspec as gridspec
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from pyoptsparse import Optimization, OPT, IPOPT
+from pyoptsparse import Optimization, OPT
 from scipy.interpolate import BSpline
 import time
-from tqdm import tqdm
 from jax import jacfwd
-from jax import jit
-from functools import partial
 import jax.numpy as jnp
 import getpass
 import matplotlib.pyplot as plt
@@ -61,6 +58,7 @@ def plot_spline(
     pez_limit=0.2,
     label=False,
 ):
+    """Plot a spline together with optional Monte Carlo PEZ values along it."""
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
@@ -168,6 +166,7 @@ def dubins_PEZ_along_spline_nn(
     pursuerTurnRadiusVar,
     agentSpeed,
 ):
+    """Evaluate neural-network PEZ predictions along a spline trajectory."""
     numControlPoints = int(len(controlPoints) / 2)
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf, numControlPoints, 3
@@ -217,6 +216,7 @@ def dubins_PEZ_along_spline_linear(
     pursuerTurnRadiusVar,
     agentSpeed,
 ):
+    """Evaluate linearized PEZ predictions along a spline trajectory."""
     numControlPoints = int(len(controlPoints) / 2)
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf, numControlPoints, 3
@@ -266,6 +266,7 @@ def dubins_PEZ_along_spline_quadratic(
     pursuerTurnRadiusVar,
     agentSpeed,
 ):
+    """Evaluate quadratic PEZ predictions along a spline trajectory."""
     numControlPoints = int(len(controlPoints) / 2)
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf, numControlPoints, 3
@@ -312,6 +313,7 @@ def compute_spline_constraints_for_dubins_PEZ_nn(
     pursuerTurnRadiusVar,
     agentSpeed,
 ):
+    """Return spline kinematics and neural-network PEZ values."""
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
@@ -358,6 +360,7 @@ def compute_spline_constraints_for_dubins_PEZ_linear(
     pursuerTurnRadiusVar,
     agentSpeed,
 ):
+    """Return spline kinematics and linearized PEZ values."""
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
@@ -404,6 +407,7 @@ def compute_spline_constraints_for_dubins_PEZ_quadratic(
     pursuerTurnRadiusVar,
     agentSpeed,
 ):
+    """Return spline kinematics and quadratic PEZ values."""
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
@@ -435,6 +439,7 @@ def compute_spline_constraints_for_dubins_PEZ_quadratic(
 
 
 def create_spline(knotPoints, controlPoints, order):
+    """Construct a SciPy B-spline object from knot and control-point data."""
     spline = BSpline(knotPoints, controlPoints, order)
     return spline
 
@@ -454,6 +459,7 @@ dDubinsPEZDtf_quadratic = jax.jit(jacfwd(dubins_PEZ_along_spline_quadratic, argn
 
 
 def rect_left_and_top(lower_left, upper_right, n_points_total):
+    """Create an L-shaped initial guess along the left and top edges of a box."""
     x1, y1 = lower_left
     x2, y2 = upper_right
 
@@ -508,6 +514,7 @@ def optimize_spline_path(
     quadraticPez=False,
     neuralNetworkPez=False,
 ):
+    """Solve the CSPEZ-constrained spline optimization problem."""
     if linearPez:
         compute_spline_constraints_for_dubins_PEZ = (
             compute_spline_constraints_for_dubins_PEZ_linear
@@ -787,6 +794,7 @@ def compare_pez_limits(
     ylabel=False,
     label=False,
 ):
+    """Plot optimized splines for a list of PEZ constraint limits."""
     # numFigures = len(pez_limits)
     # # two rows
     # fig, axs = plt.subplots(2, numFigures // 2, layout="tight")

@@ -1,19 +1,11 @@
-import os
-
-
-from operator import inv
-from jax.profiler import start_trace, stop_trace
+"""Plotting helpers and diagnostic scripts for CSPEZ approximations."""
 
 import os
-from jax.lax import le
 import numpy as np
-import chaospy as cp
 
 import jax.numpy as jnp
 import jax
 import time
-
-from scipy.stats import zmap
 
 
 import matplotlib.pyplot as plt
@@ -67,6 +59,7 @@ def plot_dubins_PEZ(
     labelY=True,
     levels=None,
 ):
+    """Plot PEZ contours for one selected CSPEZ approximation method."""
     rangeX = 5.5
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -304,6 +297,7 @@ def plot_dubins_PEZ_diff(
     plotColorBar=False,
     ylabel=False,
 ):
+    """Plot absolute error against the Monte Carlo PEZ baseline."""
     rangeX = 1.5
     x = jnp.linspace(-rangeX, rangeX, numPoints)
     y = jnp.linspace(-rangeX, rangeX, numPoints)
@@ -558,6 +552,7 @@ def plot_EZ_vs_pursuer_range(
     evaderHeading,
     evaderSpeed,
 ):
+    """Diagnostic plot of the Dubins EZ value versus pursuer heading samples."""
     fig, ax = plt.subplots()
     # pursuerHeading = np.linspace(-np.pi, np.pi, 100)
     # turn radius derivat
@@ -607,6 +602,7 @@ def plot_EZ_vs_pursuer_range(
 
 
 def plot_normal(mean, var, ax, label):
+    """Plot a Gaussian PDF with the provided mean and variance."""
     x = np.linspace(mean - 3 * np.sqrt(var), mean + 3 * np.sqrt(var), 100)
     y = jax.scipy.stats.norm.pdf(x, mean, np.sqrt(var))
     ax.plot(x, y, label=label)
@@ -628,6 +624,7 @@ def compare_distribution(
     pursuerRangeVar,
     captureRadius,
 ):
+    """Compare Monte Carlo and local approximation distributions for one state."""
     (
         inEZ,
         ez,
@@ -932,6 +929,7 @@ def compare_distribution(
 
 
 def plot_heading_vector(pursuerPosition, pursuerHeading, pursuerPositionCov, ax):
+    """Plot the pursuer heading and covariance eigenvectors."""
     ax.quiver(
         pursuerPosition[0],
         pursuerPosition[1],
@@ -973,6 +971,7 @@ def compare_PEZ(
     evaderHeading,
     evaderSpeed,
 ):
+    """Render several CSPEZ approximations side by side."""
     fig, axes = plt.subplots(2, 2, figsize=(4, 4), layout="constrained")
     linEZ = plot_dubins_PEZ(
         pursuerPosition,
@@ -1102,6 +1101,7 @@ def plot_all_error(
     evaderHeading,
     evaderSpeed,
 ):
+    """Render approximation error heatmaps relative to the Monte Carlo baseline."""
     evaderHeading = jnp.array([(0 / 20) * np.pi])
     fig, axes = plt.subplots(1, 3, constrained_layout=True, figsize=(6, 2.5))
     linEZ = plot_dubins_PEZ_diff(
@@ -1183,6 +1183,7 @@ def plot_all_error(
 
 
 def main():
+    """Run the standalone CSPEZ comparison and error-plot demo."""
     pursuerPosition = np.array([0.0, 0.0])
     pursuerPositionCov = np.array([[0.025, 0.04], [0.04, 0.1]])
     # pursuerPositionCov = np.array([[0.5, 0.0], [0.0, 0.25]])

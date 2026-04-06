@@ -1,12 +1,10 @@
+"""Deterministic CSBEZ-constrained spline path planning utilities."""
+
 import numpy as np
 import time
-from pyoptsparse import Optimization, OPT, IPOPT
+from pyoptsparse import Optimization, OPT
 from scipy.interpolate import BSpline
-import time
-from tqdm import tqdm
 from jax import jacfwd
-from jax import jit
-from functools import partial
 import jax.numpy as jnp
 import getpass
 import matplotlib.pyplot as plt
@@ -26,7 +24,6 @@ import CSPEZ.csbez_plotting as csbez_plotting
 # import pez_path_planner
 import PEZ.pez_path_planner as pez_path_planner
 import PEZ.pez_plotting as pez_plotting
-import PLOT_COMMON.draw_mahalanobis as draw_mahalanobis
 
 import bspline.spline_opt_tools as spline_opt_tools
 
@@ -46,6 +43,7 @@ def plot_spline(
     agentSpeed,
     ax,
 ):
+    """Plot a spline trajectory generated under deterministic CSBEZ constraints."""
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
@@ -99,6 +97,7 @@ def dubins_EZ_along_spline(
     pursuerTurnRadius,
     agentSpeed,
 ):
+    """Evaluate deterministic CSBEZ values along a spline trajectory."""
     numControlPoints = int(len(controlPoints) / 2)
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf, numControlPoints, 3
@@ -135,6 +134,7 @@ def compute_spline_constraints_for_dubins_EZ_deterministic(
     turnRadius,
     agentSpeed,
 ):
+    """Return spline kinematics and deterministic CSBEZ values."""
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
@@ -162,6 +162,7 @@ def compute_spline_constraints_for_dubins_EZ_deterministic(
 
 
 def create_spline(knotPoints, controlPoints, order):
+    """Construct a SciPy B-spline object from knot and control-point data."""
     spline = BSpline(knotPoints, controlPoints, order)
     return spline
 
@@ -189,6 +190,7 @@ def optimize_spline_path(
     pursuerTurnRadius,
     agentSpeed,
 ):
+    """Solve the deterministic CSBEZ-constrained spline optimization problem."""
     # Compute Jacobian of engagement zone function
 
     def objfunc(xDict):
