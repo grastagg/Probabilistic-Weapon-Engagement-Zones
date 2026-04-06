@@ -306,19 +306,19 @@ def plot_potential_BEZS():
     agentInitialHeading = 0.0
     agentHeadingVar = 0.0
 
-    numPotentialBEZS = 500
+    numPotentialBEZS = 100
     fig, ax = plt.subplots(1, 1)
-    plotEngagementZone(
-        agentInitialHeading,
-        pursuerInitialPosition,
-        pursuerRange,
-        pursuerCaptureRange,
-        pursuerSpeed,
-        agentSpeed,
-        ax,
-        alpha=1.0,
-        width=2.5,
-    )
+    # plotEngagementZone(
+    #     agentInitialHeading,
+    #     pursuerInitialPosition,
+    #     pursuerRange,
+    #     pursuerCaptureRange,
+    #     pursuerSpeed,
+    #     agentSpeed,
+    #     ax,
+    #     alpha=1.0,
+    #     width=2.5,
+    # )
     draw_mahalanobis.plotMahalanobisDistance(
         pursuerInitialPosition, pursuerPositionCov, ax, fig, plotColorbar=False
     )
@@ -334,7 +334,8 @@ def plot_potential_BEZS():
             pursuerSpeed,
             agentSpeed,
             ax,
-            alpha=0.2,
+            alpha=0.1,
+            width=3,
         )
         ax.scatter(
             potentialPursuerPosition[0], potentialPursuerPosition[1], color="red"
@@ -344,11 +345,12 @@ def plot_potential_BEZS():
     plt.yticks([])
     plt.xlabel("")
     plt.ylabel("")
-    ax.scatter(*pursuerInitialPosition, color="darkred", s=80)
+    # ax.scatter(*pursuerInitialPosition, color="darkred", s=80)
 
     ax.set_aspect("equal")
     ax.set_xlim([-2, 2])
     ax.set_ylim([-2, 2])
+    plt.box(False)
     plt.show()
 
 
@@ -509,5 +511,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-    # plot_potential_BEZS()
+    # main()
+    plot_potential_BEZS()
