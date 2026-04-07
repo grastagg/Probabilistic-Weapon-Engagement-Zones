@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 
 
 import PLOT_COMMON.draw_airplanes as draw_airplanes
-import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
-import GEOMETRIC_BEZ.rectangle_bez_path_planner as rectangle_bez_path_planner
+import GEOMETRIC_BEZ.bez_from_interceptions as bez_from_interceptions
+import GEOMETRIC_BEZ.bez_from_interceptions_path_planner as bez_from_interceptions_path_planner
 
 
 def ouq_inner_circle_for_alpha(
@@ -23,33 +23,70 @@ def ouq_inner_circle_for_alpha(
     y_center,
     radius,
 ):
-    pass
+    s = (1 - alpha) / alpha
+    x_center_new = x_pmean - s * (x_center - x_pmean)
+    y_center_new = y_pmean - s * (y_center - y_pmean)
+    radius_new = s * radius
+    return x_center_new, y_center_new, radius_new
 
 
-def max_rectangle_in_bounds(x0, y0, q, Xmin, Xmax, Ymin, Ymax):
-    """Return the largest rectangle around `(x0, y0)` satisfying OUQ mass fraction `q`."""
-    if not (0.0 < q < 1.0):
-        raise ValueError("q must be in (0,1)")
+def ouq_inner_shape_for_alpha(
+    alpha,
+    x_pmean,
+    y_pmean,
+    x_center,
+    y_center,
+    radius,
+):
+    x_center_new, y_center_new, radius_new = ouq_inner_circle_for_alpha(
+        alpha, x_pmean, y_pmean, x_center, y_center, radius
+    )
+    centers = np.array([[x_center, y_center], [x_center_new, y_center_new]])
+    radii = np.array([radius, radius_new])
+    arcs = bez_from_interceptions.intersection_arcs(
+        centers=centers,
+        radii=radii,
+    )
+    return arcs
 
-    W = min((x0 - Xmin) / (1.0 - q), (Xmax - x0) / q)
-    H = min((y0 - Ymin) / (1.0 - q), (Ymax - y0) / q)
 
-    xmin = x0 - (1.0 - q) * W
-    xmax = x0 + q * W
-    ymin = y0 - (1.0 - q) * H
-    ymax = y0 + q * H
-
-    return xmin, xmax, ymin, ymax
+def plot_ouq_contour(
+    alpha,
+    x_pmean,
+    y_pmean,
+    x_center,
+    y_center,
+    radius,
+    pursuerRange,
+    captureRadius,
+    pursuerSpeed,
+    evaderSpeed,
+    evaderHeading,
+    ax,
+):
+    arcs = ouq_inner_shape_for_alpha(
+        alpha, x_pmean, y_pmean, x_center, y_center, radius
+    )
+    bez_from_interceptions.plot_potential_pursuer_engagement_zone(
+        arcs,
+        pursuerRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderHeading,
+        evaderSpeed,
+        xlim=(-6, 6),
+        ylim=(-6, 6),
+        ax=ax,
+    )
 
 
 def plan_ouq_path(
     pez_limit,
     meanX,
     meanY,
-    minX,
-    maxX,
-    minY,
-    maxY,
+    supportCenterX,
+    supportCenterY,
+    supportRadius,
     pursuerRange,
     pursuerCaptureRadius,
     pursuerSpeed,
@@ -63,10 +100,6 @@ def plan_ouq_path(
     turn_rate_constraints,
     curvature_constraints,
 ):
-    """Plan a box-BEZ path using the OUQ inner rectangle at level `pez_limit`."""
-    minXlim, maxXlim, minYlim, maxYlim = ouq_inner_rectangle_for_alpha(
-        pez_limit, meanX, meanY, minX, maxX, minY, maxY
-    )
     print("minXlim, maxXlim, minYlim, maxYlim:", minXlim, maxXlim, minYlim, maxYlim)
     spline, tf = rectangle_bez_path_planner.plan_path_box_BEZ(
         np.array([minXlim, minYlim]),
@@ -101,91 +134,29 @@ def main():
     speedRatio = evaderSpeed / pursuerSpeed
     captureRadius = 0.1
     pursuerRange = 1.0
-    minX = -2.0
-    maxX = 2.0
-    minY = -1.0
-    maxY = 1.0
+    supportCenterX = 0.0
+    supportCenterY = 0.0
+    supportRadius = 2.0
     meanX = -1.2
     meanY = 0.7
-    test = max_ouq_prob_pursuer_position_uncertainty_single(
-        2.0,
-        1.4,
-        0.0,
-        pursuerRange,
-        captureRadius,
-        speedRatio,
-        meanX,
-        meanY,
-        minX,
-        maxX,
-        minY,
-        maxY,
-    )
-    print(test)
-    prob = max_ouq_prob_pursuer_position_uncertainty(
-        points[:, 0],
-        points[:, 1],
-        psi,
-        pursuerRange,
-        captureRadius,
-        speedRatio,
-        meanX,
-        meanY,
-        minX,
-        maxX,
-        minY,
-        maxY,
-    )
 
+    pez_limits = [0.1, 0.2, 0.3, 0.4, 0.5]
     fig, ax = plt.subplots()
-    ax.grid(True)
-    c = ax.contour(
-        X,
-        Y,
-        prob.reshape(X.shape),
-        cmap="viridis",
-        shading="auto",
-        levels=np.arange(0, 1.2, 0.1),
-    )
-    # inline labels for contours
-    clabels = ax.clabel(c, inline=True, fontsize=8, fmt="%.1f")
-
-    # c = ax.pcolormesh(X, Y, prob.reshape(X.shape), cmap="viridis", shading="auto")
-    ax.set_aspect("equal")
-    plt.colorbar(c, label="Max Probability of Capture")
-    plt.xlabel("X Position")
-    plt.ylabel("Y Position")
-    # plot minx, maxx, miny, maxy box
-    plt.plot([minX, maxX, maxX, minX, minX], [minY, minY, maxY, maxY, minY], "r--")
-    plt.scatter(meanX, meanY, color="red", label="Mean Position")
-
-    ax.set_xlim(-4, 4)
-    ax.set_ylim(-4, 4)
-
-    pez_limit = 0.3
-    minXlim, maxXlim, minYlim, maxYlim = ouq_inner_rectangle_for_alpha(
-        pez_limit, meanX, meanY, minX, maxX, minY, maxY
-    )
-    # plot rectangle to be expanded for alpha
-    plt.plot(
-        [minXlim, maxXlim, maxXlim, minXlim, minXlim],
-        [minYlim, minYlim, maxYlim, maxYlim, minYlim],
-        "g--",
-        label=f"OUQ Inner Rectangle for alpha={pez_limit}",
-    )
-    rectangle_bez.plot_box_pursuer_engagement_zone(
-        np.array([minXlim, minYlim]),
-        np.array([maxXlim, maxYlim]),
-        pursuerRange,
-        captureRadius,
-        pursuerSpeed,
-        psi[0],
-        evaderSpeed,
-        (-4, 4),
-        (-4, 4),
-        ax,
-        color="green",
-    )
+    for pez_limit in pez_limits:
+        plot_ouq_contour(
+            pez_limit,
+            meanX,
+            meanY,
+            supportCenterX,
+            supportCenterY,
+            supportRadius,
+            pursuerRange,
+            captureRadius,
+            pursuerSpeed,
+            evaderSpeed,
+            psi,
+            ax,
+        )
 
     plt.show()
 
