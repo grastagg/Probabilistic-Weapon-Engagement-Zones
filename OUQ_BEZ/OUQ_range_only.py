@@ -1,16 +1,8 @@
-from jax._src.source_info_util import current
+"""OUQ approximations for engagement zones with range-only pursuer uncertainty."""
+
 import numpy as np
-import json
-from pyoptsparse import Optimization, OPT, IPOPT
-from scipy.interpolate import BSpline
-import time
-from tqdm import tqdm
-from jax import jacfwd
-from jax import jit
 import jax
-from functools import partial
 import jax.numpy as jnp
-import getpass
 import matplotlib.pyplot as plt
 import matplotlib
 
@@ -43,6 +35,7 @@ def max_prob_single(
     maxRange,
     meanRange,
 ):
+    """Return the worst-case capture probability under range-only OUQ bounds."""
     x, y = evaderPosition
 
     a = speedRatio**2 - 1.0
@@ -89,6 +82,7 @@ def prob_uniform_single(
     minRange,
     maxRange,
 ):
+    """Return the capture probability under a uniform range prior."""
     x, y = evaderPosition
 
     a = speedRatio**2 - 1.0
@@ -146,6 +140,7 @@ def ouq_range_only_path(
     num_constraint_samples,
     pez_limit,
 ):
+    """Plan a conservative BEZ path induced by the OUQ range threshold."""
     safetyProbThresholdRange = np.clip(
         (meanRange - minRange) / pez_limit + minRange, meanRange, maxRange
     )
@@ -186,6 +181,7 @@ def uniform_range_only_path(
     num_constraint_samples,
     pez_limit,
 ):
+    """Plan a BEZ path induced by a uniform range-uncertainty threshold."""
     safetyProbThresholdRange = np.clip(
         maxRange - pez_limit * (maxRange - minRange), minRange, maxRange
     )
@@ -221,6 +217,7 @@ def plot_prob_contours(
     ax,
     plotMinMax=True,
 ):
+    """Plot OUQ probability contours for the range-only uncertainty model."""
     psiS = psi
     psi = np.ones(500 * 500) * psi
     x = np.linspace(-4, 4, 500)
@@ -308,6 +305,7 @@ def plot_prob_contours(
 
 
 def main_max():
+    """Run the max-probability range-only OUQ visualization demo."""
     x = np.linspace(-4, 4, 500)
     y = np.linspace(-4, 4, 500)
     X, Y = np.meshgrid(x, y)
@@ -398,6 +396,7 @@ def main_max():
 
 
 def main_uniform():
+    """Run the uniform-range OUQ visualization demo."""
     x = np.linspace(-4, 4, 500)
     y = np.linspace(-4, 4, 500)
     X, Y = np.meshgrid(x, y)
@@ -487,6 +486,7 @@ def main_uniform():
 
 
 def animate_spline_path():
+    """Render animation frames for the range-only OUQ path-planning demo."""
     initialEvaderPosition = np.array([-4.0, -4.0])
     finalEvaderPosition = np.array([4.0, 4.0])
     initialEvaderVelocity = np.array([1.0, 0.0])

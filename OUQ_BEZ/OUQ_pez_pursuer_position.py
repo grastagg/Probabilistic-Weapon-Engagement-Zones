@@ -1,3 +1,5 @@
+"""OUQ approximations for uncertain pursuer position inside a rectangular support."""
+
 from jax import config
 
 config.update("jax_enable_x64", True)
@@ -205,6 +207,7 @@ def compute_prob(a, p, xmin, xmax, ymin, ymax, tol=1e-9):
 
 
 def point_in_box(a, xmin, xmax, ymin, ymax):
+    """Return whether a point lies inside the axis-aligned support box."""
     x_a, y_a = a
     return (x_a >= xmin) & (x_a <= xmax) & (y_a >= ymin) & (y_a <= ymax)
 
@@ -223,6 +226,7 @@ def max_ouq_prob_pursuer_position_uncertainty_single(
     y_pmin,
     y_pmax,
 ):
+    """Return the OUQ worst-case capture probability for one evader state."""
     # circle where if pursuer is inside the evader is in the EZ
     c_x = x_e + speedRatio * pursuerRange * jnp.cos(psi_e)
     c_y = y_e + speedRatio * pursuerRange * jnp.sin(psi_e)
@@ -404,6 +408,7 @@ def ouq_inner_rectangle_for_alpha(
 
 
 def max_rectangle_in_bounds(x0, y0, q, Xmin, Xmax, Ymin, Ymax):
+    """Return the largest rectangle around `(x0, y0)` satisfying OUQ mass fraction `q`."""
     if not (0.0 < q < 1.0):
         raise ValueError("q must be in (0,1)")
 
@@ -439,6 +444,7 @@ def plan_ouq_path(
     turn_rate_constraints,
     curvature_constraints,
 ):
+    """Plan a box-BEZ path using the OUQ inner rectangle at level `pez_limit`."""
     minXlim, maxXlim, minYlim, maxYlim = ouq_inner_rectangle_for_alpha(
         pez_limit, meanX, meanY, minX, maxX, minY, maxY
     )
@@ -464,6 +470,7 @@ def plan_ouq_path(
 
 
 def main():
+    """Run the OUQ pursuer-position contour and inner-rectangle demo."""
     x = np.linspace(-4, 4, 500)
     y = np.linspace(-4, 4, 500)
     X, Y = np.meshgrid(x, y)
@@ -565,6 +572,7 @@ def main():
 
 
 def animate_spline_path():
+    """Render animation frames for the OUQ pursuer-position path-planning demo."""
     initialEvaderPosition = np.array([-4.0, -4.0])
     finalEvaderPosition = np.array([4.0, 4.0])
     initialEvaderVelocity = np.array([1.0, 0.0])

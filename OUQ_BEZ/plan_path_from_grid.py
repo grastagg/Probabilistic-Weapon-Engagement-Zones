@@ -1,14 +1,11 @@
-from jax._src.source_info_util import current
+"""Grid-driven OUQ/PEZ interpolation and spline path planning utilities."""
+
 import numpy as np
 import json
-from pyoptsparse import Optimization, OPT, IPOPT
+from pyoptsparse import Optimization, OPT
 from scipy.interpolate import BSpline
 import time
-from tqdm import tqdm
-from jax import jacfwd
-from jax import jit
 import jax
-from functools import partial
 import jax.numpy as jnp
 import getpass
 import matplotlib.pyplot as plt
@@ -36,8 +33,6 @@ matplotlib.rcParams["xtick.labelsize"] = 10
 
 import bspline.spline_opt_tools as spline_opt_tools
 import PEZ.pez as pez
-import PEZ.pez_plotting as pez_plotting
-import PLOT_COMMON.draw_mahalanobis as draw_mahalanobis
 import GEOMETRIC_BEZ.rectangle_bez as rectangle_bez
 import PLOT_COMMON.draw_airplanes as draw_airplanes
 
@@ -45,6 +40,7 @@ numSamplesPerInterval = 5
 
 
 def load_grid_data(grid_file_path, param_file_path):
+    """Load a NumPy PEZ grid together with its stored grid metadata."""
     grid_data = np.load(grid_file_path)
     paramDict = json.load(open(param_file_path, "r"))
     return (
@@ -70,6 +66,7 @@ def plot_grid_data(
     ax=None,
     inLine=False,
 ):
+    """Plot contour levels from a precomputed PEZ/OUQ grid slice."""
     if levels is None:
         levels = np.linspace(0.1, 1, 10)
     if ax is None:
@@ -204,11 +201,13 @@ trilerp_uniform_periodic_psi = jax.jit(
 
 
 def create_spline(knotPoints, controlPoints, order):
+    """Construct a SciPy B-spline from knot and control-point arrays."""
     spline = BSpline(knotPoints, controlPoints, order)
     return spline
 
 
 def rect_left_and_top(lower_left, upper_right, n_points_total):
+    """Build an initial guess that follows the left and top rectangle edges."""
     x1, y1 = lower_left
     x2, y2 = upper_right
 
@@ -235,6 +234,7 @@ def rect_left_and_top(lower_left, upper_right, n_points_total):
 
 
 def rect_bottom_and_right(lower_left, upper_right, n_points_total):
+    """Build an initial guess that follows the bottom and right rectangle edges."""
     x1, y1 = lower_left
     x2, y2 = upper_right
 
@@ -275,6 +275,7 @@ def interp_PEZ_along_spline(
     npsi,
     P_yxpsi,
 ):
+    """Sample an interpolated PEZ grid along a spline trajectory."""
     numControlPoints = int(len(controlPoints) / 2)
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf, numControlPoints, 3
@@ -327,6 +328,7 @@ def compute_spline_constraints_for_interp_PEZ(
     npsi,
     P_yxpsi,
 ):
+    """Return spline kinematics and interpolated PEZ values for optimization."""
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
@@ -385,6 +387,7 @@ def optimize_spline_path_interp_Pez(
     previous_spline=None,
     pez_limit=0.1,
 ):
+    """Solve the spline optimization problem using interpolated PEZ values."""
     # Compute Jacobian of engagement zone function
 
     def objfunc(xDict):
@@ -648,6 +651,7 @@ def plan_path_interp_PEZ(
     curvature_constraints,
     pez_limit,
 ):
+    """Plan a path by comparing left- and right-initialized interpolated solutions."""
     splineLeft, tfLeft = optimize_spline_path_interp_Pez(
         initialEvaderPosition,
         finalEvaderPosition,
@@ -707,6 +711,7 @@ def plan_path_interp_PEZ(
 
 
 def load_jd2l_params(filepath):
+    """Load the scalar scenario parameters stored alongside a JLD2 grid file."""
     with h5py.File(filepath, "r") as f:
         print(f.keys())
         xMin = np.array(f["xTmin"])
@@ -721,6 +726,7 @@ def load_jd2l_params(filepath):
 
 
 def load_jd2l_data(filepath):
+    """Load a JLD2 OUQ/PEZ grid and convert it to the repo's `(x, y, psi)` layout."""
     with h5py.File(filepath, "r") as f:
         pez = np.array(f["P_max"]).squeeze()
         xs = np.array(f["xs"]).squeeze()
@@ -753,10 +759,12 @@ def load_jd2l_data(filepath):
 
 
 def plan_path_from_file(filepath):
+    """Load a grid file and prepare it for path planning."""
     pez, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_jd2l_data(filepath)
 
 
 def main():
+    """Run the interpolated-grid contour visualization demo."""
     grid_file_path = "OUQ_BEZ/xypsi_50.jld2"
     pez, minx, dx, nx, miny, dy, ny, minpsi, dpsi, npsi = load_jd2l_data(grid_file_path)
     xMin, xMax, yMin, yMax, speedRatio, minRange, maxRange, captureRadius = (
@@ -846,6 +854,7 @@ def main():
 
 
 def main_path():
+    """Run the interpolated-grid path-planning comparison demo."""
     initialEvaderPosition = np.array([-4.0, -4.0])
     finalEvaderPosition = np.array([4.0, 4.0])
     initialEvaderVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
@@ -940,6 +949,7 @@ def main_path():
 
 
 def create_lin_pez_grid(nX, nY, nPsi):
+    """Create and save a linearized PEZ grid together with its parameter metadata."""
     pursuerRange = 1.0
     pursuerRangeVar = 0.1
     pursuerCaptureRange = 0.1
@@ -1020,6 +1030,7 @@ def create_lin_pez_grid(nX, nY, nPsi):
 
 
 def animate_path():
+    """Render animation frames for the grid-driven path-planning demo."""
     initialEvaderPosition = np.array([-4.0, -4.0])
     finalEvaderPosition = np.array([4.0, 4.0])
     initialEvaderVelocity = np.array([1.0, 1.0]) / np.sqrt(2)
