@@ -15,31 +15,31 @@ import GEOMETRIC_BEZ.bez_from_interceptions as bez_from_interceptions
 import GEOMETRIC_BEZ.bez_from_interceptions_path_planner as bez_from_interceptions_path_planner
 
 
-def ouq_inner_circle_for_alpha(
-    alpha,
+def ouq_inner_circle_for_pez_limit(
+    pez_limit,
     x_pmean,
     y_pmean,
     x_center,
     y_center,
     radius,
 ):
-    s = (1 - alpha) / alpha
+    s = (1 - pez_limit) / pez_limit
     x_center_new = x_pmean - s * (x_center - x_pmean)
     y_center_new = y_pmean - s * (y_center - y_pmean)
     radius_new = s * radius
     return x_center_new, y_center_new, radius_new
 
 
-def ouq_inner_shape_for_alpha(
-    alpha,
+def ouq_inner_shape_for_pez_limit(
+    pez_limit,
     x_pmean,
     y_pmean,
     x_center,
     y_center,
     radius,
 ):
-    x_center_new, y_center_new, radius_new = ouq_inner_circle_for_alpha(
-        alpha, x_pmean, y_pmean, x_center, y_center, radius
+    x_center_new, y_center_new, radius_new = ouq_inner_circle_for_pez_limit(
+        pez_limit, x_pmean, y_pmean, x_center, y_center, radius
     )
     centers = np.array([[x_center, y_center], [x_center_new, y_center_new]])
     radii = np.array([radius, radius_new])
@@ -51,7 +51,41 @@ def ouq_inner_shape_for_alpha(
 
 
 def plot_ouq_contour(
-    alpha,
+    pez_limit,
+    x_pmean,
+    y_pmean,
+    x_center,
+    y_center,
+    radius,
+    pursuerRange,
+    captureRadius,
+    pursuerSpeed,
+    evaderSpeed,
+    evaderHeading,
+    ax,
+    color="green",
+):
+    arcs = ouq_inner_shape_for_pez_limit(
+        pez_limit, x_pmean, y_pmean, x_center, y_center, radius
+    )
+    bez_from_interceptions.plot_potential_pursuer_engagement_zone(
+        arcs,
+        pursuerRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderHeading[0],
+        evaderSpeed,
+        xlim=(-6, 6),
+        ylim=(-6, 6),
+        ax=ax,
+        color=color,
+        label=False,
+    )
+    return arcs
+
+
+def plot_ouq_contours(
+    pez_limits,
     x_pmean,
     y_pmean,
     x_center,
@@ -64,20 +98,33 @@ def plot_ouq_contour(
     evaderHeading,
     ax,
 ):
-    arcs = ouq_inner_shape_for_alpha(
-        alpha, x_pmean, y_pmean, x_center, y_center, radius
-    )
-    bez_from_interceptions.plot_potential_pursuer_engagement_zone(
-        arcs,
-        pursuerRange,
-        captureRadius,
-        pursuerSpeed,
-        evaderHeading,
-        evaderSpeed,
-        xlim=(-6, 6),
-        ylim=(-6, 6),
-        ax=ax,
-    )
+    # make color map for pez_limits
+    # pick a base colormap
+    cmap = plt.get_cmap("viridis")
+
+    # one color per pez limit
+    colors = cmap(np.linspace(0, 1, len(pez_limits)))
+    for i, pez_limit in enumerate(pez_limits):
+        arcs = plot_ouq_contour(
+            pez_limit,
+            x_pmean,
+            y_pmean,
+            x_center,
+            y_center,
+            radius,
+            pursuerRange,
+            captureRadius,
+            pursuerSpeed,
+            evaderSpeed,
+            evaderHeading,
+            ax,
+            color=colors[i],
+        )
+
+        bez_from_interceptions.plot_circle_intersection_arcs(
+            arcs, ax=ax, linestyle="--", color=colors[i], label=False
+        )
+        ax.plot([], [], color=colors[i], label=rf"$\epsilon$: {pez_limit:.1f}")
 
 
 def plan_ouq_path(
@@ -131,7 +178,6 @@ def main():
     pursuerSpeed = 1.0
     evaderSpeed = 0.5
 
-    speedRatio = evaderSpeed / pursuerSpeed
     captureRadius = 0.1
     pursuerRange = 1.0
     supportCenterX = 0.0
@@ -141,23 +187,37 @@ def main():
     meanY = 0.7
 
     pez_limits = [0.1, 0.2, 0.3, 0.4, 0.5]
-    fig, ax = plt.subplots()
-    for pez_limit in pez_limits:
-        plot_ouq_contour(
-            pez_limit,
-            meanX,
-            meanY,
-            supportCenterX,
-            supportCenterY,
-            supportRadius,
-            pursuerRange,
-            captureRadius,
-            pursuerSpeed,
-            evaderSpeed,
-            psi,
-            ax,
-        )
 
+    fig, ax = plt.subplots()
+
+    plot_ouq_contours(
+        pez_limits,
+        meanX,
+        meanY,
+        supportCenterX,
+        supportCenterY,
+        supportRadius,
+        pursuerRange,
+        captureRadius,
+        pursuerSpeed,
+        evaderSpeed,
+        psi,
+        ax,
+    )
+
+    # plot support circle
+    circle = plt.Circle(
+        (supportCenterX, supportCenterY),
+        supportRadius,
+        color="red",
+        fill=False,
+        linestyle="--",
+    )
+
+    ax.scatter(meanX, meanY, color="red", label="Pursuer Position Mean")
+    ax.add_artist(circle)
+    ax.set_aspect("equal")
+    plt.legend()
     plt.show()
 
 
@@ -274,5 +334,5 @@ def animate_spline_path():
 
 
 if __name__ == "__main__":
-    animate_spline_path()
-    # main()
+    # animate_spline_path()
+    main()

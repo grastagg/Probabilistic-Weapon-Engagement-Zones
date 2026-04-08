@@ -270,8 +270,19 @@ def dist_point_to_arcs(point, centers, radii, theta_start, theta_end):
     return min_dist, min_index
 
 
-signed_distance_to_arcs_vmap = jax.vmap(
-    dist_point_to_arcs, in_axes=(0, None, None, None, None)
+def point_in_arc_bounded_region(point, centers, radii, tol=1e-9):
+    dists = jnp.linalg.norm(centers - point, axis=1)
+    return jnp.all(dists <= radii + tol)
+
+
+def dist_point_to_region(point, centers, radii, theta_start, theta_end):
+    boundary_dist, _ = dist_point_to_arcs(point, centers, radii, theta_start, theta_end)
+    inside = point_in_arc_bounded_region(point, centers, radii)
+    return jnp.where(inside, 0.0, boundary_dist)
+
+
+dist_point_to_region_vmap = jax.vmap(
+    dist_point_to_region, in_axes=(0, None, None, None, None)
 )
 
 
@@ -279,9 +290,7 @@ def potential_reachable_region(
     points, centers, radii, theta_start, theta_end, pursuerRange, pursuerCaptureRadius
 ):
     """Evaluate the signed-distance reachable-region model induced by arc boundaries."""
-    dists, _ = signed_distance_to_arcs_vmap(
-        points, centers, radii, theta_start, theta_end
-    )
+    dists = dist_point_to_region_vmap(points, centers, radii, theta_start, theta_end)
     return dists - (pursuerRange + pursuerCaptureRadius)
 
 
@@ -365,7 +374,14 @@ def plot_pursuer_reachable_region(
 
 
 def plot_circle_intersection_arcs(
-    arcs, centers=None, radii=None, show_circles=True, ax=None
+    arcs,
+    centers=None,
+    radii=None,
+    show_circles=True,
+    ax=None,
+    color="red",
+    linestyle="-",
+    label=True,
 ):
     """
     Plot arcs returned by circle_intersection_arcs().
@@ -392,7 +408,7 @@ def plot_circle_intersection_arcs(
         # plot full circle
         r = arcs[0]["radius"]
         c = arcs[0]["center"]
-        circle = plt.Circle(c, r, color="red", fill=False, lw=2)
+        circle = plt.Circle(c, r, color=color, fill=False, lw=2, linestyle=linestyle)
         ax.add_artist(circle)
 
     # Plot the intersection arcs
@@ -405,12 +421,21 @@ def plot_circle_intersection_arcs(
         extent = (t2 - t1) % 360  # ensure positive CCW extent
 
         arc_patch = Arc(
-            c, 2 * r, 2 * r, angle=0, theta1=t1, theta2=t1 + extent, color="red", lw=2
+            c,
+            2 * r,
+            2 * r,
+            angle=0,
+            theta1=t1,
+            theta2=t1 + extent,
+            color=color,
+            lw=2,
+            linestyle=linestyle,
         )
         ax.add_patch(arc_patch)
 
     # proxy for legend
-    ax.plot([], [], color="red", lw=2, label=r"$\partial \mathcal{P}_{\text{pot}}$")
+    if label:
+        ax.plot([], [], color="red", lw=2, label=r"$\partial \mathcal{P}_{\text{pot}}$")
 
     # Optionally show endpoints
 
@@ -569,6 +594,8 @@ def plot_potential_pursuer_engagement_zone(
     ylim,
     numPoints=200,
     ax=None,
+    color="green",
+    label=True,
 ):
     """Plot the zero contour of the geometric potential engagement zone."""
     centers, radii, theta_start, theta_end = arcs_to_arrays(arcs)
@@ -601,13 +628,14 @@ def plot_potential_pursuer_engagement_zone(
         Y.reshape((numPoints, numPoints)),
         ez.reshape((numPoints, numPoints)),
         levels=[0],
-        colors="green",
+        colors=color,
     )
-    ax.plot(
-        [],
-        color="green",
-        label=r"$\partial \mathcal{Z}_{\text{pot}}$",
-    )
+    if label:
+        ax.plot(
+            [],
+            color="green",
+            label=r"$\partial \mathcal{Z}_{\text{pot}}$",
+        )
     # plt.colorbar(c, ax=ax, label="Signed Distance")
 
 
@@ -1015,8 +1043,8 @@ def combined_potential_plot():
 if __name__ == "__main__":
     # main_potential_bez_with_noisey_interception()
 
-    # combined_potential_plot()
+    combined_potential_plot()
     # fig, ax = plt.subplots(1, 1, figsize=(6, 6), layout="constrained")
     # plot_potential_ez(ax, fig)
-    bez_learning_bez_plot()
+    # bez_learning_bez_plot()
     plt.show()

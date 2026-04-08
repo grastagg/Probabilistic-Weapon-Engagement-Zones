@@ -20,7 +20,7 @@ import GEOMETRIC_BEZ.bez_from_interceptions as bez_from_interceptions
 import bspline.spline_opt_tools as spline_opt_tools
 
 
-numSamplesPerInterval = 15
+numSamplesPerInterval = 5
 
 
 # def plot_spline(spline, pursuerPosition, pursuerRange, pursuerCaptureRange,pez_limit,useProbabalistic):
@@ -568,8 +568,9 @@ def main(interceptionPositions):
     #     [[1.0, 1.0], [-1.0, -1.0], [1.0, -1.0], [-1.0, 1.0]]
     # )
     # interceptionPositions = np.random.uniform(-1.1, 1.1, (numIntersectionPoints, 2))
-    spline, arcs = plan_path_from_interception_points(
+    spline, arcs, tf = plan_path_from_interception_points(
         interceptionPositions,
+        np.ones(len(interceptionPositions)) * (pursuerRange + pursuerCaptureRadius),
         pursuerRange,
         pursuerCaptureRadius,
         pursuerSpeed,
@@ -582,7 +583,7 @@ def main(interceptionPositions):
         velocity_constraints,
         turn_rate_constraints,
         curvature_constraints,
-        num_constraint_samples,
+        num_constraint_samples=None,
     )
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.set_aspect("equal")
