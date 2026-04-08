@@ -73,7 +73,7 @@ def plot_ouq_contour(
         pursuerRange,
         captureRadius,
         pursuerSpeed,
-        evaderHeading[0],
+        evaderHeading,
         evaderSpeed,
         xlim=(-6, 6),
         ylim=(-6, 6),
@@ -97,6 +97,7 @@ def plot_ouq_contours(
     evaderSpeed,
     evaderHeading,
     ax,
+    showInteriorShapes=False,
 ):
     # make color map for pez_limits
     # pick a base colormap
@@ -121,13 +122,14 @@ def plot_ouq_contours(
             color=colors[i],
         )
 
-        bez_from_interceptions.plot_circle_intersection_arcs(
-            arcs, ax=ax, linestyle="--", color=colors[i], label=False
-        )
+        if showInteriorShapes:
+            bez_from_interceptions.plot_circle_intersection_arcs(
+                arcs, ax=ax, linestyle="--", color=colors[i], label=False
+            )
         ax.plot([], [], color=colors[i], label=rf"$\epsilon$: {pez_limit:.1f}")
 
 
-def plan_ouq_path(
+def plan_ouq_path_circular_support(
     pez_limit,
     meanX,
     meanY,
@@ -147,23 +149,29 @@ def plan_ouq_path(
     turn_rate_constraints,
     curvature_constraints,
 ):
-    print("minXlim, maxXlim, minYlim, maxYlim:", minXlim, maxXlim, minYlim, maxYlim)
-    spline, tf = rectangle_bez_path_planner.plan_path_box_BEZ(
-        np.array([minXlim, minYlim]),
-        np.array([maxXlim, maxYlim]),
-        pursuerRange,
-        pursuerCaptureRadius,
-        pursuerSpeed,
-        initialEvaderPosition,
-        finalEvaderPosition,
-        initialEvaderVelocity,
-        evaderSpeed,
-        num_cont_points,
-        spline_order,
-        velocity_constraints,
-        turn_rate_constraints,
-        curvature_constraints,
-        num_constraint_samples=None,
+    x_center_new, y_center_new, radius_new = ouq_inner_circle_for_pez_limit(
+        pez_limit, meanX, meanY, supportCenterX, supportCenterY, supportRadius
+    )
+    centers = np.array([[supportCenterX, supportCenterY], [x_center_new, y_center_new]])
+    radii = np.array([supportRadius, radius_new])
+    spline, arcs, tf = (
+        bez_from_interceptions_path_planner.plan_path_from_interception_points(
+            centers,
+            radii,
+            pursuerRange,
+            pursuerCaptureRadius,
+            pursuerSpeed,
+            initialEvaderPosition,
+            finalEvaderPosition,
+            initialEvaderVelocity,
+            evaderSpeed,
+            num_cont_points,
+            spline_order,
+            velocity_constraints,
+            turn_rate_constraints,
+            curvature_constraints,
+            num_constraint_samples=None,
+        )
     )
     return spline, tf
 
@@ -201,8 +209,9 @@ def main():
         captureRadius,
         pursuerSpeed,
         evaderSpeed,
-        psi,
+        psi[0],
         ax,
+        showInteriorShapes=True,
     )
 
     # plot support circle
@@ -231,10 +240,12 @@ def animate_spline_path():
     pursuerCaptureRadius = 0.1
     evaderSpeed = 1.0
     pursuerPositionMean = np.array([-1.2, 0.7])
-    pursuerMinX = -2.0
-    pursuerMaxX = 2.0
-    pursuerMinY = -1.0
-    pursuerMaxY = 1.0
+    supportCenterX = 0.0
+    supportCenterY = 0.0
+    supportRadius = 2.0
+    meanX = -1.2
+    meanY = 0.7
+
     x = np.linspace(-4, 4, 500)
     y = np.linspace(-4, 4, 500)
     X, Y = np.meshgrid(x, y)
@@ -248,14 +259,13 @@ def animate_spline_path():
 
     pez_limit = 0.2
 
-    spline, tf = plan_ouq_path(
+    spline, tf = plan_ouq_path_circular_support(
         pez_limit,
-        pursuerPositionMean[0],
-        pursuerPositionMean[1],
-        pursuerMinX,
-        pursuerMaxX,
-        pursuerMinY,
-        pursuerMaxY,
+        meanX,
+        meanY,
+        supportCenterX,
+        supportCenterY,
+        supportRadius,
         pursuerRange,
         pursuerCaptureRadius,
         pursuerSpeed,
@@ -269,7 +279,6 @@ def animate_spline_path():
         turn_rate_constraints,
         curvature_constraints,
     )
-
     print("OUQ path duration:", tf)
 
     currentTime = 0
@@ -298,35 +307,27 @@ def animate_spline_path():
         ax.plot(pos[:, 0], pos[:, 1])
         ax.set_xlim(-4.5, 4.5)
         ax.set_ylim(-4.5, 4.5)
+        ax.set_aspect("equal")
         plt.xticks([])
         plt.yticks([])
         plt.xlabel("")
         plt.ylabel("")
 
-        prob = max_ouq_prob_pursuer_position_uncertainty(
-            points[:, 0],
-            points[:, 1],
-            currentHeading * np.ones(points.shape[0]),
+        plot_ouq_contours(
+            [0.1, 0.2, 0.3, 0.4, 0.5],
+            meanX,
+            meanY,
+            supportCenterX,
+            supportCenterY,
+            supportRadius,
             pursuerRange,
             pursuerCaptureRadius,
-            evaderSpeed / pursuerSpeed,
-            pursuerPositionMean[0],
-            pursuerPositionMean[1],
-            pursuerMinX,
-            pursuerMaxX,
-            pursuerMinY,
-            pursuerMaxY,
+            pursuerSpeed,
+            evaderSpeed,
+            currentHeading,
+            ax,
         )
-        c = ax.contour(
-            X,
-            Y,
-            prob.reshape(X.shape),
-            cmap="viridis",
-            shading="auto",
-            levels=np.arange(0, 1.2, 0.1),
-        )
-        # inline labels for contours
-        clabels = ax.clabel(c, inline=True, fontsize=8, fmt="%.1f")
+
         fig.savefig(f"video/{ind}.png", dpi=300)
         ind += 1
         currentTime += dt
