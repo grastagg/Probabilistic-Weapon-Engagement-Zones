@@ -199,6 +199,7 @@ def plot_dubins_reachable_set(
     colors=["magenta"],
     alpha=1.0,
     numPoints=2000,
+    label="RR",
 ):
     """Plot the reachable-set boundary induced by Dubins kinematics."""
     rangeX = 8.0
@@ -228,7 +229,7 @@ def plot_dubins_reachable_set(
     # contour_proxy = plt.plot(
     #     [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
     # )
-    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label="RR")
+    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label=label)
     ax.set_aspect("equal", "box")
     return ax
 
@@ -1121,11 +1122,11 @@ def uncertain_dubins_ez_plot():
 
     pursuerHeadingRange = np.pi
 
-    pursuerRangeRange = [1.6, 2]
+    pursuerRangeRange = [1.9, 2]
     minimumTurnRadius = 0.47
-    pursuerMinimumTurnRadiusRange = [0.30, 0.5]
+    pursuerMinimumTurnRadiusRange = [0.40, 0.5]
     fig, ax = plt.subplots()
-    numPursuerSamples = 20
+    numPursuerSamples = 13
     for i in range(numPursuerSamples):
         pursuerPosition = np.array(
             [
@@ -1138,43 +1139,68 @@ def uncertain_dubins_ez_plot():
         minimumTurnRadius = np.random.uniform(
             pursuerMinimumTurnRadiusRange[0], pursuerMinimumTurnRadiusRange[1]
         )
-        plot_dubins_reachable_set(
-            pursuerPosition,
-            pursuerHeading,
-            pursuerRange,
-            minimumTurnRadius,
-            ax,
-            alpha=0.3,
-        )
+        if i == 0:
+            plot_dubins_reachable_set(
+                np.array([0, 0]),
+                pursuerHeading,
+                pursuerRange,
+                minimumTurnRadius,
+                ax,
+                label="True EZ (hidden)",
+                colors=["red"],
+            )
+        else:
+            if i == 1:
+                plot_dubins_reachable_set(
+                    pursuerPosition,
+                    pursuerHeading,
+                    pursuerRange,
+                    minimumTurnRadius,
+                    ax,
+                    alpha=0.2,
+                    label="Potential EZ",
+                )
+            else:
+                plot_dubins_reachable_set(
+                    pursuerPosition,
+                    pursuerHeading,
+                    pursuerRange,
+                    minimumTurnRadius,
+                    ax,
+                    alpha=0.3,
+                    label=None,
+                )
+
     # plot box of potential pursuer startPosition
-    ax.plot(
-        [
-            -pursuerPositionRange,
-            pursuerPositionRange,
-            pursuerPositionRange,
-            -pursuerPositionRange,
-            -pursuerPositionRange,
-        ],
-        [
-            -pursuerPositionRange,
-            -pursuerPositionRange,
-            pursuerPositionRange,
-            pursuerPositionRange,
-            -pursuerPositionRange,
-        ],
-        c="red",
-        linewidth=2,
-    )
+    # ax.plot(
+    #     [
+    #         -pursuerPositionRange,
+    #         pursuerPositionRange,
+    #         pursuerPositionRange,
+    #         -pursuerPositionRange,
+    #         -pursuerPositionRange,
+    #     ],
+    #     [
+    #         -pursuerPositionRange,
+    #         -pursuerPositionRange,
+    #         pursuerPositionRange,
+    #         pursuerPositionRange,
+    #         -pursuerPositionRange,
+    #     ],
+    #     c="red",
+    #     linewidth=2,
+    # )
     ax.set_aspect("equal", "box")
     ax.set_xlim([-6, 6])
     ax.set_ylim([-6, 6])
+    plt.legend(loc="upper right")
     plt.show()
 
 
 if __name__ == "__main__":
     # pursuer_heading_vs_ez_boundary()
-    main_EZ()
-    # uncertain_dubins_ez_plot()
+    # main_EZ()
+    uncertain_dubins_ez_plot()
     # csbez_uncertainty_heading()
     # csbez_uncertainty_position()
     # bez_csbez_comparison()
