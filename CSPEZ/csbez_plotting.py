@@ -200,6 +200,7 @@ def plot_dubins_reachable_set(
     alpha=1.0,
     numPoints=2000,
     label="RR",
+    showLabel=True,
 ):
     """Plot the reachable-set boundary induced by Dubins kinematics."""
     rangeX = 8.0
@@ -229,7 +230,8 @@ def plot_dubins_reachable_set(
     # contour_proxy = plt.plot(
     #     [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
     # )
-    contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label=label)
+    if showLabel:
+        contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label=label)
     ax.set_aspect("equal", "box")
     return ax
 
@@ -720,200 +722,6 @@ def csbez_uncertainty_heading():
     plt.show()
 
 
-def pursuer_heading_vs_ez_boundary():
-    pursuerPosition = np.array([0, 0])
-
-    pursuerSpeed = 2
-
-    pursuerRange = 2.5
-    minimumTurnRadius = 0.47
-    captureRadius = 0.0
-    evaderHeading = (0 / 20) * np.pi
-    evaderSpeed = 1
-    evaderPosition = np.array([-1.54, 0.76])
-    startTime = time.time()
-
-    numHeadings = 200
-    headings = np.linspace(0, 2 * np.pi, numHeadings)
-    ez_boundary_points = []
-    headings_plot = []
-    for i, heading in enumerate(headings):
-        ez = bez.in_dubins_engagement_zone_single(
-            pursuerPosition,
-            heading,
-            minimumTurnRadius,
-            captureRadius,
-            pursuerRange,
-            pursuerSpeed,
-            evaderPosition,
-            evaderHeading,
-            evaderSpeed,
-        )
-
-        ez_boundary_points.append(ez)
-        headings_plot.append(heading)
-
-        fig, ax = plt.subplots(figsize=(6, 5), layout="constrained")
-        ax.set_xlim([0, 2 * np.pi])
-        ax.set_ylim([-2.2, 1.5])
-        ax.scatter(
-            headings_plot,
-            ez_boundary_points,
-            c="b",
-            linewidth=2,
-        )
-        ax.set_xlabel("Pursuer Heading (rad)")
-        ax.set_ylabel("Engagement Zone Function")
-        plt.savefig(f"video/{i}.png")
-        fig2, ax2 = plt.subplots(figsize=(6, 5), layout="constrained")
-
-        # plot evader final position and turn radius and dubins path
-        ax2.set_xlim([-3.1, 3.1])
-        ax2.set_ylim([-3.1, 3.1])
-        plot_dubins_reachable_set(
-            pursuerPosition, heading, pursuerRange, minimumTurnRadius, ax2
-        )
-        # plot_dubins_EZ(
-        #     pursuerPosition,
-        #     heading,
-        #     pursuerSpeed,
-        #     minimumTurnRadius,
-        #     captureRadius,
-        #     pursuerRange,
-        #     evaderHeading,
-        #     evaderSpeed,
-        #     ax2,
-        # )
-
-        speedRatio = evaderSpeed / pursuerSpeed
-        F = evaderPosition + speedRatio * pursuerRange * np.array(
-            [np.cos(evaderHeading), np.sin(evaderHeading)]
-        )
-        ax2.plot(
-            [evaderPosition[0], F[0]], [evaderPosition[1], F[1]], c="b", linewidth=3
-        )
-        Cl = jnp.array(
-            [
-                pursuerPosition[0] - minimumTurnRadius * jnp.sin(heading),
-                pursuerPosition[1] + minimumTurnRadius * jnp.cos(heading),
-            ]
-        )
-        Cr = jnp.array(
-            [
-                pursuerPosition[0] + minimumTurnRadius * jnp.sin(heading),
-                pursuerPosition[1] - minimumTurnRadius * jnp.cos(heading),
-            ]
-        )
-        Gl = csbez.find_counter_clockwise_tangent_point(F, Cl, minimumTurnRadius)
-        Gr = csbez.find_clockwise_tangent_point(F, Cr, minimumTurnRadius)
-        rightLength, _ = csbez.find_dubins_path_length_right_strait(
-            pursuerPosition, heading, F, minimumTurnRadius
-        )
-        leftLength, _ = csbez.find_dubins_path_length_left_strait(
-            pursuerPosition, heading, F, minimumTurnRadius
-        )
-        if rightLength < leftLength:
-            G = Gr
-            C = Cr
-            type = "RS"
-        else:
-            G = Gl
-            C = Cl
-            type = "LS"
-        plot_dubins_path(
-            pursuerPosition, heading, F, minimumTurnRadius, 0.0, G, ax2, path_type=type
-        )
-
-        # plot_theta_and_vectors_left_turn(
-        #     pursuerPosition,
-        #     pursuerHeading,
-        #     pursuerSpeed,
-        #     minimumTurnRadius,
-        #     pursuerRange,
-        #     evaderPosition,
-        #     evaderHeading,
-        #     evaderSpeed,
-        #     ax,
-        # )
-        plt.xlabel("X")
-        plt.ylabel("Y")
-        ax2.set_xlim([-3.1, 3.1])
-        ax2.set_ylim([-3.1, 3.1])
-        draw_airplanes.draw_airplane(
-            ax2,
-            evaderPosition,
-            color="blue",
-            size=0.35,
-            angle=evaderHeading - np.pi / 2,
-        )  # Blue airplane (evader) pointing toward x-axis
-        draw_airplanes.draw_airplane(
-            ax2,
-            pursuerPosition,
-            color="red",
-            size=0.35,
-            angle=heading - np.pi / 2,
-        )
-        plt.savefig(f"video2/{i}.png")
-
-        # close all figs
-        plt.close("all")
-
-
-def uncertain_dubins_ez_plot():
-    pursuerPositionRange = 4
-
-    pursuerHeadingRange = np.pi
-
-    pursuerRangeRange = [1.6, 2]
-    minimumTurnRadius = 0.47
-    pursuerMinimumTurnRadiusRange = [0.30, 0.5]
-    fig, ax = plt.subplots()
-    numPursuerSamples = 20
-    for i in range(numPursuerSamples):
-        pursuerPosition = np.array(
-            [
-                np.random.uniform(-pursuerPositionRange, pursuerPositionRange),
-                np.random.uniform(-pursuerPositionRange, pursuerPositionRange),
-            ]
-        )
-        pursuerHeading = np.random.uniform(-pursuerHeadingRange, pursuerHeadingRange)
-        pursuerRange = np.random.uniform(pursuerRangeRange[0], pursuerRangeRange[1])
-        minimumTurnRadius = np.random.uniform(
-            pursuerMinimumTurnRadiusRange[0], pursuerMinimumTurnRadiusRange[1]
-        )
-        plot_dubins_reachable_set(
-            pursuerPosition,
-            pursuerHeading,
-            pursuerRange,
-            minimumTurnRadius,
-            ax,
-            alpha=0.3,
-        )
-    # plot box of potential pursuer startPosition
-    ax.plot(
-        [
-            -pursuerPositionRange,
-            pursuerPositionRange,
-            pursuerPositionRange,
-            -pursuerPositionRange,
-            -pursuerPositionRange,
-        ],
-        [
-            -pursuerPositionRange,
-            -pursuerPositionRange,
-            pursuerPositionRange,
-            pursuerPositionRange,
-            -pursuerPositionRange,
-        ],
-        c="red",
-        linewidth=2,
-    )
-    ax.set_aspect("equal", "box")
-    ax.set_xlim([-6, 6])
-    ax.set_ylim([-6, 6])
-    plt.show()
-
-
 def bez_csbez_comparison():
     pursuerPosition = np.array([0, 0])
 
@@ -978,24 +786,26 @@ def bez_csbez_comparison():
 
 
 def pursuer_heading_vs_ez_boundary():
-    pursuerPosition = np.array([0, 0])
-
     pursuerSpeed = 2
 
     pursuerRange = 2.5
-    minimumTurnRadius = 0.47
+    minimumTurnRadius = 0.5
     captureRadius = 0.0
-    evaderHeading = (0 / 20) * np.pi
+    evaderHeading = (10 / 20) * np.pi
     evaderSpeed = 1
-    evaderPosition = np.array([-1.54, 0.76])
+    evaderPosition = np.array([0.0, -1.7])
     startTime = time.time()
 
     numHeadings = 200
-    headings = np.linspace(0, 2 * np.pi, numHeadings)
+    heading = np.pi / 2
+    xPositions = np.linspace(-2.3, 2.3, numHeadings)
+    yPos = 0
+
     ez_boundary_points = []
     headings_plot = []
-    for i, heading in enumerate(headings):
-        ez = bez.in_dubins_engagement_zone_single(
+    for i, xPos in enumerate(xPositions):
+        pursuerPosition = np.array([xPos, yPos])
+        ez = csbez.in_dubins_engagement_zone_single(
             pursuerPosition,
             heading,
             minimumTurnRadius,
@@ -1009,25 +819,23 @@ def pursuer_heading_vs_ez_boundary():
         print(ez)
 
         ez_boundary_points.append(ez)
-        headings_plot.append(heading)
+        headings_plot.append(xPos)
 
-        fig, ax = plt.subplots(figsize=(6, 5), layout="constrained")
-        ax.set_xlim([0, 2 * np.pi])
-        ax.set_ylim([-2.2, 1.5])
+        fig, axes = plt.subplots(2, 1, figsize=(6, 5), layout="constrained")
+        ax = axes[0]
+        ax2 = axes[1]
+        ax.set_xlim([np.min(xPositions), np.max(xPositions)])
+        ax.set_ylim([-1.0, 1.5])
+        ax.set_aspect("equal", "box")
         ax.scatter(
             headings_plot,
             ez_boundary_points,
             c="b",
-            linewidth=2,
         )
-        ax.set_xlabel("Pursuer Heading (rad)")
-        ax.set_ylabel("Engagement Zone Function")
-        plt.savefig(f"video/{i}.png")
-        fig2, ax2 = plt.subplots(figsize=(6, 5), layout="constrained")
+        ax.set_xlabel("Pursuer X Position (rad)")
+        ax.set_ylabel("EZ Function")
 
         # plot evader final position and turn radius and dubins path
-        ax2.set_xlim([-3.1, 3.1])
-        ax2.set_ylim([-3.1, 3.1])
         plot_dubins_reachable_set(
             pursuerPosition, heading, pursuerRange, minimumTurnRadius, ax2
         )
@@ -1095,8 +903,7 @@ def pursuer_heading_vs_ez_boundary():
         # )
         plt.xlabel("X")
         plt.ylabel("Y")
-        ax2.set_xlim([-3.1, 3.1])
-        ax2.set_ylim([-3.1, 3.1])
+
         draw_airplanes.draw_airplane(
             ax2,
             evaderPosition,
@@ -1111,7 +918,9 @@ def pursuer_heading_vs_ez_boundary():
             size=0.35,
             angle=heading - np.pi / 2,
         )
-        plt.savefig(f"video2/{i}.png")
+        ax2.set_xlim([-5.1, 5.1])
+        ax2.set_ylim([-3.1, 3.1])
+        plt.savefig(f"video/{i}.png")
 
         # close all figs
         plt.close("all")
@@ -1198,9 +1007,9 @@ def uncertain_dubins_ez_plot():
 
 
 if __name__ == "__main__":
-    # pursuer_heading_vs_ez_boundary()
+    pursuer_heading_vs_ez_boundary()
     # main_EZ()
-    uncertain_dubins_ez_plot()
+    # uncertain_dubins_ez_plot()
     # csbez_uncertainty_heading()
     # csbez_uncertainty_position()
     # bez_csbez_comparison()

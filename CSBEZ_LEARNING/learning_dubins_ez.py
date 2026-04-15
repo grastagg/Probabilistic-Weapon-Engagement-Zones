@@ -56,7 +56,7 @@ jax.config.update("jax_enable_x64", True)
 
 positionAndHeadingOnly = True
 knownSpeed = True
-interceptionOnBoundary = True
+interceptionOnBoundary = False
 randomPath = False
 noisyMeasurementsFlag = False
 saveResults = False
@@ -115,33 +115,27 @@ def plot_low_priority_paths(
                 endPoints[i][1],
                 color="blue",
                 marker="x",
-                s=250,
+                s=100,
                 zorder=10000,
             )
             if interceptedCounter == 0:
-                ax.scatter(
-                    pathHistory[:, 0],
-                    pathHistory[:, 1],
-                    c="blue",
-                    s=10,
-                )
+                # ax.scatter(
+                ax.plot(pathHistory[:, 0], pathHistory[:, 1], c="blue", linewidth=2)
             else:
-                ax.scatter(
-                    pathHistory[:, 0],
-                    pathHistory[:, 1],
-                    c="blue",
-                    s=10,
-                )
+                # ax.scatter(
+                ax.plot(pathHistory[:, 0], pathHistory[:, 1], c="blue", linewidth=2)
             interceptedCounter += 1
         else:
             if survivedCounter == 0:
-                ax.scatter(pathHistory[:, 0], pathHistory[:, 1], c="g", s=5)
+                # ax.scatter(pathHistory[:, 0], pathHistory[:, 1], c="g", s=5)
+                ax.plot(pathHistory[:, 0], pathHistory[:, 1], c="g", linewidth=2)
             else:
                 ax.scatter(
+                    # ax.scatter(
                     pathHistory[:, 0],
                     pathHistory[:, 1],
                     c="g",
-                    s=5,
+                    linewidth=2,
                 )
             survivedCounter += 1
 
@@ -3663,6 +3657,8 @@ def optimize_next_low_priority_path(
     if randomPath:
         upperTheta = jnp.pi * 2.0
         lowerTheta = 0.0
+        # limit to come from right of offscreen
+
         best_angle = jax.random.uniform(rng, (), minval=lowerTheta, maxval=upperTheta)
         best_start_pos = center + radius * jnp.array(
             [jnp.cos(best_angle), jnp.sin(best_angle)]
@@ -3681,8 +3677,10 @@ def optimize_next_low_priority_path(
         num_headings,
         0.5,
         center=center,
-        theta1=0.0,
-        theta2=2 * jnp.pi,
+        # theta1=0.0,
+        # theta2=2 * jnp.pi,
+        theta1=jnp.pi * 0.75,
+        theta2=jnp.pi * 1.25,
         plot=False,
     )
     print("time to generate headings:", time.time() - startHeadings)
@@ -4085,7 +4083,7 @@ def plot_all(
     numPlots = min(numPlots, 10)
 
     if ax is None:
-        fig, ax = plt.subplots(figsize=(3, 3))
+        fig, ax = plt.subplots(figsize=(5, 5), layout="tight")
 
     # colors = ["blue", "orange", "red", "purple", "brown", "pink", "gray"]
 
@@ -4126,6 +4124,7 @@ def plot_all(
             colors=["magenta"],
             # colors=[colors[i % len(colors)]],
             alpha=0.1,
+            showLabel=False,
         )
         # plot_true_and_learned_pursuer(
         #     pursuerPosition,
@@ -4141,16 +4140,16 @@ def plot_all(
         minimumTurnRadiusLearned1,
         pursuerRangeLearned1,
     ) = pursuerX_to_params(meanPursuerX, trueParams)
-    csbez_plotting.plot_dubins_reachable_set(
-        pursuerPositionLearned1,
-        pursuerHeadingLearned1,
-        pursuerRangeLearned1,
-        minimumTurnRadiusLearned1,
-        ax,
-        colors=["orange"],
-        # colors=[colors[i % len(colors)]],
-        alpha=1,
-    )
+    # csbez_plotting.plot_dubins_reachable_set(
+    #     pursuerPositionLearned1,
+    #     pursuerHeadingLearned1,
+    #     pursuerRangeLearned1,
+    #     minimumTurnRadiusLearned1,
+    #     ax,
+    #     colors=["orange"],
+    #     # colors=[colors[i % len(colors)]],
+    #     alpha=1,
+    # )
     if plotLPPaths:
         plot_low_priority_paths(
             startPositions, interceptedList, endPoints, pathHistories, ax
@@ -4163,7 +4162,14 @@ def plot_all(
             [],
             [],
             color="blue",
-            label="Sacrificial",
+            label="Survived",
+            linewidth=linewidithSize,
+        )
+        ax.plot(
+            [],
+            [],
+            color="g",
+            label="Intercepted",
             linewidth=linewidithSize,
         )
         # ax.plot(
@@ -4181,13 +4187,13 @@ def plot_all(
             label="Potential RR",
             linewidth=linewidithSize,
         )
-        ax.plot(
-            [],
-            [],
-            color="orange",
-            label="Mean RR",
-            linewidth=linewidithSize,
-        )
+        # ax.plot(
+        #     [],
+        #     [],
+        #     color="orange",
+        #     label="Mean RR",
+        #     linewidth=linewidithSize,
+        # )
     # ax.legend(loc="lower left")
     ax.set_aspect("equal", "box")
     # ax.set_xlabel("X")
@@ -4200,6 +4206,7 @@ def plot_all(
         pursuerTurnRadius,
         ax,
         colors=["red"],
+        showLabel=False,
     )
 
     # ax.scatter(ezPoints[:, 0], ezPoints[:, 1], color="green", s=50, label="EZ Points")
@@ -4215,9 +4222,14 @@ def plot_all(
     #         speeds[i],
     #         ax,
     #     )
+    # turn of tick labels, tick number everything
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
     if legend:
         # put legend outside of all plot on the bottom center
-        fig.legend(ncol=4, loc="outside lower center")
+        plt.legend(ncol=1, loc="upper left")
     return fig, ax
 
 
@@ -4756,7 +4768,9 @@ def run_simulation_with_random_pursuer(
     rng = np.random.default_rng(seed)
     trueParams = np.array(rng.uniform(lower_bounds_all, upper_bounds_all))
     # set heading to 0
-    trueParams[2] = 0.0
+    trueParams[4] = 0.5
+    trueParams[1] = 2.5
+    trueParams[2] = trueParams[2] + np.pi
     # plan_path_around_all_true_ez(trueParams, seed)
 
     pursuerPosition = np.array([trueParams[0], trueParams[1]])
@@ -5114,7 +5128,7 @@ def run_simulation_with_random_pursuer(
         #
         # Plot
         if i % plotEvery == 0 and plotAllFlag:
-            legend = False
+            legend = True
             if combinedPlot:
                 ax = axes[i % 4]
                 # only label x axis on bottom plots
@@ -5159,7 +5173,7 @@ def run_simulation_with_random_pursuer(
             if combinedPlot:
                 fig.savefig(f"video/{i}.pdf")
             else:
-                fig.savefig(f"video/{i}.png")
+                fig.savefig(f"video/{i}.pdf")
                 plt.close(fig)
                 # clear all plots
                 plt.clf()
@@ -5242,8 +5256,8 @@ def main(seed):
         upperBoundsAll,
         parameterMask,
         seed=seed,
-        numLowPriorityAgents=15,
-        numOptimizerStarts=150,
+        numLowPriorityAgents=2,
+        numOptimizerStarts=20,
         keepLossThreshold=1e-4,
         plotEvery=1,
         # dataDir="results",
