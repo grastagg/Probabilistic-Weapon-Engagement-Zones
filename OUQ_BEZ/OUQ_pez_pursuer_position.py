@@ -93,7 +93,6 @@ def circle_rectangle_intersections(cx, cy, r, xmin, xmax, ymin, ymax, tol=1e-9):
     """
 
     r2 = r * r
-    nan = jnp.array(jnp.nan)
 
     # Intersections with vertical side x = x0
     def vertical_side(x0):
