@@ -480,9 +480,7 @@ def in_dubins_engagement_zone_augmented_single(
         [jnp.cos(evaderHeading), jnp.sin(evaderHeading)]
     )  # Heading unit vector
     goalPositions = evaderPosition + speedRatio * pursuerRange * direction
-    # dubinsPathLengths = find_shortest_dubins_path(
-    #     startPosition, startHeading, goalPositions, turnRadius
-    # )
+
     dubinsPathLengths = find_dubins_path_length_augmented(
         startPosition, startHeading, turnRadius, pursuerRange, goalPositions
     )

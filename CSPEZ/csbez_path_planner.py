@@ -61,27 +61,28 @@ def plot_spline(
     agentHeadings = np.arctan2(yDot, xDot)
 
     pos = spline(t)
-    # ez = csbez.in_dubins_engagement_zone(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     pursuerTurnRadius,
-    #     pursuerCaptureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     pos,
-    #     agentHeadings,
-    #     agentSpeed,
-    # )
+    plotEZ = False
+    if plotEZ:
+        ez = csbez.in_dubins_engagement_zone(
+            pursuerPosition,
+            pursuerHeading,
+            pursuerTurnRadius,
+            pursuerCaptureRadius,
+            pursuerRange,
+            pursuerSpeed,
+            pos,
+            agentHeadings,
+            agentSpeed,
+        )
     #
-    ax.plot(x, y, c="blue", linewidth=2)
-    # c = ax.scatter(x, y, c=ez, s=4)
-    # cbar = plt.colorbar(c, shrink=0.8)
-    # cbar.ax.tick_params(labelsize=26)
+    if plotEZ:
+        c = ax.scatter(x, y, c=ez, s=4)
+        cbar = plt.colorbar(c, shrink=0.8)
+        cbar.ax.tick_params(labelsize=26)
+    else:
+        ax.plot(x, y, c="blue", linewidth=2)
 
     ax.set_aspect(1)
-    # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
-    # plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r")
-    # ax.add_artist(c)
     plt.xlabel("X")
     plt.ylabel("Y")
 
@@ -218,9 +219,6 @@ def optimize_spline_path(
             )
         )
 
-        # funcs['start'] = self.get_start_constraint_jax(controlPoints)
-        # funcs['start'] = pos[0]
-        # funcs['end'] = pos[-1]
         funcs["obj"] = tf
         funcs["turn_rate"] = turn_rate
         funcs["velocity"] = velocity
@@ -337,26 +335,6 @@ def optimize_spline_path(
         velocity_constraints,
         numSamplesPerInterval,
     )
-
-    # x0 = np.array(
-    #     [
-    #         -6.99550637,
-    #         -8.95872567,
-    #         -4.47336006,
-    #         -5.06316688,
-    #         -5.11105337,
-    #         -0.78860679,
-    #         -3.19745253,
-    #         3.19381798,
-    #         0.79036742,
-    #         5.04575115,
-    #         5.06051916,
-    #         4.51374057,
-    #         8.96755593,
-    #         6.89928658,
-    #     ]
-    # )
-
     tempVelocityContstraints = spline_opt_tools.get_spline_velocity(
         x0, 1, 3, numSamplesPerInterval
     )

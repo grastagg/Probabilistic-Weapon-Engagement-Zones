@@ -10,26 +10,9 @@ import CSPEZ.csbez as csbez
 
 jax.config.update("jax_enable_x64", True)
 
-# Vectorized function using vmap
-in_dubins_engagement_zone = jax.jit(
-    jax.vmap(
-        csbez.in_dubins_engagement_zone_single,
-        in_axes=(
-            0,  # pursuerPosition
-            0,  # pursuerHeading
-            0,  # minimumTurnRadius
-            None,  # catureRadius
-            0,  # pursuerRange
-            0,  # pursuerSpeed
-            None,  # evaderPosition
-            None,  # evaderHeading
-            None,  # evaderSpeed
-        ),  # Vectorizing over evaderPosition & evaderHeading
-    )
-)
 
 # Vectorized function using vmap
-in_dubins_engagement_zone3 = jax.jit(
+in_dubins_engagement_zone = jax.jit(
     jax.vmap(
         csbez.in_dubins_engagement_zone_single,
         in_axes=(
@@ -58,7 +41,7 @@ def new_in_dubins_engagement_zone(
     evaderHeading,
     evaderSpeed,
 ):
-    return in_dubins_engagement_zone3(
+    return in_dubins_engagement_zone(
         pursuerPosition,
         pursuerHeading,
         pursuerTurnRadius,
@@ -71,7 +54,7 @@ def new_in_dubins_engagement_zone(
     )
 
 
-new_in_dubins_engagement_zone3 = jax.jit(
+new_in_dubins_engagement_zone = jax.jit(
     jax.vmap(
         new_in_dubins_engagement_zone,
         in_axes=(None, None, None, None, None, None, 0, 0, None),
@@ -778,95 +761,6 @@ quadratic_dubins_pez_full_cov = jax.jit(
         ),
     )
 )
-
-
-def cubic_dubins_PEZ_single(
-    evaderPositions,
-    evaderHeadings,
-    evaderSpeed,
-    pursuerPosition,
-    pursuerPositionCov,
-    pursuerHeading,
-    pursuerHeadingVar,
-    pursuerSpeed,
-    pursuerSpeedVar,
-    minimumTurnRadius,
-    minimumTurnRadiusVar,
-    pursuerRange,
-    pursuerRangeVar,
-    captureRadius,
-):
-    pursuerParams = jnp.concatenate(
-        [
-            pursuerPosition,  # (2,)
-            jnp.array([pursuerHeading]),  # (1,)
-            jnp.array([pursuerSpeed]),  # (1,)
-            jnp.array([minimumTurnRadius]),  # (1,)
-            jnp.array([pursuerRange]),  # (1,)
-        ]
-    )
-    evaderParams = jnp.concatenate(
-        [evaderPositions, jnp.array([evaderHeadings]), jnp.array([evaderSpeed])]
-    )
-    val = csbez.in_dubins_engagement_zone_single(
-        pursuerPosition,
-        pursuerHeading,
-        minimumTurnRadius,
-        captureRadius,
-        pursuerRange,
-        pursuerSpeed,
-        evaderPositions,
-        evaderHeadings,
-        evaderSpeed,
-    )
-    dDubinsEZ_dPursuerParamsValue = dDubinsEZ_dPursuerParams(
-        pursuerParams, evaderParams
-    )
-    d2DubinsEZ_dPursuerParamsValue = d2DubinsEZ_dPursuerParams(
-        pursuerParams, evaderParams
-    )
-    d3DubinsEZ_dPursuerParamsValue = d3DubinsEZ_dPursuerParams(
-        pursuerParams, evaderParams
-    )
-    full_cov = stacked_cov(
-        pursuerPositionCov,
-        pursuerHeadingVar,
-        pursuerSpeedVar,
-        minimumTurnRadiusVar,
-        pursuerRangeVar,
-    )
-
-    mean, var = taylor3_mean_var_scalar_output(
-        val,
-        dDubinsEZ_dPursuerParamsValue,
-        d2DubinsEZ_dPursuerParamsValue,
-        d3DubinsEZ_dPursuerParamsValue,
-        full_cov,
-    )
-    return (jax.scipy.stats.norm.cdf(0, mean, jnp.sqrt(var)), mean, var)
-
-
-# cubic_dubins_PEZ = jax.jit(
-#     jax.vmap(
-#         cubic_dubins_PEZ_single,
-#         in_axes=(
-#             0,
-#             0,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#         ),
-#     )
-# )
 
 
 def symmetric_sqrt(mat):
@@ -1797,7 +1691,7 @@ def dubins_pez_numerical_integration(
             pursuerPositionYGrid[pursuerPositionYGridIndices],
         ],
     )
-    Z = new_in_dubins_engagement_zone3(
+    Z = new_in_dubins_engagement_zone(
         pursuerPositions,
         pursuerHeadingGrid[pursuerHeadingGridIndices],
         pursuerTurnRadiusGrid[pursuerTurnRadiusGridIndices],
@@ -1887,7 +1781,7 @@ def dubins_pez_numerical_integration_sparse(
     pursuerSpeeds = nodes[4, :]  # shape (n,)
     pursuerRanges = nodes[5, :]  # shape (n,)
 
-    Z = new_in_dubins_engagement_zone3(
+    Z = new_in_dubins_engagement_zone(
         pursuerPositions,
         pursuerHeadings,
         pursuerTurnRadii,
@@ -1975,91 +1869,6 @@ def create_bounding_and_linearization_points(mean, std, numBoundingPoints):
     linearizationPoints = (boundingPoints[:-1] + boundingPoints[1:]) / 2.0
     lineaizationIndex = jnp.arange(len(linearizationPoints))
     return boundingPoints, linearizationPoints, lineaizationIndex
-
-
-# @jax.jit
-# def create_linear_model_single(
-#     evaderPositions,
-#     evaderHeadings,
-#     evaderSpeed,
-#     pursuerPositionsX,
-#     pursuerPositionsY,
-#     pursuerHeadings,
-#     pursuerSpeeds,
-#     pursuerTurnRadii,
-#     pursuerRanges,
-#     captureRadius,
-#     pursuerPositionXIndex,
-#     pursuerPositionYIndex,
-#     pursuerHeadingIndex,
-#     pursuerTurnRadiusIndex,
-#     pursuerRangeIndex,
-#     pursuerSpeedIndex,
-# ):
-#     pursuerPositionX = pursuerPositionsX[pursuerPositionXIndex]
-#     pursuerPositionY = pursuerPositionsY[pursuerPositionYIndex]
-#     pursuerHeading = pursuerHeadings[pursuerHeadingIndex]
-#     pursuerSpeed = pursuerSpeeds[pursuerSpeedIndex]
-#     pursuerTurnRadius = pursuerTurnRadii[pursuerTurnRadiusIndex]
-#     pursuerRange = pursuerRanges[pursuerRangeIndex]
-#
-#     pursuerParams = jnp.concatenate(
-#         [
-#             jnp.array([pursuerPositionX]),  # (1,)
-#             jnp.array([pursuerPositionY]),  # (1,)
-#             jnp.array([pursuerHeading]),  # (1,)
-#             jnp.array([pursuerSpeed]),  # (1,)
-#             jnp.array([pursuerTurnRadius]),  # (1,)
-#             jnp.array([pursuerRange]),  # (1,)
-#         ]
-#     )
-#     evaderParams = jnp.concatenate(
-#         [evaderPositions, jnp.array([evaderHeadings]), jnp.array([evaderSpeed])]
-#     )
-#     pursuerPosition = jnp.array([pursuerPositionX, pursuerPositionY])
-#     val = csbez.in_dubins_engagement_zone_right_single(
-#         pursuerPosition,
-#         pursuerHeading,
-#         pursuerTurnRadius,
-#         captureRadius,
-#         pursuerRange,
-#         pursuerSpeed,
-#         evaderPositions,
-#         evaderHeadings,
-#         evaderSpeed,
-#     )
-#     dDubinsEZ_dPursuerParamsValue = dDubinsEZRight_dPursuerParams(
-#         pursuerParams, evaderParams
-#     )
-#     M = dDubinsEZ_dPursuerParamsValue
-#     b = val - jnp.dot(M, pursuerParams)
-#
-#     return M, b
-#
-#
-# create_linear_model = jax.jit(
-#     jax.vmap(
-#         create_linear_model_single,
-#         in_axes=(
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             None,
-#             0,
-#             0,
-#             0,
-#             0,
-#             0,
-#             0,
-#         ),
-#     )
-# )
 
 
 def multivariate_normal_pdf(x, mean, cov):
@@ -2173,40 +1982,6 @@ def compute_average_combined_pdf_single(
         vertices, pursuerParamsMean, pursuerParamsCov
     )  # shape (64,)
     return jnp.mean(pdfs)
-    # pursuerPositionX = (
-    #     pursuerPositionXGrid[pursuerPositionXIndex]
-    #     + pursuerPositionXGrid[pursuerPositionXIndex + 1]
-    # ) / 2.0
-    # pursuerPositionY = (
-    #     pursuerPositionYGrid[pursuerPositionYIndex]
-    #     + pursuerPositionYGrid[pursuerPositionYIndex + 1]
-    # ) / 2.0
-    # pursuerHeading = (
-    #     pursuerHeadingGrid[pursuerHeadingIndex]
-    #     + pursuerHeadingGrid[pursuerHeadingIndex + 1]
-    # ) / 2.0
-    # pursuerTurnRadius = (
-    #     pursuerTurnRadiusGrid[pursuerTurnRadiusIndex]
-    #     + pursuerTurnRadiusGrid[pursuerTurnRadiusIndex + 1]
-    # ) / 2.0
-    # pursuerRange = (
-    #     pursuerRangeGrid[pursuerRangeIndex] + pursuerRangeGrid[pursuerRangeIndex + 1]
-    # ) / 2.0
-    # pursuerSpeed = (
-    #     pursuerSpeedGrid[pursuerSpeedIndex] + pursuerSpeedGrid[pursuerSpeedIndex + 1]
-    # ) / 2.0
-    #
-    # pursuerParams = jnp.array(
-    #     [
-    #         pursuerPositionX,
-    #         pursuerPositionY,
-    #         pursuerHeading,
-    #         pursuerTurnRadius,
-    #         pursuerRange,
-    #         pursuerSpeed,
-    #     ]
-    # )
-    # return multivariate_normal_pdf(pursuerParams, pursuerParamsMean, pursuerParamsCov)
 
 
 compute_average_pdf_combined = jax.jit(

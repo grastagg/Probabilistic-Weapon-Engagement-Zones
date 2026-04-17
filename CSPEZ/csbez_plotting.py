@@ -8,9 +8,6 @@ from matplotlib import patches
 import jax.numpy as jnp
 
 
-# import dubinsReachable
-# import testDubins
-# get rid of type 3 fonts
 import matplotlib
 
 import CSPEZ.csbez as csbez
@@ -110,7 +107,6 @@ def plot_dubins_EZ(
     )
 
     ZTrue = ZTrue.reshape(numPoints, numPoints)
-    # ZGeometric = ZGeometric.reshape(numPoints, numPoints)
 
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
@@ -211,25 +207,16 @@ def plot_dubins_reachable_set(
 
     X = X.flatten()
     Y = Y.flatten()
-    # Z = vectorized_find_shortest_dubins_path(
-    #     pursuerPosition, pursuerHeading, np.array([X, Y]).T, radius
-    # )
-    # Z = Z.reshape(numPoints, numPoints) - pursuerRange
+
     Z = csbez.in_dubins_reachable_set_augmented(
         pursuerPosition, pursuerHeading, radius, pursuerRange, np.array([X, Y]).T
     )
-    # Z = np.isclose(Z, pursuerRange, atol=1e-1)
     Z = Z.reshape(numPoints, numPoints)
     X = X.reshape(numPoints, numPoints)
     Y = Y.reshape(numPoints, numPoints)
 
     ax.contour(X, Y, Z <= 0.0, colors=colors, levels=[0], alpha=alpha, linewidths=2)
-    # c = ax.contourf(X, Y, Z, levels=np.linspace(-1, 1, 101), alpha=0.5)
-    # c = ax.pcolormesh(X, Y, Z, alpha=0.5, cmap="coolwarm", vmin=-1, vmax=1)
-    # cbar = plt.colorbar(c, ax=ax)
-    # contour_proxy = plt.plot(
-    #     [0], [0], color=colors[0], linestyle="-", label="Reachable Set", linewidth=20
-    # )
+
     if showLabel:
         contour_proxy = plt.plot([0], [0], color=colors[0], linewidth=2, label=label)
     ax.set_aspect("equal", "box")
@@ -432,10 +419,6 @@ def plot_theta_and_vectors_left_turn(
     ax.text(
         P[0] - 0.01, P[1] - 0.01, "P", fontsize=annotationFontSize, ha="right", va="top"
     )
-
-    # plot circles
-    # ax.plot(leftCircleX, leftCircleY, c="b")
-    # ax.set_aspect("equal", "box")
 
     legend_proxies = []
 
@@ -737,19 +720,6 @@ def bez_csbez_comparison():
     evaderPosition = np.array([-1.14, 2.46])
     startTime = time.time()
 
-    # length, tangentPoint = find_dubins_path_length_right_strait(
-    #     pursuerPosition, pursuerHeading, evaderPosition, minimumTurnRadius
-    # )
-    # print("length", length)
-    # plot_dubins_path(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     evaderPosition,
-    #     minimumTurnRadius,
-    #     0.0,
-    #     tangentPoint,
-    # )
-    #
     fig, ax = plt.subplots(figsize=(6, 5), layout="constrained")
     pez_plotting.plotEngagementZone(
         evaderHeading,
