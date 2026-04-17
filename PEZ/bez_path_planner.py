@@ -382,20 +382,20 @@ def optimize_spline_path_BEZ(
         upper=velocity_constraints[1],
         scale=1.0 / velocity_constraints[1],
     )
-    # optProb.addConGroup(
-    #     "turn_rate",
-    #     num_constraint_samples,
-    #     lower=turn_rate_constraints[0],
-    #     upper=turn_rate_constraints[1],
-    #     scale=1.0 / turn_rate_constraints[1],
-    # )
-    # optProb.addConGroup(
-    #     "curvature",
-    #     num_constraint_samples,
-    #     lower=curvature_constraints[0],
-    #     upper=curvature_constraints[1],
-    #     scale=1.0 / curvature_constraints[1],
-    # )
+    optProb.addConGroup(
+        "turn_rate",
+        num_constraint_samples,
+        lower=turn_rate_constraints[0],
+        upper=turn_rate_constraints[1],
+        scale=1.0 / turn_rate_constraints[1],
+    )
+    optProb.addConGroup(
+        "curvature",
+        num_constraint_samples,
+        lower=curvature_constraints[0],
+        upper=curvature_constraints[1],
+        scale=1.0 / curvature_constraints[1],
+    )
     optProb.addConGroup("ez", num_constraint_samples, lower=0.00, upper=None)
     optProb.addConGroup("start", 2, lower=p0, upper=p0)
     optProb.addConGroup("end", 2, lower=pf, upper=pf)

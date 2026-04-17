@@ -110,13 +110,6 @@ def plotProbablisticEngagementZone(
     agentPositions = jnp.vstack([X.ravel(), Y.ravel()]).T
     agentHeadings = jnp.ones(numPoints * numPoints) * agentHeading
 
-    # Compute Jacobian of engagement zone function
-    # dPezDPursuerPosition = jacfwd(inEngagementZoneJax, argnums=2)
-    # dPezDAgentPosition = jacfwd(inEngagementZoneJax, argnums=0)
-    # dPezDPursuerRange = jacfwd(inEngagementZoneJax, argnums=3)
-    # dPezDPursuerCaptureRange = jacfwd(inEngagementZoneJax, argnums=4)
-    # dPezDAgentHeading = jacfwd(inEngagementZoneJax, argnums=1)
-
     start = time.time()
     # Compute engagement zone probabilities
     engagementZonePlot = pez.probabalisticEngagementZoneVectorizedTemp(
