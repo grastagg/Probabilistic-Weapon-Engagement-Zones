@@ -424,68 +424,6 @@ def main():
     fig, ax = plt.subplots(1, 1)
     # plot_abs_diff(linPez, mcEz, ax, fig)
     plt.show()
-    #
-    # fig,axes = plt.subplots(2,4,layout='constrained')
-    #
-    #
-    # for case in range(4):
-    #     if case == 0:
-    #         pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
-    #
-    #     elif case == 1:
-    #         pursuerPositionCov = np.array([[0.0, 0.0], [0.0, 0.0]])
-    #         pursuerRangeVar = 0.2
-    #     elif case == 2:
-    #         pursuerRangeVar = 0.0
-    #         pursuerCaptureRangeVar = 0.02
-    #     elif case == 3:
-    #         pursuerPositionCov = np.array([[0.2, 0.0], [0.0, 0.2]])
-    #         pursuerRangeVar = 0.2
-    #         pursuerCaptureRangeVar = 0.02
-    #
-    #
-    #     mcAx = axes[1][case]
-    #     if np.any(pursuerPositionCov):
-    #       drawMahlonobis.plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, mcAx)
-    # # mcFig,mcAx = plt.subplots(1,1)
-    #     mcEz = plotMCProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange,pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed, mcAx)
-    #     plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,mcAx)
-    #     mcAx.set_xlabel("X",fontsize = 16)
-    #     mcAx.set_ylabel("Y",fontsize = 16)
-    #     mcAx.set_aspect('equal')
-    #
-    #
-    #
-    #
-    #     # linFig,linAx = plt.subplots(1,1)
-    #     linAx = axes[0][case]
-    #     if np.any(pursuerPositionCov):
-    #        drawMahlonobis.plotMahalanobisDistance(pursuerInitialPosition, pursuerPositionCov, linAx)
-    #
-    #     linAx.set_aspect('equal')
-    #     linPez = plotProbablisticEngagementZone(agentPositionCov,agentInitialHeading,agentHeadingVar, pursuerInitialPosition, pursuerPositionCov, pursuerRange, pursuerRangeVar, pursuerCaptureRange,pursuerCaptureRangeVar, pursuerSpeed,pursuerSpeedVar, agentSpeed,linAx)
-    #     plotEngagementZone(agentInitialHeading, pursuerInitialPosition, pursuerRange, pursuerCaptureRange, pursuerSpeed, agentSpeed,linAx)
-    #     linAx.set_xlabel("X",fontsize = 16)
-    #     linAx.set_ylabel("Y",fontsize = 16)
-    #
-    #
-    #
-    #     # mse = np.sqrt(np.mean((mcEz - linPez)**2))
-    #     # print(mse)
-    #     # absPercentError = np.mean(np.abs(mcEz - linPez))
-    #     # print("Absolute Percent Error: ", absPercentError)
-    #
-    #
-    # cols = ['Case 1', 'Case 2', 'Case 3', 'Case 4']
-    # rows = ['Linearized', 'Monte Carlo']
-    # for ax, col in zip(axes[0], cols):
-    #     ax.set_title(col,fontsize = 20)
-    # for ax, row in zip(axes[:,0], rows):
-    #     ax.set_ylabel(row, rotation=90,fontsize = 20)
-    #
-    # # plt.tight_layout()
-    # plt.show()
-    #
 
 
 if __name__ == "__main__":
