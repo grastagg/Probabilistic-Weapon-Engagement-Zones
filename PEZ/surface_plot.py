@@ -37,7 +37,7 @@ useBEZ = False
 # tangency point
 x0, y0 = 0.0, 0.0
 
-turnRadius = 0.5
+turnRadius = 0.2
 # use this for bez
 if useBEZ:
     z0 = bez_z(x0, y0, x_e, y_e, psi_e, nu, R, r)
@@ -217,7 +217,22 @@ fig.patch.set_facecolor("white")
 ax.set_facecolor("white")
 
 plt.tight_layout()
+# ax.contour(XS, YS, ZS, levels=[0], colors="black", linewidths=2.0, zorder=10)
+# # plot flat plane at z=0
+# ax.plot_surface(
+#     XP,
+#     YP,
+#     np.zeros_like(ZP),
+#     color="red",
+#     alpha=0.5,
+#     edgecolor="none",
+#     linewidth=0,
+#     antialiased=False,
+#     shade=False,
+# )
 plt.show()
+
+# plot zero level set of bez_tangent_plane_clear
 print("here")
 
 # plt.savefig("bez_tangent_plane_clear.png", dpi=400, bbox_inches="tight", pad_inches=0.02)
