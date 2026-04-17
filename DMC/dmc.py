@@ -119,34 +119,6 @@ def dmc_multiple_pursuer(
     return jnp.max(dmcs, axis=0)
 
 
-# @jax.jit
-# def in_dmc(
-#     agentPosition,  # shape (2,)
-#     agentHeading,  # scalar (rad)
-#     agentSpeed,  # scalar
-#     pursuerPosition,  # shape (2,)
-#     pursuerSpeed,  # scalar
-#     pursuerRange,  # R
-#     pursuerCaptureRadius,  # r
-#     dmcVal,
-# ):
-#     speedRatio = agentSpeed / pursuerSpeed
-#     c1 = pursuerPosition - speedRatio * (pursuerRange) * jnp.array(
-#         [jnp.cos(agentHeading - dmcVal), jnp.sin(agentHeading - dmcVal)]
-#     )
-#     c2 = pursuerPosition - speedRatio * (pursuerRange) * jnp.array(
-#         [jnp.cos(agentHeading + dmcVal), jnp.sin(agentHeading + dmcVal)]
-#     )
-#     d1 = jnp.linalg.norm(agentPosition - c1)
-#     d2 = jnp.linalg.norm(agentPosition - c2)
-#     d = jnp.maximum(d1, d2)
-#     return d - (pursuerRange + pursuerCaptureRadius)
-#
-#
-# in_dmc_vmap = jax.jit(
-#     jax.vmap(in_dmc, in_axes=(0, 0, None, None, None, None, None, None))
-# )
-#
 def in_dmc(
     agentPosition,  # shape (2,)
     agentHeading,  # scalar (rad)

@@ -85,34 +85,6 @@ def rect_dmc(
     return jnp.maximum(rectBez1, jnp.maximum(rectBez2, rectBezNominal))
 
 
-# def rect_dmc_val_solve(
-#     evaderPosition,
-#     evaderHeading,
-#     evaderSpeed,
-#     box_min,
-#     box_max,
-#     pursuerRange,
-#     pursuerCaptureRadius,
-#     pursuerSpeed,
-# ):
-#     def func(xiStar):
-#         return rectangle_bez.box_pursuer_engagment_zone(
-#             evaderPosition,
-#             evaderHeading + xiStar,
-#             evaderSpeed,
-#             box_min,
-#             box_max,
-#             pursuerRange,
-#             pursuerCaptureRadius,
-#             pursuerSpeed,
-#         )[0]
-#
-#     xiStar = _wrap_angle(
-#         scipy.optimize.root_scalar(func, bracket=[-np.pi, np.pi])["root"]
-#     )
-#     xiStar2 = _wrap_angle(scipy.optimize.root_scalar(func, bracket=[-np.pi, 0])["root"])
-
-
 def rect_dmc_val_solve(
     evaderPosition,
     evaderHeading,
@@ -126,6 +98,7 @@ def rect_dmc_val_solve(
     tol=1e-6,
 ):
     """Numerically find heading offsets where the rectangular BEZ boundary is met."""
+
     def func(xiStar):
         return rectangle_bez.box_pursuer_engagment_zone(
             evaderPosition,
@@ -177,11 +150,6 @@ def rect_dmc_val_solve(
     return _angle_diff(roots[jnp.argmin(absDiffs)], evaderHeading), _angle_diff(
         roots[jnp.argmax(absDiffs)], evaderHeading
     )
-
-    # print("xiStar:", xiStar)
-    # print("xiStar2:", xiStar2)
-    #
-    # return _angle_diff(xiStar, evaderHeading), _angle_diff(xiStar2, evaderHeading)
 
 
 def _shortest_root_in_interval(func, lo, hi, evaderHeading, iters=20, num_samples=64):
@@ -242,6 +210,7 @@ def rect_dmc_val_solve_jax(
     pursuerSpeed,
 ):
     """JAX-compatible approximation of the rectangular DMC heading offset."""
+
     def bez_at_xi(xi):
         return rectangle_bez.box_pursuer_engagment_zone(
             evaderPosition,
