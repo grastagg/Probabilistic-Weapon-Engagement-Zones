@@ -287,14 +287,6 @@ def interp_PEZ_along_spline(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    # ez = rectangle_pez.prob_reachable_uniform_box(
-    #     pos,
-    #     pursuerRange,
-    #     pursuerCaptureRadius,
-    #     min_box,
-    #     max_box,
-    # )
-
     interpPez = trilerp_uniform_periodic_psi(
         pos[:, 0],
         pos[:, 1],
@@ -418,9 +410,6 @@ def optimize_spline_path_interp_Pez(
             )
         )
 
-        # funcs['start'] = self.get_start_constraint_jax(controlPoints)
-        # funcs['start'] = pos[0]
-        # funcs['end'] = pos[-1]
         funcs["obj"] = tf
         funcs["turn_rate"] = turn_rate
         funcs["velocity"] = velocity
@@ -472,11 +461,6 @@ def optimize_spline_path_interp_Pez(
             npsi,
             P_yxpsi,
         )
-        # replace nans with zeros
-        # dEZDtf = np.array(dEZDtf, copy=True)
-        # dEZDtf[np.isnan(dEZDtf)] = 0.0
-        # dEZDControlPoints = np.array(dEZDControlPoints, copy=True)
-        # dEZDControlPoints[np.isnan(dEZDControlPoints)] = 0.0
         dVelocityDControlPointsVal = spline_opt_tools.dVelocityDControlPoints(
             controlPoints, tf, 3, numSamplesPerInterval
         )
@@ -1196,5 +1180,5 @@ if __name__ == "__main__":
 
     # create_lin_pez_grid(nX=20, nY=20, nPsi=20)
     # main_path()
-    # main()
+    main()
     animate_path()

@@ -29,42 +29,12 @@ def plot_spline(spline, ax, width=1):
     t0 = spline.t[spline.k]
     tf = spline.t[-1 - spline.k]
     t = np.linspace(t0, tf, 1000, endpoint=True)
-    ax.set_xlabel("X", fontsize=26)
-    ax.set_ylabel("Y", fontsize=26)
-    ax.tick_params(axis="x", labelsize=26)
-    ax.tick_params(axis="y", labelsize=26)
-
     pos = spline(t)
     x = pos[:, 0]
     y = pos[:, 1]
-    splineDot = spline.derivative()(t)
-    xDot = splineDot[:, 0]
-    yDot = splineDot[:, 1]
-    agentHeadings = np.arctan2(yDot, xDot)
-
     pos = spline(t)
-    # ez = in_dubins_engagement_zone(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     pursuerTurnRadius,
-    #     pursuerCaptureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     pos,
-    #     agentHeadings,
-    #     agentSpeed,
-    # )
-    #
-    ax.plot(x, y, linewidth=width)
-    # cbar = plt.colorbar(c, shrink=0.8)
-    # cbar.ax.tick_params(labelsize=26)
 
-    ax.set_aspect(1)
-    # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
-    # plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r")
-    # ax.add_artist(c)
-    plt.xlabel("X")
-    plt.ylabel("Y")
+    ax.plot(x, y, linewidth=width)
 
 
 @jax.jit
@@ -263,9 +233,6 @@ def optimize_spline_path_potential_BEZ(
             )
         )
 
-        # funcs['start'] = self.get_start_constraint_jax(controlPoints)
-        # funcs['start'] = pos[0]
-        # funcs['end'] = pos[-1]
         funcs["obj"] = tf
         funcs["turn_rate"] = turn_rate
         funcs["velocity"] = velocity
@@ -373,7 +340,6 @@ def optimize_spline_path_potential_BEZ(
             0, tf_initial, num_cont_points, 3
         )
 
-        # x0 = np.linspace(p0, pf, num_cont_points).flatten()
         if right:
             x0 = rect_bottom_and_right(p0, pf, num_cont_points).flatten()
         else:

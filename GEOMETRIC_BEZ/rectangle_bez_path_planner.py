@@ -36,32 +36,13 @@ def plot_spline(spline, ax, width=1):
     pos = spline(t)
     x = pos[:, 0]
     y = pos[:, 1]
-    splineDot = spline.derivative()(t)
-    xDot = splineDot[:, 0]
-    yDot = splineDot[:, 1]
-    agentHeadings = np.arctan2(yDot, xDot)
 
     pos = spline(t)
-    # ez = in_dubins_engagement_zone(
-    #     pursuerPosition,
-    #     pursuerHeading,
-    #     pursuerTurnRadius,
-    #     pursuerCaptureRadius,
-    #     pursuerRange,
-    #     pursuerSpeed,
-    #     pos,
-    #     agentHeadings,
-    #     agentSpeed,
-    # )
-    #
+
     ax.plot(x, y, linewidth=width)
-    # cbar = plt.colorbar(c, shrink=0.8)
-    # cbar.ax.tick_params(labelsize=26)
 
     ax.set_aspect(1)
-    # c = plt.Circle(pursuerPosition, pursuerRange + pursuerCaptureRange, fill=False)
-    # plt.scatter(pursuerPosition[0], pursuerPosition[1], c="r")
-    # ax.add_artist(c)
+
     plt.xlabel("X")
     plt.ylabel("Y")
 
@@ -70,22 +51,6 @@ def create_spline(knotPoints, controlPoints, order):
     """Construct a SciPy B-spline from knot and control-point arrays."""
     spline = BSpline(knotPoints, controlPoints, order)
     return spline
-
-
-def rect_left_and_top(lower_left, upper_right, n_points_total):
-    x1, y1 = lower_left
-    x2, y2 = upper_right
-
-    # Compute edge lengths
-    left_len = y2 - y1
-    top_len = x2 - x1
-    total_len = left_len + top_len
-
-    # Split points proportionally to edge lengths
-    n_left = max(2, int(round(n_points_total * (left_len / total_len))))
-    n_top = max(
-        2, n_points_total - n_left + 1
-    )  # +1 to avoid losing one point at the corner
 
 
 def rect_left_and_top(lower_left, upper_right, n_points_total):
@@ -266,9 +231,6 @@ def optimize_spline_path_box_BEZ(
             )
         )
 
-        # funcs['start'] = self.get_start_constraint_jax(controlPoints)
-        # funcs['start'] = pos[0]
-        # funcs['end'] = pos[-1]
         funcs["obj"] = tf
         funcs["turn_rate"] = turn_rate
         funcs["velocity"] = velocity

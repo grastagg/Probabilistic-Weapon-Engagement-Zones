@@ -341,7 +341,6 @@ def optimize_spline_path(
         funcs["curvature"] = curvature
         # funcs['position'] = pos
         funcs["pez"] = pez
-        funcs["obj"] = tf
         return funcs, False
 
     def sens(xDict, funcs):
@@ -438,10 +437,10 @@ def optimize_spline_path(
     knotPoints = spline_opt_tools.create_unclamped_knot_points(
         0, tf_initial, num_cont_points, 3
     )
-    if not left:
-        x0 = rect_bottom_and_right(p0, pf, num_cont_points).flatten()
-    else:
+    if left:
         x0 = rect_left_and_top(p0, pf, num_cont_points).flatten()
+    else:
+        x0 = rect_bottom_and_right(p0, pf, num_cont_points).flatten()
 
     print("velocity constraints", velocity_constraints)
     tf = spline_opt_tools.assure_velocity_constraint(

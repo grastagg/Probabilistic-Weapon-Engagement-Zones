@@ -132,14 +132,6 @@ def PEZ_from_interceptions_along_spline(
     pos = spline_opt_tools.evaluate_spline(
         controlPoints, knotPoints, numSamplesPerInterval
     )
-    # ez = rectangle_pez.prob_reachable_uniform_box(
-    #     pos,
-    #     pursuerRange,
-    #     pursuerCaptureRadius,
-    #     min_box,
-    #     max_box,
-    # )
-
     pez = pez_from_interceptions.pez_numerical_soft(
         pos,
         evaderHeadings,
@@ -248,9 +240,6 @@ def optimize_spline_path_PEZ_from_interceptions(
             )
         )
 
-        # funcs['start'] = self.get_start_constraint_jax(controlPoints)
-        # funcs['start'] = pos[0]
-        # funcs['end'] = pos[-1]
         funcs["obj"] = tf
         funcs["turn_rate"] = turn_rate
         funcs["velocity"] = velocity
@@ -632,15 +621,6 @@ def main_pez_from_interceptions():
         ax,
         levels=[0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5],
     )
-    # rectangle_pez.plot_rectangle_prr(
-    #     pursuerRange,
-    #     pursuerCaptureRadius,
-    #     min_box,
-    #     max_box,
-    #     xlim=(-4, 4),
-    #     ylim=(-4, 4),
-    #     ax=ax,
-    # )
 
     plt.legend()
 
